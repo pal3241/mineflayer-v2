@@ -1,0 +1,14 @@
+{
+    "id": "tester",
+    "name": "Tester",
+    "version": "1.0.0",
+    "role": "Membuat dan menjalankan pengujian",
+    "capabilities": [
+        "testing",
+        "test_automation",
+        "qa"
+    ],
+    "model": "coding-model",
+    "category": "testing",
+    "enabled": true
+}

@@ -1,0 +1,14 @@
+{
+    "id": "researcher",
+    "name": "Researcher",
+    "version": "1.0.0",
+    "role": "Mengumpulkan dan menganalisis informasi",
+    "capabilities": [
+        "research",
+        "web_search",
+        "information_gathering"
+    ],
+    "model": "research-model",
+    "category": "research",
+    "enabled": true
+}

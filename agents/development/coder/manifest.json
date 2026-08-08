@@ -1,0 +1,14 @@
+{
+    "id": "coder",
+    "name": "Coder",
+    "version": "1.0.0",
+    "role": "Menulis kode program",
+    "capabilities": [
+        "coding",
+        "python",
+        "debugging"
+    ],
+    "model": "coding-model",
+    "category": "development",
+    "enabled": true
+}

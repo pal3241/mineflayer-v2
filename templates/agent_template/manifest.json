@@ -1,0 +1,12 @@
+{
+    "id": "my_agent",
+    "name": "My Agent",
+    "version": "1.0.0",
+    "role": "Mengerjakan tugas tertentu",
+    "capabilities": [
+        "custom_task"
+    ],
+    "model": null,
+    "category": "custom",
+    "enabled": true
+}

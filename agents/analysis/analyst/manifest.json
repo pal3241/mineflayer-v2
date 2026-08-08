@@ -1,0 +1,14 @@
+{
+    "id": "analyst",
+    "name": "Analyst",
+    "version": "1.0.0",
+    "role": "Menganalisis masalah dan tugas secara terstruktur",
+    "capabilities": [
+        "analysis",
+        "reasoning",
+        "problem_analysis"
+    ],
+    "model": "reasoning-model",
+    "category": "specialized",
+    "enabled": true
+}

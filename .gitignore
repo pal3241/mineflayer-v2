@@ -1,0 +1,14 @@
+# Environment / secrets — jangan pernah commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Test cache
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/

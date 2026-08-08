@@ -1,0 +1,14 @@
+{
+    "id": "supervisor",
+    "name": "Supervisor",
+    "version": "1.0.0",
+    "role": "Memantau agent/task, mendeteksi failure, dan meminta retry",
+    "capabilities": [
+        "supervision",
+        "monitoring",
+        "quality_control"
+    ],
+    "model": null,
+    "category": "manager",
+    "enabled": true
+}
