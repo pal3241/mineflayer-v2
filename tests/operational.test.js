@@ -25,13 +25,26 @@ async function waitFor(predicate, timeout = 1000) {
 
 test('authorized chat command creates and completes a real capability goal', async () => {
   let adapter;
-  const app = createApplication({ env: { MINEHIVE_LOG_LEVEL: 'silent', MINEHIVE_ADMINS: 'Alice' }, overrides: { adapterFactory: () => (adapter = new OperationalAdapter()) } });
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent', MINEHIVE_ADMINS: 'Alice' }, overrides: { adapterFactory: () => (adapter = new OperationalAdapter()) } });
   app.bots.create({ id: 'worker', username: 'Worker' });
-  adapter.emit('chat', 'Mallory', '!hive collect oak_log 2');
+  adapter.emit('chat', 'Mallory', '!worker collect oak_log 2');
   await new Promise(resolve => setImmediate(resolve)); assert.equal(app.goals.list().length, 0);
   adapter.emit('chat', 'Alice', '!hive collect oak_log 2');
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(app.goals.list().length, 0);
+  adapter.emit('chat', 'Alice', '!worker collect oak_log 2');
   await waitFor(() => app.goals.list()[0]?.status === 'COMPLETED');
   assert.deepEqual(adapter.collected, [{ block: 'oak_log', count: 2 }]); assert.ok(adapter.messages.some(message => message.includes('goal completed')));
+});
+
+test('class and global selectors route commands to the intended bots', async () => {
+  const adapters = new Map();
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent', MINEHIVE_ADMINS: 'Alice' }, overrides: { adapterFactory: input => { const adapter = new OperationalAdapter(); adapters.set(input.id, adapter); return adapter; } } });
+  app.bots.create({ id: 'miner-1', name: 'MinerOne', metadata: { commandAlias: 'one', className: 'miner' } });
+  app.bots.create({ id: 'builder-1', name: 'BuilderOne', metadata: { commandAlias: 'two', className: 'builder' } });
+  for (const adapter of adapters.values()) adapter.emit('chat', 'Alice', '!miner collect stone 1');
+  await waitFor(() => adapters.get('miner-1').collected.length === 1); assert.equal(adapters.get('builder-1').collected.length, 0);
+  for (const adapter of adapters.values()) adapter.emit('chat', 'Alice', '!global collect dirt 1');
+  await waitFor(() => adapters.get('miner-1').collected.length === 2 && adapters.get('builder-1').collected.length === 1);
 });
 
 test('Mineflayer adapter normalizes client chat, snapshot and shutdown', async () => {
@@ -49,7 +62,7 @@ test('Mineflayer adapter normalizes client chat, snapshot and shutdown', async (
 
 test('unexpected disconnect triggers bounded reconnect', async () => {
   let adapter;
-  const app = createApplication({ env: { MINEHIVE_LOG_LEVEL: 'silent', MINEHIVE_RECONNECT: 'true', MINEHIVE_RECONNECT_ATTEMPTS: '2', MINEHIVE_RECONNECT_DELAY_MS: '1' }, overrides: { adapterFactory: () => (adapter = new OperationalAdapter()) } });
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent', MINEHIVE_RECONNECT: 'true', MINEHIVE_RECONNECT_ATTEMPTS: '2', MINEHIVE_RECONNECT_DELAY_MS: '1' }, overrides: { adapterFactory: () => (adapter = new OperationalAdapter()) } });
   const bot = app.bots.create({ id: 'recoverable' }); await app.bots.start(bot.id); await app.bots.get(bot.id).transitionQueue;
   adapter.status = 'DISCONNECTED'; adapter.emit('end', 'network');
   await waitFor(() => adapter.connectCalls === 2); await app.bots.get(bot.id).transitionQueue;
@@ -58,7 +71,7 @@ test('unexpected disconnect triggers bounded reconnect', async () => {
 
 test('each bot camera receives an independent live-view port', async () => {
   const adapters = [];
-  const app = createApplication({ env: { MINEHIVE_LOG_LEVEL: 'silent', MINEHIVE_VIEWER_BASE_PORT: '43100' }, overrides: { adapterFactory: () => { const adapter = new OperationalAdapter(); adapters.push(adapter); return adapter; } } });
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent', MINEHIVE_VIEWER_BASE_PORT: '43100' }, overrides: { adapterFactory: () => { const adapter = new OperationalAdapter(); adapters.push(adapter); return adapter; } } });
   app.bots.create({ id: 'camera-a' }); app.bots.create({ id: 'camera-b' }); await app.bots.start('camera-a'); await app.bots.start('camera-b');
   await Promise.all(app.bots.list().map(bot => app.bots.get(bot.id).transitionQueue));
   const first = await app.startCamera('camera-a'); const second = await app.startCamera('camera-b');

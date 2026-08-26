@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>MineHive Control Center</title>
   <link rel="stylesheet" href="/dashboard.css">
+  <link rel="stylesheet" href="/camera.css">
 </head>
 <body>
   <aside class="sidebar">
@@ -46,6 +47,8 @@
           <div class="panel-title"><div><p class="eyebrow">PROVISIONING</p><h2>Add a bot</h2></div></div>
           <form id="botForm" class="form-grid">
             <label>Bot name<input name="username" required placeholder="MineHiveWorker"></label>
+            <label>Command alias<input name="commandAlias" required placeholder="bot1"></label>
+            <label>Bot class<input name="className" required value="worker" placeholder="miner"></label>
             <label>Server host<input name="host" required value="localhost"></label>
             <label>Server port<input name="port" type="number" min="1" max="65535" value="25565"></label>
             <label>Authentication<select name="auth"><option value="offline">Offline</option><option value="microsoft">Microsoft</option></select></label>
@@ -53,7 +56,7 @@
             <label class="check"><input name="autoConnect" type="checkbox" checked><span>Connect automatically after restart</span></label>
             <button class="button primary full" type="submit">Add bot to fleet</button>
           </form>
-          <p class="hint">Microsoft authentication may require device login in the server terminal.</p>
+          <p class="hint">Alias creates !botname commands. Class creates grouped commands such as !miner. Microsoft auth may require device login in the terminal.</p>
         </section>
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">FLEET</p><h2>Registered bots</h2></div><button id="refreshBots" class="icon-button" title="Refresh">↻</button></div><div id="botManager" class="bot-grid"></div></section>
       </div>
@@ -61,7 +64,7 @@
 
     <section id="cameras" class="view">
       <section class="panel camera-panel">
-        <div class="panel-title"><div><p class="eyebrow">PRISMARINE VIEWER</p><h2>Live camera wall</h2></div><span class="hint">Camera starts only when requested</span></div>
+        <div class="panel-title"><div><p class="eyebrow">PRISMARINE VIEWER</p><h2>Live camera wall</h2></div><span class="hint">Persistent iframe · low reload</span></div>
         <div id="cameraWall" class="camera-wall"></div>
       </section>
     </section>
@@ -71,7 +74,7 @@
         <section class="panel">
           <div class="panel-title"><div><p class="eyebrow">SAFE ACTIONS</p><h2>Command console</h2></div></div>
           <form id="commandForm" class="command-form">
-            <label>Target bot<select id="commandBot" required></select></label>
+            <label>Target bot / class<select id="commandBot" required></select></label>
             <label>Command<input id="commandInput" autocomplete="off" placeholder="collect oak_log 16" required></label>
             <button class="button primary" type="submit">Execute command</button>
           </form>

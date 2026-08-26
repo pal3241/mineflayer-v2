@@ -1,6 +1,6 @@
 # MineHive
 
-MineHive adalah framework Mineflayer modular dan event-driven. Implementasi saat ini merupakan baseline operasional tervalidasi **0.3.2** dari spesifikasi 24 volume, bukan klaim bahwa AI, ML, koloni, atau milestone produksi sudah selesai.
+MineHive adalah framework Mineflayer modular dan event-driven. Implementasi saat ini merupakan baseline operasional tervalidasi **0.3.3** dari spesifikasi 24 volume, bukan klaim bahwa AI, ML, koloni, atau milestone produksi sudah selesai.
 
 Panduan instalasi dan penggunaan lengkap tersedia di [`PANDUAN_PENGGUNAAN.md`](PANDUAN_PENGGUNAAN.md).
 
@@ -41,13 +41,11 @@ Untuk server offline/local gunakan `MINEHIVE_AUTH=offline`. Untuk akun resmi gun
 Isi `MINEHIVE_ADMINS` dengan username yang diizinkan. Setelah bot spawn, kirim melalui chat:
 
 ```text
-!hive help
-!hive status
-!hive come
-!hive goto 100 64 -20
-!hive collect oak_log 16
-!hive inventory
-!hive stop
+!bot1 status
+!bot1 come
+!bot1 collect oak_log 16
+!miner collect stone 8
+!global status
 ```
 
 Command tidak mendukung JavaScript, shell, atau pemanggilan fungsi bebas. Bila `MINEHIVE_ADMINS` kosong, semua command chat ditolak.

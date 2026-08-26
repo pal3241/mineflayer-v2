@@ -66,19 +66,39 @@ export class MineflayerAdapter extends EventEmitter {
     const bot = this.#ready('camera'); if (bot.viewer) return { port: this.viewerPort, active: true };
     const module = await import('prismarine-viewer'); const viewer = module.mineflayer ?? module.default?.mineflayer;
     if (typeof viewer !== 'function') throw new ValidationError('Prismarine viewer is unavailable');
-    viewer(bot, { port, firstPerson, viewDistance }); this.viewerPort = port; return { port, active: true };
+    const supportedVersions = module.supportedVersions ?? module.default?.supportedVersions ?? []; const renderVersion = compatibleViewerVersion(bot.version, supportedVersions);
+    const viewerBot = renderVersion === bot.version ? bot : new Proxy(bot, { get: (target, property, receiver) => property === 'version' ? renderVersion : Reflect.get(target, property, receiver) });
+    viewer(viewerBot, { port, firstPerson, viewDistance }); this.viewerPort = port; this.viewerRenderVersion = renderVersion;
+    try { await waitForViewer(port); } catch (error) { await this.stopViewer(); throw error; }
+    this.viewerVersionSupported = supportedVersions.includes(bot.version); return { port, active: true, version: bot.version, renderVersion, versionSupported: this.viewerVersionSupported };
   }
 
-  async stopViewer() { if (!this.client?.viewer) return { active: false }; this.client.viewer.close(); delete this.client.viewer; this.viewerPort = null; return { active: false }; }
+  async stopViewer() { if (!this.client?.viewer) return { active: false }; this.client.viewer.close(); delete this.client.viewer; this.viewerPort = null; this.viewerVersionSupported = null; this.viewerRenderVersion = null; return { active: false }; }
 
   snapshot() {
     const bot = this.client;
     return { connection: this.status, position: bot?.entity?.position ? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z } : null,
       health: bot?.health ?? null, food: bot?.food ?? null, dimension: bot?.game?.dimension ?? null,
       inventorySummary: bot?.inventory?.items?.().map(item => ({ name: item.name, count: item.count })) ?? [], plugins: { ...this.pluginStatus },
-      camera: { active: Boolean(bot?.viewer), port: this.viewerPort ?? null }, timestamp: new Date().toISOString() };
+      camera: { active: Boolean(bot?.viewer), port: this.viewerPort ?? null, version: bot?.version ?? null, renderVersion: this.viewerRenderVersion ?? null, versionSupported: this.viewerVersionSupported ?? null }, timestamp: new Date().toISOString() };
   }
 
   async disconnect(reason = 'MineHive shutdown') { if (!this.client) return; await this.stopViewer(); await this.stopActions(); this.client.quit?.(reason); }
   raw() { throw new ValidationError('Raw Mineflayer client access is forbidden outside adapter capabilities'); }
+}
+
+async function waitForViewer(port, timeoutMs = 5000) {
+  const started = Date.now(); let lastError;
+  while (Date.now() - started < timeoutMs) {
+    try { const response = await fetch(`http://127.0.0.1:${port}`); await response.body?.cancel(); if (response.ok) return; }
+    catch (error) { lastError = error; }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new ValidationError(`Camera server on port ${port} did not become ready`, { cause: lastError });
+}
+
+function compatibleViewerVersion(version, supported) {
+  if (supported.includes(version)) return version;
+  const family = String(version).split('.').slice(0, 2).join('.'); const candidates = supported.filter(item => item === family || item.startsWith(`${family}.`));
+  return candidates.at(-1) ?? supported.at(-1) ?? version;
 }

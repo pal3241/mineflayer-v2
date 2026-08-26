@@ -16,8 +16,8 @@ export function loadConfig(env = process.env) {
       reconnect: { enabled: bool(env.MINEHIVE_RECONNECT ?? true), maxAttempts: integer(env.MINEHIVE_RECONNECT_ATTEMPTS, 5), delayMs: integer(env.MINEHIVE_RECONNECT_DELAY_MS, 3000) },
       autoEat: { enabled: bool(env.MINEHIVE_AUTO_EAT ?? true), minHunger: integer(env.MINEHIVE_AUTO_EAT_MIN_HUNGER, 15) }
     },
-    commands: { enabled: bool(env.MINEHIVE_CHAT_COMMANDS ?? true), prefix: env.MINEHIVE_CHAT_PREFIX ?? '!hive', admins: (env.MINEHIVE_ADMINS ?? '').split(',').map(value => value.trim()).filter(Boolean) },
-    viewer: { basePort: integer(env.MINEHIVE_VIEWER_BASE_PORT, 3100), viewDistance: integer(env.MINEHIVE_VIEWER_DISTANCE, 6) }
+    commands: { enabled: bool(env.MINEHIVE_CHAT_COMMANDS ?? true), admins: (env.MINEHIVE_ADMINS ?? '').split(',').map(value => value.trim()).filter(Boolean) },
+    viewer: { basePort: integer(env.MINEHIVE_VIEWER_BASE_PORT, 3100), viewDistance: integer(env.MINEHIVE_VIEWER_DISTANCE, 4) }
   };
   if (!Number.isInteger(config.api.port) || config.api.port < 1 || config.api.port > 65535) throw new ValidationError('Invalid API port');
   if (!Number.isInteger(config.bot.port) || config.bot.port < 1 || config.bot.port > 65535) throw new ValidationError('Invalid Minecraft port');

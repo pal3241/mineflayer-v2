@@ -11,7 +11,7 @@ class FakeAdapter extends EventEmitter {
 }
 
 test('bot runtimes are isolated and use adapter boundaries', async () => {
-  const app = createApplication({ env: { MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: () => new FakeAdapter() } });
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: () => new FakeAdapter() } });
   await app.start({ api: false }); const first = app.bots.create({ id: 'a', username: 'Alpha' }); app.bots.create({ id: 'b', username: 'Beta' });
   await app.bots.start(first.id); await app.bots.get('a').transitionQueue;
   assert.equal(app.bots.get('a').snapshot().status, 'READY'); assert.equal(app.bots.get('b').snapshot().status, 'REGISTERED');

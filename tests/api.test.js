@@ -14,6 +14,7 @@ test('API exposes health and versioned bot DTOs', async () => {
     const dashboard = await fetch(`http://127.0.0.1:${port}/`);
     assert.equal(dashboard.status, 200); assert.match(await dashboard.text(), /MineHive Control Center/);
     assert.match(await (await fetch(`http://127.0.0.1:${port}/dashboard.css`)).text(), /camera-wall/);
+    assert.match(await (await fetch(`http://127.0.0.1:${port}/camera.css`)).text(), /camera-loading/);
     assert.match(await (await fetch(`http://127.0.0.1:${port}/dashboard.js`)).text(), /executeCommand/);
     const health = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(health.status, 200);
@@ -27,6 +28,8 @@ test('API exposes health and versioned bot DTOs', async () => {
 
     const list = await fetch(`http://127.0.0.1:${port}/api/v1/bots`);
     assert.equal((await list.json()).data.length, 1);
+    const updatedBot = await fetch(`http://127.0.0.1:${port}/api/v1/bots/api-bot`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"className":"miner","commandAlias":"api"}' });
+    assert.equal((await updatedBot.json()).data.metadata.className, 'miner');
 
     app.bots.get('api-bot').bot.capabilities.add('observe');
     app.capabilities.register({ name: 'observe', execute: async () => ({ observed: true }) });

@@ -1,0 +1,4 @@
+.camera-card { position: relative; }
+.camera-loading { position: absolute; inset: 48px 0 0; display: grid; place-items: center; background: #070c09; color: var(--muted); z-index: 2; }
+.camera-live, .camera-warning { display: inline-block; margin-left: 9px; font-size: 9px; padding: 3px 6px; border-radius: 99px; background: #193523; color: var(--green); }
+.camera-warning { background: #382b16; color: var(--amber); }

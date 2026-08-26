@@ -6,7 +6,8 @@ import { readFile } from 'node:fs/promises';
 const DASHBOARD_FILES = Object.freeze({
   '/': [new URL('../dashboard/index.html', import.meta.url), 'text/html; charset=utf-8'],
   '/dashboard.js': [new URL('../dashboard/dashboard.js', import.meta.url), 'text/javascript; charset=utf-8'],
-  '/dashboard.css': [new URL('../dashboard/dashboard.css', import.meta.url), 'text/css; charset=utf-8']
+  '/dashboard.css': [new URL('../dashboard/dashboard.css', import.meta.url), 'text/css; charset=utf-8'],
+  '/camera.css': [new URL('../dashboard/camera.css', import.meta.url), 'text/css; charset=utf-8']
 });
 
 async function body(request) {
@@ -50,6 +51,7 @@ export class ApiServer {
         }
         if (parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'bots' && parts[3]) {
           if (req.method === 'GET' && parts.length === 4) return send(200, { data: this.application.bots.get(parts[3]).snapshot() });
+          if (req.method === 'PATCH' && parts.length === 4) return send(200, { data: await this.application.botProfiles.update(parts[3], await body(req)) });
           if (req.method === 'POST' && parts[4] === 'start') { await this.application.bots.start(parts[3]); return send(202, { data: this.application.bots.get(parts[3]).snapshot() }); }
           if (req.method === 'POST' && parts[4] === 'stop') { await this.application.bots.stop(parts[3]); return send(200, { data: this.application.bots.get(parts[3]).snapshot() }); }
           if (req.method === 'DELETE' && parts.length === 4) { await this.application.stopCamera(parts[3]).catch(() => {}); await this.application.botProfiles.remove(parts[3]); return send(200, { data: { removed: true, id: parts[3] } }); }

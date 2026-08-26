@@ -20,7 +20,7 @@ test('task graph rejects dependency cycles', () => {
 });
 
 test('goal executes task chain through matched bot capabilities', async () => {
-  const app = createApplication({ env: { MINEHIVE_LOG_LEVEL: 'silent' } }); const calls = [];
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' } }); const calls = [];
   app.bots.create({ id: 'worker', username: 'Worker', capabilities: ['navigation', 'collection'] });
   app.capabilities.register({ name: 'navigation', execute: async (input, context) => { calls.push(['move', context.botId]); return { position: input.target }; } });
   app.capabilities.register({ name: 'collection', execute: async input => { calls.push(['collect', input.count]); return { count: input.count }; } });
@@ -34,7 +34,7 @@ test('goal executes task chain through matched bot capabilities', async () => {
 });
 
 test('failed verified task is retried, checkpointed and fails its goal', async () => {
-  const app = createApplication({ env: { MINEHIVE_LOG_LEVEL: 'silent' } }); let attempts = 0;
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' } }); let attempts = 0;
   app.bots.create({ id: 'worker', capabilities: ['collection'] });
   app.capabilities.register({ name: 'collection', execute: async () => ({ count: ++attempts }) });
   const goal = app.goals.create({ description: 'Impossible collection', steps: [{ type: 'collect', requiredCapabilities: ['collection'], retries: 1, verify: result => result.count === 99 }] });

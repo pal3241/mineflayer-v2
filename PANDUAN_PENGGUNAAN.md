@@ -1,6 +1,6 @@
 # Panduan Penggunaan MineHive
 
-Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.3.2. MineHive membutuhkan Node.js 20 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
+Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.3.3. MineHive membutuhkan Node.js 20 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
 
 ## 1. Persiapan
 
@@ -55,7 +55,6 @@ MINEHIVE_API_PORT=3000
 MINEHIVE_API_TOKEN=ganti-dengan-token-rahasia
 
 MINEHIVE_CHAT_COMMANDS=true
-MINEHIVE_CHAT_PREFIX=!hive
 MINEHIVE_ADMINS=UsernameMinecraftAnda
 ```
 
@@ -131,18 +130,28 @@ Setiap bot memakai port kamera berbeda mulai dari `MINEHIVE_VIEWER_BASE_PORT`, d
 
 ## 5. Command dari chat Minecraft
 
-Command hanya diterima dari username yang terdaftar pada `MINEHIVE_ADMINS`.
+Command hanya diterima dari username yang terdaftar pada `MINEHIVE_ADMINS`. Setiap bot memiliki **command alias** dan **class** yang dapat diatur ketika bot ditambahkan melalui dashboard.
+
+Format selector:
+
+```text
+!aliasbot command
+!class command
+!global command
+```
+
+Contoh: `!bot1` hanya mengontrol bot dengan alias `bot1`, `!miner` mengontrol semua bot dalam class `miner`, sedangkan `!global` mengontrol seluruh bot yang menerima chat pada server tersebut.
 
 ### Melihat bantuan
 
 ```text
-!hive help
+!bot1 help
 ```
 
 ### Melihat status bot
 
 ```text
-!hive status
+!bot1 status
 ```
 
 Bot akan menampilkan status, health, food, dan posisi.
@@ -150,7 +159,7 @@ Bot akan menampilkan status, health, food, dan posisi.
 ### Memanggil bot ke posisi pemain
 
 ```text
-!hive come
+!bot1 come
 ```
 
 Pemain harus terlihat oleh bot.
@@ -158,7 +167,7 @@ Pemain harus terlihat oleh bot.
 ### Bergerak ke koordinat
 
 ```text
-!hive goto 100 64 -20
+!bot1 goto 100 64 -20
 ```
 
 Urutan koordinat adalah `x y z`.
@@ -166,7 +175,7 @@ Urutan koordinat adalah `x y z`.
 ### Mengumpulkan block
 
 ```text
-!hive collect oak_log 16
+!bot1 collect oak_log 16
 ```
 
 Gunakan nama registry Minecraft, misalnya:
@@ -184,13 +193,13 @@ MineHive mencari block dalam radius yang diizinkan, memilih alat, mendatangi blo
 ### Melihat inventory
 
 ```text
-!hive inventory
+!bot1 inventory
 ```
 
 ### Menghentikan aktivitas
 
 ```text
-!hive stop
+!bot1 stop
 ```
 
 Command ini menghentikan pathfinding, pengumpulan block, dan task aktif milik bot.
@@ -389,7 +398,7 @@ Periksa:
 
 - username sama persis dengan nilai `MINEHIVE_ADMINS`
 - `MINEHIVE_CHAT_COMMANDS=true`
-- prefix yang digunakan sesuai `MINEHIVE_CHAT_PREFIX`
+- selector sesuai command alias, class, atau `global`
 - bot sudah berstatus `READY`
 
 ### Bot tidak menemukan block

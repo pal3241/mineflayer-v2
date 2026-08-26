@@ -38,7 +38,7 @@ export class Application {
     const repository = name => config.profile === 'test' ? new MemoryRepository() : new JsonRepository(join(resolve(config.dataPath), `${name}.json`));
     this.admins = new AdminManager({ repository: repository('admins'), bootstrap: [...(config.commands?.admins ?? [])], target: config.commands?.admins ?? [] });
     this.botProfiles = new BotProfileManager({ repository: repository('bots'), botManager: this.bots });
-    this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, config: config.commands ?? { enabled: false, prefix: '!hive', admins: [] }, logger: this.logger });
+    this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, config: config.commands ?? { enabled: false, admins: [] }, logger: this.logger });
     this.bots.onCreated(runtime => this.chatCommands.attach(runtime));
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
     Object.entries({ config, logger: this.logger, eventBus: this.events, health: this.health, metrics: this.metrics, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles }).forEach(([name, value]) => this.container.register(name, value));
@@ -74,7 +74,7 @@ export class Application {
     const result = await runtime.adapter.startViewer({ port, firstPerson: true, viewDistance: this.config.viewer?.viewDistance ?? 6 }); return { ...result, botId };
   }
   async stopCamera(botId) { const result = await this.bots.get(botId).adapter.stopViewer(); this.cameraPorts.delete(botId); return { ...result, botId }; }
-  status() { return { name: 'MineHive', version: '0.3.2', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status() }; }
+  status() { return { name: 'MineHive', version: '0.3.3', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status() }; }
 }
 
 function portAvailable(port) {
