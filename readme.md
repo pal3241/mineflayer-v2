@@ -1,6 +1,6 @@
 # MineHive
 
-MineHive adalah framework Mineflayer modular dan event-driven. Versi operasional **0.4.0** menyediakan dashboard multi-bot, live camera berbasis canvas, command alias/class/global, crafting, home, follow, smart movement, dan koordinator LLM terbatas.
+MineHive adalah framework Mineflayer modular dan event-driven. Versi operasional **0.4.1** menyediakan dashboard multi-bot, live camera berbasis canvas, command alias/class/global, crafting, home, follow, smart movement, dan koordinator LLM terbatas.
 
 Panduan instalasi dan penggunaan lengkap tersedia di [`PANDUAN_PENGGUNAAN.md`](PANDUAN_PENGGUNAAN.md).
 
@@ -17,7 +17,9 @@ Panduan instalasi dan penggunaan lengkap tersedia di [`PANDUAN_PENGGUNAAN.md`](P
 - Fondasi HTTP API versioned dan CLI
 - Dashboard web untuk join, fleet monitoring, live camera, command, dan admin
 - Follow dinamis, named home, smart movement, recursive crafting, dan transfer item antar-bot
-- Koordinator OpenRouter atau LLM lokal kompatibel OpenAI dengan fallback deterministik
+- Koordinator OpenRouter tiga-key failover atau LLM lokal kompatibel OpenAI dengan fallback deterministik
+- Fleet view berisi posisi, inventory, dan daftar donor terdekat; tool/material planning berlaku otomatis pada semua command collect
+- Recursive resource gathering, crafting table, furnace, dan smelting bahan alat
 - Structured goals, deterministic planning, task dependency graph, dan capability-aware scheduling
 - Bounded retry, timeout, cancellation, verification, checkpoint, dan failure propagation
 - Test tanpa kebutuhan server Minecraft
@@ -37,6 +39,16 @@ CLI otomatis membaca `.env`. Secara default API berjalan di `http://127.0.0.1:30
 Jika API diekspos ke jaringan, isi `MINEHIVE_API_TOKEN`. Semua endpoint selain `/health` kemudian membutuhkan header `Authorization: Bearer <token>`.
 
 Untuk server offline/local gunakan `MINEHIVE_AUTH=offline`. Untuk akun resmi gunakan `MINEHIVE_AUTH=microsoft`; Mineflayer akan menampilkan alur login perangkat ketika dibutuhkan.
+
+Pool OpenRouter menggunakan hingga tiga key dan berpindah otomatis saat key aktif terkena rate limit:
+
+```env
+MINEHIVE_LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY_1=key-utama
+OPENROUTER_API_KEY_2=key-cadangan-1
+OPENROUTER_API_KEY_3=key-cadangan-2
+MINEHIVE_LLM_MODEL=openrouter/auto
+```
 
 ## Command dari Minecraft
 
@@ -87,6 +99,7 @@ Nama block memakai registry Minecraft, misalnya `oak_log`, `stone`, atau `iron_o
 - `POST /api/v1/bots/:id/actions/sethome`
 - `POST /api/v1/bots/:id/actions/home`
 - `GET /api/v1/ai/status`
+- `GET /api/v1/ai/fleet`
 - `POST /api/v1/ai/command`
 - `POST /api/v1/bots/:id/actions/chat`
 - `POST /api/v1/bots/:id/actions/observe`
@@ -109,7 +122,7 @@ Core tidak mengimpor Mineflayer. Hanya `src/plugins/minecraft/mineflayer-adapter
 | 0.1.0 | Foundation dan core | Implemented |
 | 0.2.0 | Runtime bot dan behavior engine | Implemented |
 | 0.3.0 | Goal, task, recovery, advanced orchestration | Implemented |
-| 0.4.0 | Safe AI, provider-agnostic LLM, crafting, movement, dan fleet coordination | Implemented |
+| 0.4.0-0.4.1 | Safe AI, LLM key pool, crafting, movement, dan nearest-bot coordination | Implemented |
 | 0.5.0+ | Memory jangka panjang, ML, HiveMind lanjutan, database, production, autonomy | Planned |
 
 Dokumen di `instruksi/` tetap menjadi sumber persyaratan utama.

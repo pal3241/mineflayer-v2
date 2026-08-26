@@ -23,7 +23,7 @@ async function refresh() {
 function render() {
   $('#statOnline').textContent = state.bots.filter(online).length; $('#statBots').textContent = state.bots.length;
   $('#statGoals').textContent = state.goals.filter(goal => goal.status === 'ACTIVE').length; $('#statHealth').textContent = state.health?.status ?? '—';
-  $('#statAi').textContent = state.ai?.llm?.enabled ? state.ai.llm.provider : 'RULES'; $('#statAiModel').textContent = state.ai?.llm?.model ?? 'Deterministic fallback';
+  $('#statAi').textContent = state.ai?.llm?.enabled ? state.ai.llm.provider : 'RULES'; $('#statAiModel').textContent = state.ai?.llm?.model ? `${state.ai.llm.model}${state.ai.llm.keyCount ? ` · key ${state.ai.llm.activeKey} · ready ${state.ai.llm.availableKeys}/${state.ai.llm.keyCount}` : ''}` : 'Deterministic fallback';
   $('#overviewBots').innerHTML = state.bots.length ? state.bots.map(botRow).join('') : empty('No bots registered');
   $('#goalList').innerHTML = state.goals.length ? state.goals.slice(-6).reverse().map(goal => `<div class="goal-row"><div><b>${escapeHtml(goal.description)}</b><small>${goal.progress}% · ${new Date(goal.updatedAt).toLocaleTimeString()}</small></div><span class="badge">${goal.status}</span></div>`).join('') : empty('No goals yet');
   $('#botManager').innerHTML = state.bots.length ? state.bots.map(botCard).join('') : empty('Add your first bot using the form');
@@ -68,9 +68,9 @@ $('#aiForm').onsubmit = async event => { event.preventDefault(); const text = $(
 $$('.quick-commands button').forEach(button => button.onclick = () => { $('#commandInput').value = button.dataset.command; $('#commandInput').focus(); });
 async function executeCommand(target, text) {
   const [command, ...args] = text.trim().split(/\s+/); let action = command; let input = {};
+  if (command === 'collect') { log(`> coordinator ${target}: ${text}`); try { const result = await api('/api/v1/ai/command', { method: 'POST', body: JSON.stringify({ text, selector: selectorForApi(target) }) }); log(JSON.stringify(result, null, 2)); await refresh(); } catch (error) { log(`COORDINATOR ERROR: ${error.message}`, true); } return; }
   if (command === 'status' || command === 'inventory') action = 'observe';
   else if (command === 'goto') { action = 'navigate'; input = { x: Number(args[0]), y: Number(args[1]), z: Number(args[2]) }; }
-  else if (command === 'collect') input = { block: args[0], count: Number(args[1] ?? 1) };
   else if (command === 'follow') input = { username: args[0] };
   else if (command === 'sethome') { action = 'sethome'; input = { name: args[0] ?? 'home' }; }
   else if (command === 'home') input = { name: args[0] ?? 'home' };

@@ -1,6 +1,6 @@
 # Panduan Penggunaan MineHive
 
-Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.4.0. MineHive membutuhkan Node.js 20 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
+Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.4.1. MineHive membutuhkan Node.js 20 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
 
 ## 1. Persiapan
 
@@ -86,9 +86,13 @@ MineHive tetap dapat menjalankan command sederhana tanpa LLM melalui parser dete
 
 ```env
 MINEHIVE_LLM_PROVIDER=openrouter
-OPENROUTER_API_KEY=isi-api-key-anda
+OPENROUTER_API_KEY_1=api-key-utama
+OPENROUTER_API_KEY_2=api-key-cadangan-1
+OPENROUTER_API_KEY_3=api-key-cadangan-2
 MINEHIVE_LLM_MODEL=openrouter/auto
 ```
+
+Ketiga key disimpan sebagai pool. Jika key aktif menerima HTTP `429` (rate limit), `402` (saldo/quota), atau `401` (key tidak valid), permintaan yang sama dipindahkan ke key berikutnya. Key yang terkena `429` mengikuti `Retry-After` atau cooldown 60 detik. Dashboard hanya menampilkan nomor key aktif dan jumlah key siap pakai, tidak pernah nilai key. Variabel lama `OPENROUTER_API_KEY` tetap didukung untuk satu key.
 
 Untuk server LLM lokal yang menyediakan API kompatibel OpenAI `/v1/chat/completions`, gunakan:
 
@@ -100,7 +104,7 @@ MINEHIVE_LOCAL_LLM_API_KEY=
 MINEHIVE_LOCAL_LLM_STRUCTURED=false
 ```
 
-Mode `auto` memilih OpenRouter jika `OPENROUTER_API_KEY` tersedia, memilih lokal jika endpoint dan model lokal diisi, lalu menggunakan parser deterministik bila keduanya belum dikonfigurasi. Dashboard menampilkan provider dan model yang benar-benar aktif.
+Mode `auto` memilih OpenRouter jika salah satu API key tersedia, memilih lokal jika endpoint dan model lokal diisi, lalu menggunakan parser deterministik bila keduanya belum dikonfigurasi. Dashboard menampilkan provider, model, dan kesehatan pool key yang benar-benar aktif.
 
 ## 3. Menjalankan sistem
 
@@ -218,7 +222,7 @@ iron_ore
 sand
 ```
 
-MineHive mencari block dalam radius yang diizinkan, memilih alat, mendatangi block, menambangnya, lalu mengambil hasilnya.
+Semua command `collect` otomatis melewati koordinator, termasuk command tanpa kata `ai`. MineHive mencari block dalam radius yang diizinkan, memeriksa persyaratan alat dari registry Minecraft, mendatangi block, menambangnya, lalu mengambil hasilnya.
 
 ### Menyimpan dan kembali ke home
 
@@ -245,7 +249,20 @@ Crafting menyelesaikan bahan turunan secara rekursif. Jika resep membutuhkan cra
 !global ai craft wooden_pickaxe 3
 ```
 
-Selector tetap menggunakan alias bot, class, atau global. Untuk pekerjaan batu dan ore, koordinator memeriksa inventory terlebih dahulu. Jika target belum memiliki pickaxe, koordinator mencari bot idle pada server dan dimension yang sama untuk menyerahkan pickaxe. Jika tidak ada donor, target mencoba crafting pickaxe dan mengumpulkan kayu lebih dulu bila diperlukan. Jumlah pekerjaan class/global dibagi tepat di antara bot yang tersedia.
+Selector tetap menggunakan alias bot, class, atau global. Sebelum bekerja, LLM menerima snapshot aman yang berisi posisi dan inventory masing-masing bot serta daftar bot terdekat yang sudah diurutkan berdasarkan jarak tiga dimensi.
+
+Untuk setiap block yang tidak dapat dipanen dengan tangan, koordinator menjalankan pipeline otomatis:
+
+1. Membaca daftar `harvestTools` block dari registry versi Minecraft bot.
+2. Memeriksa inventory bot target.
+3. Menyaring bot lain agar hanya server dan dimension yang sama, mengabaikan bot dengan task aktif, menghitung jarak Euclidean, lalu mencoba donor terdekat terlebih dahulu.
+4. Meminjam alat yang valid atau bahan crafting yang masih kurang. Donor dapat memberi sebagian stack dan koordinator melanjutkan ke donor berikutnya.
+5. Membuat crafting plan rekursif, termasuk crafting table dan furnace.
+6. Jika tidak ada donor bahan, mencari block yang menjatuhkan item tersebut, menyiapkan alat untuk bahan itu secara rekursif, lalu mengumpulkannya sendiri.
+7. Melakukan smelting otomatis untuk `iron_ingot`, `gold_ingot`, atau `copper_ingot` dengan raw material dan coal ketika dibutuhkan.
+8. Memverifikasi alat di inventory, baru menjalankan pekerjaan collect utama.
+
+Dengan demikian `!bot1 collect stone 16` sudah menjalankan seluruh alur peminjaman/crafting tersebut tanpa command tambahan. Jumlah pekerjaan class/global dibagi tepat di antara bot yang tersedia.
 
 Output LLM hanya boleh menghasilkan intent terstruktur yang telah diizinkan. LLM tidak memperoleh akses shell, JavaScript, API internal bebas, atau API key dari prompt. Output yang rusak atau tidak valid otomatis jatuh kembali ke parser deterministik.
 
@@ -377,7 +394,7 @@ Invoke-RestMethod `
   -Body '{"selector":"class:miner","text":"collect stone 32"}'
 ```
 
-Gunakan `bot:alias`, `class:nama`, `global`, atau `auto` sebagai selector. Status provider dapat diperiksa melalui `GET /api/v1/ai/status`.
+Gunakan `bot:alias`, `class:nama`, `global`, atau `auto` sebagai selector. Status provider dan pool key dapat diperiksa melalui `GET /api/v1/ai/status`. Snapshot koordinasi berisi posisi, inventory, dan urutan bot terdekat tersedia melalui `GET /api/v1/ai/fleet`; endpoint ini dilindungi bearer token bila token API dikonfigurasi.
 
 ### Menghentikan bot
 

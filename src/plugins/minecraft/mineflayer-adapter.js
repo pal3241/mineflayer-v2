@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { ValidationError } from '../../core/errors.js';
 
+const SMELTING_RECIPES = Object.freeze({ iron_ingot: 'raw_iron', gold_ingot: 'raw_gold', copper_ingot: 'raw_copper' });
+
 export class MineflayerAdapter extends EventEmitter {
   constructor({ factory, plugins = true, autoEat = {} } = {}) { super(); this.factory = factory; this.plugins = plugins; this.autoEatConfig = { enabled: true, minHunger: 15, ...autoEat }; this.client = null; this.status = 'DISCONNECTED'; this.pluginStatus = {}; this.homes = new Map(); }
 
@@ -60,6 +62,37 @@ export class MineflayerAdapter extends EventEmitter {
     if (input.home) return this.goHome({ name: input.home, range: input.range }, context);
     return this.navigate(input, context);
   }
+  async analyzeBlock({ block }) {
+    const bot = this.#ready('block-analysis'); const definition = bot.registry?.blocksByName?.[block]; if (!definition) throw new ValidationError(`Unknown block '${block}'`);
+    const requiredTools = Object.keys(definition.harvestTools ?? {}).map(id => bot.registry.items?.[Number(id)]?.name).filter(Boolean);
+    return { block, diggable: definition.diggable !== false, material: definition.material ?? null, handMineable: requiredTools.length === 0, requiredTools };
+  }
+  async craftRequirements({ item, count = 1 }) {
+    const bot = this.#ready('craft-planning'); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1)); const inventory = inventoryLedger(bot);
+    const plan = resolveCraftPlan(bot, item, amount, inventory, new Set(), 0); return { item, count: amount, missing: [...plan.missing].map(([name, missingCount]) => ({ name, count: missingCount })), steps: plan.steps };
+  }
+  async findSourceBlocks({ item }) {
+    const bot = this.#ready('resource-analysis'); const definition = bot.registry?.itemsByName?.[item]; if (!definition) return [];
+    return (bot.registry.blocksArray ?? Object.values(bot.registry.blocksByName ?? {})).filter(block => block?.diggable !== false && block.drops?.includes(definition.id)).sort((left, right) => Number(right.name === item) - Number(left.name === item)).map(block => block.name);
+  }
+  async smeltRequirements({ item, count = 1 }) {
+    const bot = this.#ready('smelting-plan'); const input = SMELTING_RECIPES[item]; if (!input) return null; const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1));
+    return { item, count: amount, input: { name: input, count: amount }, fuel: { name: 'coal', count: Math.ceil(amount / 8) }, furnace: Boolean(bot.findBlock({ matching: bot.registry.blocksByName?.furnace?.id, maxDistance: 6 })) };
+  }
+  async smeltItem({ item, count = 1 }, { signal } = {}) {
+    const bot = this.#ready('smelting'); const inputName = SMELTING_RECIPES[item]; if (!inputName) throw new ValidationError(`No supported smelting recipe for '${item}'`); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1));
+    let furnaceBlock = bot.findBlock({ matching: bot.registry.blocksByName?.furnace?.id, maxDistance: 6 });
+    if (!furnaceBlock) { await this.#ensureCrafted('furnace', 1, new Set(), 0); await this.#placeUtilityBlock('furnace'); furnaceBlock = bot.findBlock({ matching: bot.registry.blocksByName.furnace.id, maxDistance: 6 }); }
+    if (!furnaceBlock) throw new ValidationError('Could not place furnace');
+    const input = bot.registry.itemsByName[inputName]; const fuel = bot.registry.itemsByName.coal; if (!input || inventoryCount(bot, inputName) < amount) throw new ValidationError(`Not enough '${inputName}' to smelt`);
+    const fuelCount = Math.ceil(amount / 8); if (!fuel || inventoryCount(bot, 'coal') < fuelCount) throw new ValidationError('Not enough coal for smelting');
+    const furnace = await bot.openFurnace(furnaceBlock); const started = Date.now(); const timeout = Math.max(20_000, amount * 12_000);
+    try {
+      await furnace.putInput(input.id, null, amount); await furnace.putFuel(fuel.id, null, fuelCount);
+      while (furnace.outputItem()?.name !== item || (furnace.outputItem()?.count ?? 0) < amount) { if (signal?.aborted) throw signal.reason ?? new ValidationError('Smelting cancelled'); if (Date.now() - started > timeout) throw new ValidationError(`Smelting '${item}' timed out`); await new Promise(resolve => setTimeout(resolve, 250)); }
+      await furnace.takeOutput(); return { item, count: amount, inventory: this.snapshot().inventorySummary };
+    } finally { furnace.close(); }
+  }
   async collect({ block, count = 1, maxDistance = 64 }, { signal } = {}) {
     const bot = this.#ready('collection'); if (!bot.collectBlock) throw new ValidationError('CollectBlock plugin is unavailable');
     const definition = bot.registry?.blocksByName?.[block]; if (!definition) throw new ValidationError(`Unknown block '${block}'`);
@@ -93,18 +126,21 @@ export class MineflayerAdapter extends EventEmitter {
     visiting.delete(name); throw new ValidationError(`Unable to craft '${name}': ${lastError?.message ?? 'no recipe or ingredients'}`);
   }
   async #placeCraftingTable() {
-    const bot = this.#ready('crafting-table'); const table = bot.inventory.items().find(value => value.name === 'crafting_table'); if (!table) throw new ValidationError('Crafting table is not available');
+    return this.#placeUtilityBlock('crafting_table');
+  }
+  async #placeUtilityBlock(name) {
+    const bot = this.#ready(`place-${name}`); const item = bot.inventory.items().find(value => value.name === name); if (!item) throw new ValidationError(`'${name}' is not available`);
     const { Vec3 } = await import('vec3'); const origin = bot.entity.position.floored();
     const reference = [[1, 0], [0, 1], [-1, 0], [0, -1]].map(([x, z]) => bot.blockAt(origin.offset(x, -1, z))).find(block => block && ['air', 'cave_air', 'void_air'].includes(bot.blockAt(block.position.offset(0, 1, 0))?.name));
-    if (!reference) throw new ValidationError('No safe adjacent space for crafting table');
-    await bot.equip(table, 'hand'); await bot.placeBlock(reference, new Vec3(0, 1, 0));
+    if (!reference) throw new ValidationError(`No safe adjacent space for '${name}'`);
+    await bot.equip(item, 'hand'); await bot.placeBlock(reference, new Vec3(0, 1, 0));
   }
   async dropItem({ item, count = 1 }) { const bot = this.#ready('item-transfer'); const definition = bot.registry.itemsByName?.[item]; if (!definition || inventoryCount(bot, item) < count) throw new ValidationError(`Not enough '${item}' to transfer`); await bot.toss(definition.id, null, count); return { item, count, dropped: true }; }
-  async pickupItem({ item, timeout = 10_000 }, { signal } = {}) {
-    const bot = this.#ready('item-pickup'); const started = Date.now(); const initialCount = inventoryCount(bot, item);
+  async pickupItem({ item, count = 1, timeout = 10_000 }, { signal } = {}) {
+    const bot = this.#ready('item-pickup'); const started = Date.now(); const initialCount = inventoryCount(bot, item); const expected = initialCount + Math.max(1, Number.parseInt(count, 10) || 1);
     while (Date.now() - started < timeout) {
       if (signal?.aborted) throw signal.reason ?? new ValidationError('Item pickup cancelled');
-      if (inventoryCount(bot, item) > initialCount) return { item, collected: true };
+      if (inventoryCount(bot, item) >= expected) return { item, count: inventoryCount(bot, item) - initialCount, collected: true };
       const entity = bot.nearestEntity(candidate => candidate.name === 'item' && candidate.getDroppedItem?.()?.name === item);
       if (entity?.position) await this.navigate({ x: entity.position.x, y: entity.position.y, z: entity.position.z, range: 1 }, { signal }).catch(() => {});
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -140,6 +176,32 @@ export class MineflayerAdapter extends EventEmitter {
 }
 
 function inventoryCount(bot, name) { return bot.inventory?.items?.().filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0) ?? 0; }
+function inventoryLedger(bot) { const ledger = new Map(); for (const item of bot.inventory?.items?.() ?? []) ledger.set(item.name, (ledger.get(item.name) ?? 0) + item.count); return ledger; }
+function resolveCraftPlan(bot, name, requiredCount, ledger, visiting, depth) {
+  if ((ledger.get(name) ?? 0) >= requiredCount) return { ledger, missing: new Map(), steps: [] };
+  if (depth > 10 || visiting.has(name)) throw new ValidationError(`Cannot resolve crafting plan for '${name}'`);
+  const definition = bot.registry?.itemsByName?.[name]; if (!definition) throw new ValidationError(`Unknown item '${name}'`);
+  const recipes = bot.recipesAll(definition.id, null, true) ?? [];
+  if (!recipes.length) { const missing = requiredCount - (ledger.get(name) ?? 0); ledger.set(name, requiredCount); return { ledger, missing: new Map([[name, missing]]), steps: [] }; }
+  let best; const nextVisiting = new Set(visiting).add(name);
+  for (const recipe of recipes) {
+    try {
+      let candidateLedger = new Map(ledger); const candidateMissing = new Map(); const candidateSteps = [];
+      if (recipe.requiresTable && !bot.findBlock({ matching: bot.registry.blocksByName?.crafting_table?.id, maxDistance: 6 })) {
+        const tablePlan = resolveCraftPlan(bot, 'crafting_table', 1, candidateLedger, nextVisiting, depth + 1); candidateLedger = tablePlan.ledger; mergeMissing(candidateMissing, tablePlan.missing); candidateSteps.push(...tablePlan.steps);
+      }
+      const resultCount = Math.max(1, recipe.result?.count ?? 1); const crafts = Math.ceil((requiredCount - (candidateLedger.get(name) ?? 0)) / resultCount);
+      for (const ingredient of recipe.delta.filter(value => value.count < 0)) {
+        const ingredientName = bot.registry.items?.[ingredient.id]?.name; if (!ingredientName) continue; const needed = Math.abs(ingredient.count) * crafts;
+        const ingredientPlan = resolveCraftPlan(bot, ingredientName, needed, candidateLedger, nextVisiting, depth + 1); candidateLedger = ingredientPlan.ledger; mergeMissing(candidateMissing, ingredientPlan.missing); candidateSteps.push(...ingredientPlan.steps); candidateLedger.set(ingredientName, (candidateLedger.get(ingredientName) ?? 0) - needed);
+      }
+      candidateLedger.set(name, (candidateLedger.get(name) ?? 0) + resultCount * crafts); candidateSteps.push({ item: name, crafts, resultCount: resultCount * crafts });
+      const score = [...candidateMissing.values()].reduce((sum, value) => sum + value, 0); if (!best || score < best.score) best = { ledger: candidateLedger, missing: candidateMissing, steps: candidateSteps, score };
+    } catch {}
+  }
+  if (!best) throw new ValidationError(`No usable crafting plan for '${name}'`); return best;
+}
+function mergeMissing(target, source) { for (const [name, count] of source) target.set(name, (target.get(name) ?? 0) + count); }
 
 async function waitForViewer(port, timeoutMs = 5000) {
   const started = Date.now(); let lastError;

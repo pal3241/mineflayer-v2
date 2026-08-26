@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createApplication } from '../src/index.js';
 import { MineflayerAdapter } from '../src/plugins/minecraft/mineflayer-adapter.js';
+import { createRequire } from 'node:module';
 
 class OperationalAdapter extends EventEmitter {
   constructor() { super(); this.status = 'READY'; this.messages = []; this.collected = []; this.items = []; }
@@ -11,6 +12,9 @@ class OperationalAdapter extends EventEmitter {
   async chat(message) { this.messages.push(message); return { sent: true }; }
   async collect(input) { this.collected.push(input); return { block: input.block, collectedTargets: input.count }; }
   async craftItem({ item }) { this.items.push({ name: item, count: 1 }); return { item, count: 1 }; }
+  async craftRequirements({ item, count }) { return { item, count, missing: [], steps: [] }; }
+  async analyzeBlock({ block }) { const requiredTools = /stone|ore|obsidian/.test(block) ? ['wooden_pickaxe'] : []; return { block, diggable: true, handMineable: !requiredTools.length, requiredTools }; }
+  async findSourceBlocks() { return []; }
   async smartMove(input) { this.lastMove = input; return { position: input }; }
   async setHome({ name = 'home' } = {}) { this.home = { name, x: 1, y: 64, z: 2 }; return this.home; }
   async goHome() { return { position: this.home }; }
@@ -32,14 +36,14 @@ async function waitFor(predicate, timeout = 1000) {
 test('authorized chat command creates and completes a real capability goal', async () => {
   let adapter;
   const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent', MINEHIVE_ADMINS: 'Alice' }, overrides: { adapterFactory: () => (adapter = new OperationalAdapter()) } });
-  app.bots.create({ id: 'worker', username: 'Worker' });
+  app.bots.create({ id: 'worker', username: 'Worker' }); await app.bots.start('worker'); await app.bots.get('worker').transitionQueue;
   adapter.emit('chat', 'Mallory', '!worker collect oak_log 2');
   await new Promise(resolve => setImmediate(resolve)); assert.equal(app.goals.list().length, 0);
   adapter.emit('chat', 'Alice', '!hive collect oak_log 2');
   await new Promise(resolve => setImmediate(resolve)); assert.equal(app.goals.list().length, 0);
   adapter.emit('chat', 'Alice', '!worker collect oak_log 2');
   await waitFor(() => app.goals.list()[0]?.status === 'COMPLETED');
-  assert.deepEqual(adapter.collected, [{ block: 'oak_log', count: 2 }]); assert.ok(adapter.messages.some(message => message.includes('goal completed')));
+  assert.deepEqual(adapter.collected, [{ block: 'oak_log', count: 2 }]); assert.ok(adapter.messages.some(message => message.includes('coordinator completed')));
 });
 
 test('class and global selectors route commands to the intended bots', async () => {
@@ -47,9 +51,10 @@ test('class and global selectors route commands to the intended bots', async () 
   const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent', MINEHIVE_ADMINS: 'Alice' }, overrides: { adapterFactory: input => { const adapter = new OperationalAdapter(); adapters.set(input.id, adapter); return adapter; } } });
   app.bots.create({ id: 'miner-1', name: 'MinerOne', metadata: { commandAlias: 'one', className: 'miner' } });
   app.bots.create({ id: 'builder-1', name: 'BuilderOne', metadata: { commandAlias: 'two', className: 'builder' } });
+  await app.bots.start('miner-1'); await app.bots.start('builder-1'); await Promise.all(['miner-1', 'builder-1'].map(id => app.bots.get(id).transitionQueue));
   for (const adapter of adapters.values()) adapter.emit('chat', 'Alice', '!miner collect stone 1');
   await waitFor(() => adapters.get('miner-1').collected.length === 1); assert.equal(adapters.get('builder-1').collected.length, 0);
-  for (const adapter of adapters.values()) adapter.emit('chat', 'Alice', '!global collect dirt 1');
+  for (const adapter of adapters.values()) adapter.emit('chat', 'Alice', '!global collect dirt 2');
   await waitFor(() => adapters.get('miner-1').collected.length === 2 && adapters.get('builder-1').collected.length === 1);
 });
 
@@ -94,6 +99,18 @@ test('crafting builds and safely places a required crafting table', async () => 
   }
   const client = new TableCraftClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn');
   const result = await adapter.craftItem({ item: 'wooden_pickaxe' }); assert.equal(result.count, 1); assert.equal(client.placed, true); await adapter.disconnect();
+});
+
+test('registry analysis identifies mandatory tools and recursive raw materials', async () => {
+  const require = createRequire(import.meta.url); const registry = require('prismarine-registry')('1.20.4'); const Recipe = require('prismarine-recipe')(registry).Recipe;
+  class RegistryClient extends EventEmitter {
+    constructor() { super(); this.registry = registry; this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; }
+    recipesAll(id, metadata, table) { return Recipe.find(id, metadata).filter(recipe => !recipe.requiresTable || table); } findBlock() { return null; } clearControlStates() {} quit() { this.emit('end'); }
+  }
+  const client = new RegistryClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn');
+  const block = await adapter.analyzeBlock({ block: 'iron_ore' }); assert.equal(block.handMineable, false); assert.ok(block.requiredTools.includes('stone_pickaxe')); assert.ok(!block.requiredTools.includes('wooden_pickaxe'));
+  const plan = await adapter.craftRequirements({ item: 'wooden_pickaxe', count: 1 }); assert.deepEqual(plan.missing, [{ name: 'oak_log', count: 3 }]); assert.ok((await adapter.findSourceBlocks({ item: 'diamond' })).includes('diamond_ore'));
+  assert.deepEqual(await adapter.smeltRequirements({ item: 'iron_ingot', count: 9 }), { item: 'iron_ingot', count: 9, input: { name: 'raw_iron', count: 9 }, fuel: { name: 'coal', count: 2 }, furnace: false }); await adapter.disconnect();
 });
 
 test('unexpected disconnect triggers bounded reconnect', async () => {

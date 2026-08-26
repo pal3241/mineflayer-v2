@@ -41,6 +41,7 @@ export class ApiServer {
         if (req.method === 'POST' && url.pathname === '/api/v1/goals') return send(201, { data: this.application.goals.create(await body(req)) });
         if (req.method === 'GET' && url.pathname === '/api/v1/tasks') return send(200, { data: this.application.goals.allTasks() });
         if (req.method === 'GET' && url.pathname === '/api/v1/ai/status') return send(200, { data: this.application.coordinator.status() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/ai/fleet') return send(200, { data: this.application.coordinator.fleetView() });
         if (req.method === 'POST' && url.pathname === '/api/v1/ai/command') { const input = await body(req); return send(200, { data: await this.application.coordinator.coordinate({ text: input.text, selector: input.selector, actor: 'api' }) }); }
         if (parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'goals' && parts[3]) {
           if (req.method === 'GET' && parts.length === 4) return send(200, { data: this.application.goals.get(parts[3]).toDTO(), tasks: this.application.goals.tasks(parts[3]) });
@@ -62,6 +63,7 @@ export class ApiServer {
           if (req.method === 'POST' && parts[4] === 'actions' && parts[5]) {
             const input = await body(req); const capability = ({ navigate: 'minecraft.navigation', move: 'minecraft.smart-movement', collect: 'minecraft.collection', follow: 'minecraft.follow-player', sethome: 'minecraft.set-home', home: 'minecraft.home', craft: 'minecraft.crafting', chat: 'minecraft.chat', observe: 'minecraft.observation', stop: 'minecraft.stop' })[parts[5]];
             if (!capability) throw new ValidationError(`Unsupported action '${parts[5]}'`);
+            if (parts[5] === 'collect') { if (typeof input.block !== 'string' || !input.block.trim()) throw new ValidationError('Collect action requires block'); const bot = this.application.bots.get(parts[3]).snapshot(); return send(200, { data: await this.application.coordinator.coordinate({ text: `collect ${input.block} ${input.count ?? 1}`, selector: `bot:${bot.metadata.commandAlias ?? bot.name}`, actor: 'api' }) }); }
             const goal = this.application.goals.create({ description: `${parts[5]} for bot ${parts[3]}`, priority: input.priority ?? 50, constraints: { preferredBot: parts[3] }, steps: [{ type: parts[5], input, requiredCapabilities: [capability], timeout: input.timeout ?? 120_000 }] });
             return send(200, { data: await this.application.goals.run(goal.id) });
           }

@@ -2,28 +2,41 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createApplication } from '../src/index.js';
-import { LlmGateway } from '../src/ai/llm-gateway.js';
+import { LlmGateway, OpenAICompatibleProvider } from '../src/ai/llm-gateway.js';
 import { EventEmitter } from 'node:events';
 
 class FleetAdapter extends EventEmitter {
-  constructor(items = []) { super(); this.status = 'READY'; this.items = items.map(name => ({ name, count: 1 })); this.collected = []; }
+  constructor(items = [], { position = { x: 1, y: 64, z: 1 }, requireMaterials = false } = {}) { super(); this.status = 'READY'; this.items = items.map(value => typeof value === 'string' ? { name: value, count: 1 } : { ...value }); this.collected = []; this.position = position; this.requireMaterials = requireMaterials; }
   async connect() { this.emit('login'); this.emit('spawn'); }
   async disconnect() { this.emit('end'); }
   async smartMove(input) { this.movedTo = input; }
-  async dropItem({ item }) { this.items.find(entry => entry.name === item).count--; this.dropped = item; }
-  async pickupItem({ item }) { this.items.push({ name: item, count: 1 }); }
-  async craftItem({ item }) { this.items.push({ name: item, count: 1 }); }
-  async collect(input) { this.collected.push(input); return { collectedTargets: input.count }; }
+  async dropItem({ item, count = 1 }) { this.items.find(entry => entry.name === item).count -= count; this.dropped = item; }
+  async pickupItem({ item, count = 1 }) { this.items.push({ name: item, count }); }
+  async analyzeBlock({ block }) { const requiredTools = /stone|ore|obsidian/.test(block) ? ['wooden_pickaxe', 'stone_pickaxe', 'iron_pickaxe', 'diamond_pickaxe'] : []; return { block, diggable: true, handMineable: !requiredTools.length, requiredTools }; }
+  async craftRequirements({ item, count }) { return { item, count, missing: this.requireMaterials && item.endsWith('_pickaxe') && this.count('oak_log') < 3 ? [{ name: 'oak_log', count: 3 - this.count('oak_log') }] : [], steps: [{ item, crafts: count }] }; }
+  async findSourceBlocks({ item }) { return item === 'oak_log' ? ['oak_log'] : []; }
+  async craftItem({ item }) { if (this.requireMaterials && item.endsWith('_pickaxe') && this.count('oak_log') < 3) throw new Error('missing wood'); this.items.push({ name: item, count: 1 }); }
+  async collect(input) { this.collected.push(input); if (input.block === 'oak_log') this.items.push({ name: 'oak_log', count: input.count }); return { collectedTargets: input.count }; }
+  count(name) { return this.items.filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0); }
   async stopActions() {}
-  snapshot() { return { connection: 'READY', position: { x: 1, y: 64, z: 1 }, dimension: 'overworld', health: 20, food: 20, inventorySummary: this.items.filter(item => item.count > 0), camera: { active: false }, timestamp: new Date().toISOString() }; }
+  snapshot() { return { connection: 'READY', position: this.position, dimension: 'overworld', health: 20, food: 20, inventorySummary: this.items.filter(item => item.count > 0), camera: { active: false }, timestamp: new Date().toISOString() }; }
 }
 
 test('local OpenAI-compatible LLM returns a validated coordinator intent', async () => {
-  const server = createServer(async (request, response) => { for await (const _ of request) {} response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { content: '{"intent":"collect","selector":"class:miner","block":"stone","item":null,"count":8,"player":null,"x":null,"y":null,"z":null,"home":null}' } }] })); });
+  let requestBody; const server = createServer(async (request, response) => { const chunks = []; for await (const chunk of request) chunks.push(chunk); requestBody = JSON.parse(Buffer.concat(chunks)); response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { content: '{"intent":"collect","selector":"class:miner","block":"stone","item":null,"count":8,"player":null,"x":null,"y":null,"z":null,"home":null}' } }] })); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     const gateway = new LlmGateway({ provider: 'local', localEndpoint: `http://127.0.0.1:${server.address().port}`, localModel: 'test', localStructuredOutput: false, timeoutMs: 1000 }, { warn() {} });
-    const result = await gateway.interpret('get stone'); assert.equal(result.intent, 'collect'); assert.equal(result.block, 'stone'); assert.equal(result.count, 8);
+    const fleet = [{ id: 'bot1', position: { x: 1, y: 64, z: 1 }, inventory: [{ name: 'stone_pickaxe', count: 1 }], nearby: [] }]; const result = await gateway.interpret('get stone', { fleet }); assert.equal(result.intent, 'collect'); assert.equal(result.block, 'stone'); assert.equal(result.count, 8); assert.deepEqual(JSON.parse(requestBody.messages[1].content).fleet, fleet);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('OpenRouter provider rotates to the next key after a rate limit', async () => {
+  const seen = []; const server = createServer(async (request, response) => { for await (const _ of request) {} const authorization = request.headers.authorization; seen.push(authorization); if (authorization === 'Bearer key-one') { response.writeHead(429, { 'retry-after': '60' }); return response.end('limited'); } response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { content: '{"intent":"status"}' } }] })); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const provider = new OpenAICompatibleProvider({ endpoint: `http://127.0.0.1:${server.address().port}`, apiKeys: ['key-one', 'key-two', 'key-three'], model: 'test', structuredOutput: false, timeoutMs: 1000 });
+    assert.equal(await provider.complete([{ role: 'user', content: 'status' }], {}), '{"intent":"status"}'); assert.deepEqual(seen, ['Bearer key-one', 'Bearer key-two']); assert.deepEqual(provider.status(), { keyCount: 3, activeKey: 2, availableKeys: 2 });
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
@@ -53,12 +66,32 @@ test('coordinator borrows an idle pickaxe before collecting stone', async () => 
   assert.equal(result.results[0].status, 'COMPLETED'); assert.ok(adapters.get('target').items.some(item => item.name === 'stone_pickaxe' && item.count > 0)); assert.equal(adapters.get('donor').items[0].count, 0); assert.equal(adapters.get('target').collected[0].block, 'stone'); await app.stop();
 });
 
+test('nearest-bot algorithm ignores a farther tool donor', async () => {
+  const adapters = new Map(); const positions = { target: { x: 0, y: 64, z: 0 }, near: { x: 3, y: 64, z: 4 }, far: { x: 30, y: 64, z: 0 } };
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: input => { const adapter = new FleetAdapter(input.id === 'target' ? [] : ['stone_pickaxe'], { position: positions[input.id] }); adapters.set(input.id, adapter); return adapter; } } });
+  for (const id of ['target', 'far', 'near']) { app.bots.create({ id, metadata: { commandAlias: id, className: 'worker' } }); await app.bots.start(id); await app.bots.get(id).transitionQueue; }
+  app.coordinator.gateway.provider = null; const view = app.coordinator.fleetView().find(bot => bot.id === 'target'); assert.deepEqual(view.nearby.map(bot => bot.id), ['near', 'far']); assert.deepEqual(view.nearby.map(bot => bot.distance), [5, 30]);
+  await app.coordinator.coordinate({ text: 'collect stone 1', selector: 'bot:target', actor: 'test' }); assert.equal(adapters.get('near').items[0].count, 0); assert.equal(adapters.get('far').items[0].count, 1); await app.stop();
+});
+
 test('coordinator crafts a pickaxe when no idle donor has one', async () => {
   let adapter;
   const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: () => (adapter = new FleetAdapter()) } });
   app.bots.create({ id: 'solo', name: 'Solo', metadata: { commandAlias: 'solo', className: 'miner' } }); await app.bots.start('solo'); await app.bots.get('solo').transitionQueue; app.coordinator.gateway.provider = null;
   const result = await app.coordinator.coordinate({ text: 'ambil stone 3', selector: 'bot:solo', actor: 'test' });
   assert.equal(result.results[0].status, 'COMPLETED'); assert.ok(adapter.items.some(item => item.name === 'wooden_pickaxe')); assert.deepEqual(adapter.collected, [{ block: 'stone', count: 3 }]); await app.stop();
+});
+
+test('coordinator borrows missing crafting material before making a required tool', async () => {
+  const adapters = new Map(); const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: input => { const adapter = input.id === 'target' ? new FleetAdapter([], { requireMaterials: true }) : new FleetAdapter([{ name: 'oak_log', count: 3 }]); adapters.set(input.id, adapter); return adapter; } } });
+  for (const id of ['target', 'materials']) { app.bots.create({ id, metadata: { commandAlias: id, className: 'worker' } }); await app.bots.start(id); await app.bots.get(id).transitionQueue; }
+  app.coordinator.gateway.provider = null; const result = await app.coordinator.coordinate({ text: 'collect stone 1', selector: 'bot:target', actor: 'test' }); assert.equal(result.results[0].status, 'COMPLETED'); assert.equal(adapters.get('materials').count('oak_log'), 0); assert.ok(adapters.get('target').count('wooden_pickaxe') > 0); await app.stop();
+});
+
+test('coordinator collects missing material itself when no bot can donate it', async () => {
+  let adapter; const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: () => (adapter = new FleetAdapter([], { requireMaterials: true })) } });
+  app.bots.create({ id: 'solo', metadata: { commandAlias: 'solo', className: 'worker' } }); await app.bots.start('solo'); await app.bots.get('solo').transitionQueue; app.coordinator.gateway.provider = null;
+  const result = await app.coordinator.coordinate({ text: 'collect stone 1', selector: 'bot:solo', actor: 'test' }); assert.equal(result.results[0].status, 'COMPLETED'); assert.ok(adapter.collected.some(entry => entry.block === 'oak_log' && entry.count === 3)); assert.ok(adapter.count('wooden_pickaxe') > 0); await app.stop();
 });
 
 test('group coordinator distributes collection count exactly across bots', async () => {

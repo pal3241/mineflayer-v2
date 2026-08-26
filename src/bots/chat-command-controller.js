@@ -22,11 +22,11 @@ export class ChatCommandController {
     }
     try {
       if (command === 'help') return this.#reply(runtime, `use !${alias} <command>, !${className || 'class'} <command>, or !global <command>. ${HELP}`);
-      if (command === 'ai') {
-        const targetSelector = selector === 'global' ? 'global' : selector === className ? `class:${className}` : `bot:${alias}`;
+      if (command === 'ai' || command === 'collect') {
+        const targetSelector = selector === 'global' ? 'global' : selector === className ? `class:${className}` : `bot:${alias}`; const request = command === 'ai' ? args.join(' ') : `collect ${args.join(' ')}`;
         if (!this.coordinator.shouldHandle(runtime.bot.id, targetSelector)) return;
-        const result = await this.coordinator.coordinateOnce(`${username}:${message}`, { text: args.join(' '), selector: targetSelector, actor: username });
-        return this.#reply(runtime, `AI completed ${result.results.filter(item => item.status === 'COMPLETED').length}/${result.results.length}`);
+        const result = await this.coordinator.coordinateOnce(`${username}:${message}`, { text: request, selector: targetSelector, actor: username });
+        return this.#reply(runtime, `coordinator completed ${result.results.filter(item => item.status === 'COMPLETED').length}/${result.results.length}`);
       }
       if (command === 'status') { const state = runtime.snapshot(); return this.#reply(runtime, `${state.status}, hp=${state.runtime.health}, food=${state.runtime.food}, pos=${formatPosition(state.runtime.position)}`); }
       if (command === 'inventory') { const items = runtime.adapter.snapshot().inventorySummary; return this.#reply(runtime, items.length ? items.map(item => `${item.name}:${item.count}`).join(', ').slice(0, 200) : 'inventory empty'); }
@@ -37,7 +37,6 @@ export class ChatCommandController {
       let step;
       if (command === 'come') step = { type: 'follow-player', input: { username }, requiredCapabilities: ['minecraft.follow-player'], timeout: 120_000 };
       else if (command === 'goto') step = { type: 'navigate', input: { x: Number(args[0]), y: Number(args[1]), z: Number(args[2]) }, requiredCapabilities: ['minecraft.navigation'], timeout: 120_000 };
-      else if (command === 'collect') step = { type: 'collect', input: { block: args[0], count: Number(args[1] ?? 1) }, requiredCapabilities: ['minecraft.collection'], timeout: 300_000, retries: 1 };
       else return this.#reply(runtime, `unknown command. ${HELP}`);
       const goal = this.goals.create({ description: `${command} requested by ${username}`, priority: 60, constraints: { preferredBot: runtime.bot.id }, steps: [step] });
       await this.#reply(runtime, `goal ${goal.id.slice(0, 8)} started`);

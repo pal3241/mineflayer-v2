@@ -1,29 +1,38 @@
 import { ConflictError, ValidationError } from '../core/errors.js';
 
-const PICKAXES = ['netherite_pickaxe', 'diamond_pickaxe', 'iron_pickaxe', 'stone_pickaxe', 'golden_pickaxe', 'wooden_pickaxe'];
-const LOGS = ['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log'];
+const AVAILABLE_STATES = new Set(['READY', 'ACTIVE', 'PAUSED']);
+const TOOL_TIER = Object.freeze({ wooden: 1, golden: 2, stone: 3, iron: 4, diamond: 5, netherite: 6 });
 
 export class FleetCoordinator {
   #recent = new Map();
+  #busy = new Map();
   constructor({ gateway, bots, goals, events, logger }) { this.gateway = gateway; this.bots = bots; this.goals = goals; this.events = events; this.logger = logger; }
-  status() { return { llm: this.gateway.status(), bots: this.bots.list().length }; }
+  status() { return { llm: this.gateway.status(), bots: this.bots.list().length, coordination: 'nearest-first-tool-and-material-planning' }; }
+  fleetView() {
+    const bots = this.bots.list();
+    return bots.map(bot => ({ id: bot.id, alias: bot.metadata.commandAlias ?? bot.name, class: bot.metadata.className ?? 'worker', status: bot.status,
+      server: serverIdentity(this.bots.get(bot.id).options), dimension: bot.runtime.dimension, position: bot.runtime.position, inventory: bot.runtime.inventorySummary,
+      nearby: nearestTo(bot, bots, this.bots).slice(0, 12).map(candidate => ({ id: candidate.id, alias: candidate.metadata.commandAlias ?? candidate.name, distance: round(candidate.distance), status: candidate.status, inventory: candidate.runtime.inventorySummary })) }));
+  }
   shouldHandle(botId, selector) { return this.#select(selector).map(bot => bot.id).sort()[0] === botId; }
-  coordinateOnce(key, request) { const recent = this.#recent.get(key); if (recent && Date.now() - recent.createdAt < 3000) return recent.promise; const promise = this.coordinate(request).finally(() => setTimeout(() => this.#recent.delete(key), 3000)); this.#recent.set(key, { createdAt: Date.now(), promise }); return promise; }
+  coordinateOnce(key, request) { const recent = this.#recent.get(key); if (recent && Date.now() - recent.createdAt < 3000) return recent.promise; const promise = this.coordinate(request).finally(() => { const timer = setTimeout(() => this.#recent.delete(key), 3000); timer.unref?.(); }); this.#recent.set(key, { createdAt: Date.now(), promise }); return promise; }
   async coordinate({ text, selector, actor = 'api' }) {
     if (typeof text !== 'string' || !text.trim()) throw new ValidationError('Coordinator request text is required');
-    const intent = await this.gateway.interpret(text, { selector, bots: this.bots.list().map(bot => ({ alias: bot.metadata.commandAlias ?? bot.name, class: bot.metadata.className ?? 'worker', status: bot.status, inventory: bot.runtime.inventorySummary })) });
+    const intent = await this.gateway.interpret(text, { selector, fleet: this.fleetView() });
     const selected = this.#select(intent.selector); if (!selected.length) throw new ConflictError(`No available bots match '${intent.selector}'`);
-    const targets = ['collect', 'craft'].includes(intent.intent) ? selected.slice(0, Math.min(selected.length, intent.count)) : selected;
-    const counts = distribute(intent.count, targets.length);
-    await this.events.publish('coordinator.requested', { actor, text, intent, targets: targets.map(bot => bot.id) }, { source: 'fleet-coordinator' });
-    const results = await Promise.allSettled(targets.map((bot, index) => this.#execute(bot.id, { ...intent, count: counts[index] })));
-    const response = { intent, results: results.map((result, index) => ({ botId: targets[index].id, status: result.status === 'fulfilled' ? 'COMPLETED' : 'FAILED', result: result.value, error: result.reason?.message })) };
-    await this.events.publish('coordinator.completed', response, { source: 'fleet-coordinator' }); return response;
+    const targets = ['collect', 'craft'].includes(intent.intent) ? selected.slice(0, Math.min(selected.length, intent.count)) : selected; const counts = distribute(intent.count, targets.length);
+    this.#reserve(targets.map(bot => bot.id));
+    try {
+      await this.events.publish('coordinator.requested', { actor, text, intent, targets: targets.map(bot => bot.id) }, { source: 'fleet-coordinator' });
+      const results = await Promise.allSettled(targets.map((bot, index) => this.#execute(bot.id, { ...intent, count: counts[index] })));
+      const response = { intent, results: results.map((result, index) => ({ botId: targets[index].id, status: result.status === 'fulfilled' ? 'COMPLETED' : 'FAILED', result: result.value, error: result.reason?.message })) };
+      await this.events.publish('coordinator.completed', response, { source: 'fleet-coordinator' }); return response;
+    } finally { this.#release(targets.map(bot => bot.id)); }
   }
   #select(selector = 'auto') {
-    const available = this.bots.list().filter(bot => ['READY', 'ACTIVE', 'PAUSED'].includes(bot.status));
+    const available = this.bots.list().filter(bot => AVAILABLE_STATES.has(bot.status));
     if (selector === 'global') return available;
-    if (selector.startsWith('bot:')) { const name = selector.slice(4).toLowerCase(); return available.filter(bot => bot.id === name || String(bot.metadata.commandAlias ?? bot.name).toLowerCase() === name); }
+    if (selector.startsWith('bot:')) { const name = selector.slice(4).toLowerCase(); return available.filter(bot => bot.id.toLowerCase() === name || String(bot.metadata.commandAlias ?? bot.name).toLowerCase() === name); }
     if (selector.startsWith('class:')) { const name = selector.slice(6).toLowerCase(); return available.filter(bot => String(bot.metadata.className ?? 'worker').toLowerCase() === name); }
     return available.slice(0, 1);
   }
@@ -34,35 +43,86 @@ export class FleetCoordinator {
     if (intent.intent === 'move') return adapter.smartMove({ x: intent.x, y: intent.y, z: intent.z });
     if (intent.intent === 'set_home') return adapter.setHome({ name: intent.home });
     if (intent.intent === 'home') return adapter.goHome({ name: intent.home });
-    if (intent.intent === 'craft') return adapter.craftItem({ item: intent.item, count: intent.count });
+    if (intent.intent === 'craft') { const preparation = await this.#prepareCraft(botId, intent.item, intent.count, new Set()); return { preparation, crafted: await adapter.craftItem({ item: intent.item, count: intent.count }) }; }
     if (intent.intent === 'collect') {
-      if (requiresPickaxe(intent.block)) await this.#ensurePickaxe(botId);
+      const preparation = await this.#ensureToolForBlock(botId, intent.block, new Set());
       const goal = this.goals.create({ description: `Coordinator collect ${intent.count} ${intent.block}`, priority: 70, constraints: { preferredBot: botId }, steps: [{ type: 'collect', input: { block: intent.block, count: intent.count }, requiredCapabilities: ['minecraft.collection'], timeout: 300_000, retries: 1 }] });
-      return this.goals.run(goal.id);
+      return { preparation, goal: await this.goals.run(goal.id) };
     }
     throw new ValidationError(`Unsupported coordinator intent '${intent.intent}'`);
   }
-  async #ensurePickaxe(botId) {
-    const target = this.bots.get(botId); if (findPickaxe(target.adapter.snapshot())) return;
-    const activeBots = new Set(this.goals.allTasks().filter(task => task.status === 'RUNNING').map(task => task.assignedBot));
-    const targetSnapshot = target.adapter.snapshot();
-    const donor = this.bots.list().find(bot => bot.id !== botId && !activeBots.has(bot.id) && bot.runtime.position && findPickaxe(bot.runtime) && bot.runtime.dimension === targetSnapshot.dimension && sameServer(this.bots.get(bot.id).options, target.options));
-    if (donor) {
-      const tool = findPickaxe(donor.runtime); const donorRuntime = this.bots.get(donor.id); const position = donorRuntime.adapter.snapshot().position;
-      if (position) await target.adapter.smartMove({ ...position, range: 2 }); await donorRuntime.adapter.dropItem({ item: tool, count: 1 }); await target.adapter.pickupItem({ item: tool });
-      if (findPickaxe(target.adapter.snapshot())) return;
+  async #ensureToolForBlock(botId, block, visiting) {
+    const key = `${botId}:${block}`; if (visiting.has(key)) throw new ConflictError(`Tool dependency cycle while preparing to mine '${block}'`); visiting.add(key);
+    const target = this.bots.get(botId); const analysis = await target.adapter.analyzeBlock({ block });
+    if (!analysis.diggable) throw new ConflictError(`Block '${block}' is not diggable`);
+    if (analysis.handMineable || !analysis.requiredTools.length) { visiting.delete(key); return { block, required: false, source: 'hand' }; }
+    const existing = findInventoryItem(target.adapter.snapshot(), analysis.requiredTools); if (existing) { visiting.delete(key); return { block, required: true, tool: existing, source: 'inventory' }; }
+    const borrowed = await this.#borrowNearest(botId, analysis.requiredTools, 1);
+    if (borrowed) { visiting.delete(key); return { block, required: true, tool: borrowed.item, source: 'nearest-bot', donor: borrowed.donor, distance: borrowed.distance }; }
+    let lastError;
+    for (const tool of [...analysis.requiredTools].sort(toolOrder)) {
+      try { const preparation = await this.#prepareCraft(botId, tool, 1, visiting); await target.adapter.craftItem({ item: tool, count: 1 }); if (findInventoryItem(target.adapter.snapshot(), [tool])) { visiting.delete(key); return { block, required: true, tool, source: 'crafted', preparation }; } }
+      catch (error) { lastError = error; }
     }
-    try { await target.adapter.craftItem({ item: 'wooden_pickaxe', count: 1 }); }
-    catch {
-      let gathered = false;
-      for (const block of LOGS) { try { await target.adapter.collect({ block, count: 3, maxDistance: 64 }); gathered = true; break; } catch {} }
-      if (!gathered) throw new ConflictError('No pickaxe is available and no craftable wood was found'); await target.adapter.craftItem({ item: 'wooden_pickaxe', count: 1 });
-    }
-    if (!findPickaxe(target.adapter.snapshot())) throw new ConflictError('Pickaxe preparation could not be verified');
+    visiting.delete(key); throw new ConflictError(`No valid tool could be prepared for '${block}': ${lastError?.message ?? 'no craftable tool or donor'}`);
   }
+  async #prepareCraft(botId, item, count, visiting) {
+    const target = this.bots.get(botId); const available = itemCount(target.adapter.snapshot(), item); if (available >= count) return { item, count, source: 'inventory' };
+    try { await target.adapter.craftItem({ item, count }); return { item, count, source: 'existing-materials' }; } catch {}
+    const plan = await target.adapter.craftRequirements({ item, count }); const acquisitions = [];
+    for (const missing of plan.missing) acquisitions.push(await this.#acquireItem(botId, missing.name, missing.count, visiting));
+    return { item, count, source: 'prepared-materials', missing: plan.missing, acquisitions, steps: plan.steps };
+  }
+  async #acquireItem(botId, item, count, visiting) {
+    const target = this.bots.get(botId); let shortage = Math.max(0, count - itemCount(target.adapter.snapshot(), item)); if (!shortage) return { item, count, source: 'inventory' };
+    const transfers = [];
+    while (shortage > 0) {
+      const transfer = await this.#borrowNearest(botId, [item], shortage); if (!transfer) break; transfers.push(transfer); shortage = Math.max(0, count - itemCount(target.adapter.snapshot(), item));
+    }
+    if (!shortage) return { item, count, source: 'nearby-bots', transfers };
+    const sources = await target.adapter.findSourceBlocks({ item }); let lastError;
+    for (const block of sources) {
+      try { await this.#ensureToolForBlock(botId, block, visiting); await target.adapter.collect({ block, count: shortage, maxDistance: 64 }); shortage = Math.max(0, count - itemCount(target.adapter.snapshot(), item)); if (!shortage) return { item, count, source: 'collected', block, transfers }; }
+      catch (error) { lastError = error; }
+    }
+    const smelting = typeof target.adapter.smeltRequirements === 'function' ? await target.adapter.smeltRequirements({ item, count: shortage }) : null;
+    if (smelting) {
+      try {
+        const furnacePreparation = smelting.furnace ? null : await this.#prepareCraft(botId, 'furnace', 1, visiting); if (!smelting.furnace) await target.adapter.craftItem({ item: 'furnace', count: 1 });
+        const input = await this.#acquireItem(botId, smelting.input.name, smelting.input.count, visiting); const fuel = await this.#acquireItem(botId, smelting.fuel.name, smelting.fuel.count, visiting);
+        const result = await target.adapter.smeltItem({ item, count: shortage }); if (itemCount(target.adapter.snapshot(), item) >= count) return { item, count, source: 'smelted', furnacePreparation, input, fuel, result, transfers };
+      } catch (error) { lastError = error; }
+    }
+    throw new ConflictError(`Unable to obtain ${shortage} '${item}' from inventory, nearby bots, or reachable blocks${lastError ? `: ${lastError.message}` : ''}`);
+  }
+  async #borrowNearest(targetId, acceptedItems, requestedCount) {
+    const target = this.bots.get(targetId); const activeBots = new Set(this.goals.allTasks().filter(task => task.status === 'RUNNING').map(task => task.assignedBot));
+    const targetBot = target.snapshot(); const donors = nearestTo(targetBot, this.bots.list(), this.bots).filter(bot => !activeBots.has(bot.id) && !this.#busy.has(bot.id));
+    for (const donor of donors) {
+      const item = findInventoryItem(donor.runtime, acceptedItems); if (!item) continue; const available = itemCount(donor.runtime, item); const count = Math.min(requestedCount, available); if (!count) continue;
+      this.#reserve([donor.id]);
+      try {
+        const donorRuntime = this.bots.get(donor.id); await target.adapter.smartMove({ ...donor.runtime.position, range: 2 }); await donorRuntime.adapter.dropItem({ item, count }); await target.adapter.pickupItem({ item, count });
+        if (itemCount(target.adapter.snapshot(), item) > 0) { const result = { item, count, donor: donor.id, distance: round(donor.distance) }; await this.events.publish('coordinator.item.transferred', { target: targetId, ...result }, { source: 'fleet-coordinator' }); return result; }
+      } finally { this.#release([donor.id]); }
+    }
+    return null;
+  }
+  #reserve(ids) { for (const id of ids) this.#busy.set(id, (this.#busy.get(id) ?? 0) + 1); }
+  #release(ids) { for (const id of ids) { const count = (this.#busy.get(id) ?? 1) - 1; if (count > 0) this.#busy.set(id, count); else this.#busy.delete(id); } }
 }
 
-function findPickaxe(snapshot) { return PICKAXES.find(name => snapshot.inventorySummary?.some(item => item.name === name && item.count > 0)); }
-function requiresPickaxe(block) { return /stone|ore|deepslate|obsidian|cobblestone/.test(block); }
-function sameServer(left = {}, right = {}) { return String(left.host ?? 'localhost').toLowerCase() === String(right.host ?? 'localhost').toLowerCase() && Number(left.port ?? 25565) === Number(right.port ?? 25565); }
+function nearestTo(target, bots, manager) {
+  if (!target.runtime.position) return [];
+  return bots.filter(bot => bot.id !== target.id && AVAILABLE_STATES.has(bot.status) && bot.runtime.position && bot.runtime.dimension === target.runtime.dimension && sameServer(manager.get(bot.id).options, manager.get(target.id).options))
+    .map(bot => ({ ...bot, distance: distance(target.runtime.position, bot.runtime.position) })).sort((left, right) => left.distance - right.distance || left.id.localeCompare(right.id));
+}
+function findInventoryItem(snapshot, accepted) { return accepted.find(name => itemCount(snapshot, name) > 0); }
+function itemCount(snapshot, name) { return snapshot.inventorySummary?.filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0) ?? 0; }
+function distance(left, right) { return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z); }
+function round(value) { return Math.round(value * 100) / 100; }
+function toolOrder(left, right) { return toolTier(left) - toolTier(right) || left.localeCompare(right); }
+function toolTier(name) { const material = Object.keys(TOOL_TIER).find(value => name.startsWith(`${value}_`)); return TOOL_TIER[material] ?? 99; }
+function serverIdentity(options = {}) { return { host: options.host ?? 'localhost', port: Number(options.port ?? 25565) }; }
+function sameServer(left = {}, right = {}) { const a = serverIdentity(left); const b = serverIdentity(right); return String(a.host).toLowerCase() === String(b.host).toLowerCase() && a.port === b.port; }
 function distribute(total, slots) { const base = Math.floor(total / slots); const remainder = total % slots; return Array.from({ length: slots }, (_, index) => base + (index < remainder ? 1 : 0)); }

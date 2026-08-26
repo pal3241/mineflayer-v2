@@ -3,30 +3,40 @@ import { ValidationError } from '../core/errors.js';
 const INTENTS = new Set(['collect', 'craft', 'follow', 'move', 'set_home', 'home', 'status']);
 
 export class OpenAICompatibleProvider {
-  constructor({ endpoint, apiKey, model, structuredOutput = true, headers = {}, timeoutMs = 30_000 }) { this.endpoint = endpoint.replace(/\/$/, ''); this.apiKey = apiKey; this.model = model; this.structuredOutput = structuredOutput; this.headers = headers; this.timeoutMs = timeoutMs; }
+  constructor({ endpoint, apiKey, apiKeys = [], model, structuredOutput = true, headers = {}, timeoutMs = 30_000, rotateOn = [401, 402, 429] }) { this.endpoint = endpoint.replace(/\/$/, ''); this.keys = [...new Set([...apiKeys, apiKey].filter(Boolean))].map(key => ({ key, cooldownUntil: 0 })); this.model = model; this.structuredOutput = structuredOutput; this.headers = headers; this.timeoutMs = timeoutMs; this.rotateOn = new Set(rotateOn); this.keyIndex = 0; }
   async complete(messages, schema) {
-    const request = structured => fetch(`${this.endpoint}/chat/completions`, { method: 'POST', signal: AbortSignal.timeout(this.timeoutMs), headers: { 'content-type': 'application/json', ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}), ...this.headers },
+    const request = (structured, apiKey) => fetch(`${this.endpoint}/chat/completions`, { method: 'POST', signal: AbortSignal.timeout(this.timeoutMs), headers: { 'content-type': 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}), ...this.headers },
       body: JSON.stringify({ model: this.model, messages, temperature: 0, ...(structured ? { response_format: { type: 'json_schema', json_schema: { name: 'minehive_command', strict: true, schema } } } : {}) }) });
-    let response = await request(this.structuredOutput); if (response.status === 400 && this.structuredOutput) { await response.body?.cancel(); response = await request(false); }
-    if (!response.ok) throw new Error(`LLM HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
-    const payload = await response.json(); return payload.choices?.[0]?.message?.content ?? '';
+    const attempts = Math.max(1, this.keys.length); let lastError;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const entry = this.#nextKey(); if (this.keys.length && !entry) throw new Error('All LLM API keys are cooling down after rate limits');
+      let response = await request(this.structuredOutput, entry?.key); if (response.status === 400 && this.structuredOutput) { await response.body?.cancel(); response = await request(false, entry?.key); }
+      if (response.ok) { const payload = await response.json(); return payload.choices?.[0]?.message?.content ?? ''; }
+      const message = `LLM HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`; lastError = new Error(message);
+      if (!entry || !this.rotateOn.has(response.status)) throw lastError;
+      entry.cooldownUntil = response.status === 429 ? Date.now() + retryDelay(response.headers.get('retry-after')) : Date.now() + 60_000; this.keyIndex = (this.keys.indexOf(entry) + 1) % this.keys.length;
+    }
+    throw lastError ?? new Error('No LLM API key is available');
   }
+  #nextKey() { if (!this.keys.length) return null; for (let offset = 0; offset < this.keys.length; offset++) { const index = (this.keyIndex + offset) % this.keys.length; if (this.keys[index].cooldownUntil <= Date.now()) { this.keyIndex = index; return this.keys[index]; } } return null; }
+  status() { return { keyCount: this.keys.length, activeKey: this.keys.length ? this.keyIndex + 1 : null, availableKeys: this.keys.filter(entry => entry.cooldownUntil <= Date.now()).length }; }
 }
 
 export class LlmGateway {
   constructor(config, logger) { this.config = config; this.logger = logger; const resolved = buildProvider(config); this.provider = resolved?.provider ?? null; this.providerName = resolved?.name ?? 'disabled'; }
-  status() { return { enabled: Boolean(this.provider), provider: this.providerName, model: this.provider?.model ?? null, endpoint: this.provider?.endpoint ?? null }; }
+  status() { return { enabled: Boolean(this.provider), provider: this.providerName, model: this.provider?.model ?? null, endpoint: this.provider?.endpoint ?? null, ...(this.provider?.status?.() ?? {}) }; }
   async interpret(text, context = {}) {
     if (!this.provider) return deterministicIntent(text, context.selector);
-    const messages = [{ role: 'system', content: 'You coordinate Minecraft bots. Return only the requested JSON. Never invent tools. Allowed intents: collect, craft, follow, move, set_home, home, status. selector must be auto, global, bot:<alias>, or class:<name>.' },
-      { role: 'user', content: JSON.stringify({ request: text, availableBots: context.bots, requestedSelector: context.selector ?? 'auto' }) }];
+    const messages = [{ role: 'system', content: 'You coordinate Minecraft bots. The fleet data includes each bot position, inventory, and nearby bots sorted by distance. Return only the requested JSON. Never invent tools. Allowed intents: collect, craft, follow, move, set_home, home, status. selector must be auto, global, bot:<alias>, or class:<name>. Tool borrowing and crafting prerequisites are executed automatically after your intent is validated.' },
+      { role: 'user', content: JSON.stringify({ request: text, fleet: context.fleet ?? context.bots, requestedSelector: context.selector ?? 'auto' }) }];
     try { return validateIntent(parseJson(await this.provider.complete(messages, commandSchema)), context.selector); }
     catch (error) { this.logger?.warn('llm.interpretation.fallback', { error: error.message }); return deterministicIntent(text, context.selector); }
   }
 }
 
 function buildProvider(config) {
-  if ((config.provider === 'openrouter' || config.provider === 'auto') && config.apiKey) return { name: 'openrouter', provider: new OpenAICompatibleProvider({ endpoint: config.endpoint || 'https://openrouter.ai/api/v1', apiKey: config.apiKey, model: config.model || 'openrouter/auto', structuredOutput: true, headers: { 'HTTP-Referer': config.siteUrl ?? 'http://localhost', 'X-Title': 'MineHive' }, timeoutMs: config.timeoutMs }) };
+  const openRouterKeys = [...new Set([...(config.apiKeys ?? []), config.apiKey].filter(Boolean))];
+  if ((config.provider === 'openrouter' || config.provider === 'auto') && openRouterKeys.length) return { name: 'openrouter', provider: new OpenAICompatibleProvider({ endpoint: config.endpoint || 'https://openrouter.ai/api/v1', apiKeys: openRouterKeys, model: config.model || 'openrouter/auto', structuredOutput: true, headers: { 'HTTP-Referer': config.siteUrl ?? 'http://localhost', 'X-Title': 'MineHive' }, timeoutMs: config.timeoutMs }) };
   const localRequested = config.provider === 'local'; const localReady = (config.localEndpoint || config.endpoint) && config.localModel;
   if ((localRequested || config.provider === 'auto') && localReady) return { name: 'local', provider: new OpenAICompatibleProvider({ endpoint: config.localEndpoint || config.endpoint, apiKey: config.localApiKey, model: config.localModel, structuredOutput: config.localStructuredOutput, timeoutMs: config.timeoutMs }) };
   return null;
@@ -58,6 +68,7 @@ function deterministicIntent(text, selector = 'auto') {
 function after(words, candidates) { const index = words.findIndex(value => candidates.includes(value)); return words.slice(index + 1).find(value => !/^\d+$/.test(value)); }
 function normalizeCount(value) { const count = Number.parseInt(value ?? 1, 10); return Number.isFinite(count) ? Math.max(1, Math.min(64, count)) : 1; }
 function numberOrUndefined(value) { if (value === null || value === undefined || value === '') return undefined; const number = Number(value); return Number.isFinite(number) ? number : undefined; }
+function retryDelay(header) { const seconds = Number(header); if (Number.isFinite(seconds)) return Math.max(1_000, seconds * 1000); const date = Date.parse(header); return Number.isFinite(date) ? Math.max(1_000, date - Date.now()) : 60_000; }
 
 const commandSchema = { type: 'object', additionalProperties: false, required: ['intent', 'selector', 'block', 'item', 'count', 'player', 'x', 'y', 'z', 'home'], properties: {
   intent: { type: 'string', enum: [...INTENTS] }, selector: { type: 'string' }, block: { type: ['string', 'null'] }, item: { type: ['string', 'null'] }, count: { type: 'integer', minimum: 1, maximum: 64 },

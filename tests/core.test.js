@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus, Container, StateMachine, BehaviorTree, ActionNode, Sequence, Selector, Status, createApplication } from '../src/index.js';
+import { loadConfig } from '../src/core/config.js';
 
 test('event bus emits a versioned envelope shape', async () => {
   const bus = new EventBus(); let received;
@@ -38,4 +39,9 @@ test('behavior tree sequence and selector are deterministic', async () => {
 test('application boots without Minecraft or API', async () => {
   const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' } });
   await app.start({ api: false }); assert.equal(app.state, 'RUNNING'); assert.equal((await app.health.check()).status, 'HEALTHY'); await app.stop(); assert.equal(app.state, 'STOPPED');
+});
+
+test('configuration loads three OpenRouter keys and provider deduplicates fallback aliases', () => {
+  const config = loadConfig({ OPENROUTER_API_KEY_1: 'one', OPENROUTER_API_KEY_2: 'two', OPENROUTER_API_KEY_3: 'three', OPENROUTER_API_KEY: 'one' }); assert.deepEqual(config.llm.apiKeys, ['one', 'two', 'three', 'one']);
+  const gateway = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent', OPENROUTER_API_KEY_1: 'one', OPENROUTER_API_KEY_2: 'two', OPENROUTER_API_KEY_3: 'three' } }).llm; assert.equal(gateway.status().keyCount, 3);
 });
