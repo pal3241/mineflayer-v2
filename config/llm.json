@@ -1,6 +1,0 @@
-{
-    "default_provider": "openrouter",
-    "default_temperature": 0.7,
-    "timeout_seconds": 60,
-    "max_retries": 3
-}

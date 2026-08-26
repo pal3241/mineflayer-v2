@@ -12,3 +12,10 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
+
+# MineHive / Node.js
+node_modules/
+data/*.json
+data/*.tmp
+npm-debug.log*
+coverage/

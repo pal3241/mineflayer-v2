@@ -1,0 +1,69 @@
+const state = { token: localStorage.getItem('minehive.token') ?? '', bots: [], goals: [], admins: [], health: null };
+const $ = selector => document.querySelector(selector);
+const $$ = selector => [...document.querySelectorAll(selector)];
+$('#apiToken').value = state.token;
+
+async function api(path, options = {}) {
+  const headers = { ...(options.body ? { 'content-type': 'application/json' } : {}), ...(state.token ? { authorization: `Bearer ${state.token}` } : {}), ...options.headers };
+  const response = await fetch(path, { ...options, headers }); const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error?.message ?? `HTTP ${response.status}`); return payload.data ?? payload;
+}
+function toast(message, error = false) { const el = $('#toast'); el.textContent = message; el.className = `${error ? 'error ' : ''}show`; clearTimeout(toast.timer); toast.timer = setTimeout(() => { el.className = ''; }, 3500); }
+function escapeHtml(value) { return String(value ?? '').replace(/[&<>"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]); }
+function position(bot) { const p = bot.runtime?.position; return p ? `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}` : '—'; }
+function online(bot) { return ['READY', 'ACTIVE', 'PAUSED'].includes(bot.status); }
+
+async function refresh() {
+  try {
+    const [health, bots, goals, admins] = await Promise.all([api('/health'), api('/api/v1/bots'), api('/api/v1/goals'), api('/api/v1/admins')]);
+    Object.assign(state, { health, bots, goals, admins }); render();
+    $('#connectionDot').style.background = '#77e39e'; $('#connectionText').textContent = 'Connected'; $('#lastUpdate').textContent = new Date().toLocaleTimeString();
+  } catch (error) { $('#connectionDot').style.background = '#ff7474'; $('#connectionText').textContent = 'Disconnected'; $('#lastUpdate').textContent = error.message; }
+}
+function render() {
+  $('#statOnline').textContent = state.bots.filter(online).length; $('#statBots').textContent = state.bots.length;
+  $('#statGoals').textContent = state.goals.filter(goal => goal.status === 'ACTIVE').length; $('#statHealth').textContent = state.health?.status ?? '—';
+  $('#overviewBots').innerHTML = state.bots.length ? state.bots.map(botRow).join('') : empty('No bots registered');
+  $('#goalList').innerHTML = state.goals.length ? state.goals.slice(-6).reverse().map(goal => `<div class="goal-row"><div><b>${escapeHtml(goal.description)}</b><small>${goal.progress}% · ${new Date(goal.updatedAt).toLocaleTimeString()}</small></div><span class="badge">${goal.status}</span></div>`).join('') : empty('No goals yet');
+  $('#botManager').innerHTML = state.bots.length ? state.bots.map(botCard).join('') : empty('Add your first bot using the form');
+  $('#commandBot').innerHTML = state.bots.map(bot => `<option value="${escapeHtml(bot.id)}">${escapeHtml(bot.name)} · ${bot.status}</option>`).join('');
+  $('#adminList').innerHTML = state.admins.length ? state.admins.map(admin => `<div class="admin-row"><div><b>${escapeHtml(admin.username)}</b><div class="source">${admin.source}</div></div>${admin.removable ? `<button class="button danger" data-remove-admin="${escapeHtml(admin.username)}">Remove</button>` : '<span class="badge">.env</span>'}</div>`).join('') : empty('No chat admins configured');
+  renderCameras(); bindDynamic();
+}
+function botRow(bot) { return `<div class="bot-row"><div class="bot-main"><i class="status-dot ${bot.status.toLowerCase()}"></i><div><b>${escapeHtml(bot.name)}</b><small>${bot.status} · ${position(bot)}</small></div></div><span class="badge">HP ${bot.runtime?.health ?? '—'}</span></div>`; }
+function botCard(bot) { const ready = online(bot); return `<article class="bot-card"><div class="bot-card-head"><div><h3>${escapeHtml(bot.name)}</h3><small>${escapeHtml(bot.id)}</small></div><i class="status-dot ${bot.status.toLowerCase()}"></i></div><dl><div><dt>Status</dt><dd>${bot.status}</dd></div><div><dt>Health / food</dt><dd>${bot.runtime?.health ?? '—'} / ${bot.runtime?.food ?? '—'}</dd></div><div><dt>Position</dt><dd>${position(bot)}</dd></div><div><dt>Dimension</dt><dd>${bot.runtime?.dimension ?? '—'}</dd></div></dl><div class="actions"><button class="button primary" data-bot-action="${ready ? 'stop' : 'start'}" data-bot="${bot.id}">${ready ? 'Disconnect' : 'Join server'}</button><button class="button secondary" data-camera="${bot.runtime?.camera?.active ? 'stop' : 'start'}" data-bot="${bot.id}" ${ready ? '' : 'disabled'}>${bot.runtime?.camera?.active ? 'Stop camera' : 'Live camera'}</button><button class="button danger" data-delete-bot="${bot.id}">Delete</button></div></article>`; }
+function renderCameras() { const active = state.bots.filter(bot => bot.runtime?.camera?.active && bot.runtime.camera.port); $('#cameraWall').innerHTML = active.length ? active.map(bot => `<article class="camera-card"><header><b>◉ ${escapeHtml(bot.name)}</b><button class="button danger" data-camera="stop" data-bot="${bot.id}">Stop</button></header><iframe title="Camera ${escapeHtml(bot.name)}" src="${location.protocol}//${location.hostname}:${bot.runtime.camera.port}"></iframe></article>`).join('') : '<div class="camera-empty">Start a camera from the Bots menu to show it here.</div>'; }
+function empty(text) { return `<div class="camera-empty" style="padding:28px">${text}</div>`; }
+
+function bindDynamic() {
+  $$('[data-bot-action]').forEach(button => button.onclick = () => performBot(button.dataset.bot, button.dataset.botAction));
+  $$('[data-camera]').forEach(button => button.onclick = () => camera(button.dataset.bot, button.dataset.camera));
+  $$('[data-delete-bot]').forEach(button => button.onclick = () => deleteBot(button.dataset.deleteBot));
+  $$('[data-remove-admin]').forEach(button => button.onclick = () => removeAdmin(button.dataset.removeAdmin));
+}
+async function performBot(id, action) { try { await api(`/api/v1/bots/${id}/${action}`, { method: 'POST' }); toast(action === 'start' ? 'Bot is joining the server' : 'Bot disconnected'); await refresh(); } catch (error) { toast(error.message, true); } }
+async function camera(id, action) { try { await api(`/api/v1/bots/${id}/camera/${action}`, { method: 'POST' }); toast(`Camera ${action}ed`); await refresh(); if (action === 'start') showView('cameras'); } catch (error) { toast(error.message, true); } }
+async function deleteBot(id) { if (!confirm('Disconnect and permanently remove this bot profile?')) return; try { await api(`/api/v1/bots/${id}`, { method: 'DELETE' }); toast('Bot removed'); await refresh(); } catch (error) { toast(error.message, true); } }
+async function removeAdmin(username) { try { await api(`/api/v1/admins/${encodeURIComponent(username)}`, { method: 'DELETE' }); toast('Admin removed'); await refresh(); } catch (error) { toast(error.message, true); } }
+
+$('#botForm').onsubmit = async event => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.target)); data.port = Number(data.port); data.autoConnect = data.autoConnect === 'on'; if (!data.version) delete data.version; try { const bot = await api('/api/v1/bots', { method: 'POST', body: JSON.stringify(data) }); toast(`Bot ${bot.name} added`); event.target.reset(); await refresh(); } catch (error) { toast(error.message, true); } };
+$('#adminForm').onsubmit = async event => { event.preventDefault(); const username = new FormData(event.target).get('username'); try { await api('/api/v1/admins', { method: 'POST', body: JSON.stringify({ username }) }); event.target.reset(); toast('Admin added'); await refresh(); } catch (error) { toast(error.message, true); } };
+$('#commandForm').onsubmit = async event => { event.preventDefault(); await executeCommand($('#commandBot').value, $('#commandInput').value); };
+$$('.quick-commands button').forEach(button => button.onclick = () => { $('#commandInput').value = button.dataset.command; $('#commandInput').focus(); });
+async function executeCommand(botId, text) {
+  const [command, ...args] = text.trim().split(/\s+/); let action = command; let input = {};
+  if (command === 'status' || command === 'inventory') action = 'observe';
+  else if (command === 'goto') { action = 'navigate'; input = { x: Number(args[0]), y: Number(args[1]), z: Number(args[2]) }; }
+  else if (command === 'collect') input = { block: args[0], count: Number(args[1] ?? 1) };
+  else if (command === 'follow') input = { username: args[0] };
+  else if (command === 'chat') input = { message: args.join(' ') };
+  else if (command !== 'stop' && command !== 'observe') return log(`Unknown command: ${command}`, true);
+  log(`> ${botId}: ${text}`); try { const result = await api(`/api/v1/bots/${botId}/actions/${action}`, { method: 'POST', body: JSON.stringify(input) }); log(JSON.stringify(result, null, 2)); await refresh(); } catch (error) { log(`ERROR: ${error.message}`, true); }
+}
+function log(message, error = false) { const output = $('#commandLog'); output.textContent += `\n[${new Date().toLocaleTimeString()}] ${message}`; output.scrollTop = output.scrollHeight; if (error) toast(message, true); }
+$('#clearLog').onclick = () => { $('#commandLog').textContent = 'Log cleared.'; }; $('#refreshBots').onclick = refresh;
+$('#saveToken').onclick = () => { state.token = $('#apiToken').value.trim(); localStorage.setItem('minehive.token', state.token); toast('API token saved in this browser'); refresh(); };
+$$('.nav').forEach(button => button.onclick = () => showView(button.dataset.view)); $$('.goto').forEach(button => button.onclick = () => showView(button.dataset.target));
+function showView(id) { $$('.view').forEach(view => view.classList.toggle('active', view.id === id)); $$('.nav').forEach(nav => nav.classList.toggle('active', nav.dataset.view === id)); $('#pageTitle').textContent = ({ overview: 'System overview', bots: 'Bots & server join', cameras: 'Live camera wall', commands: 'Command center', admins: 'Admin access' })[id]; }
+
+refresh(); setInterval(refresh, 3000);

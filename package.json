@@ -1,0 +1,29 @@
+{
+  "name": "minehive",
+  "version": "0.3.2",
+  "description": "Modular, event-driven Mineflayer bot framework",
+  "type": "module",
+  "private": true,
+  "main": "src/index.js",
+  "bin": {
+    "minehive": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js start",
+    "dev": "node --watch src/cli.js start",
+    "test": "node --test",
+    "health": "node src/cli.js health"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "dotenv": "^17.4.2",
+    "mineflayer": "^4.33.0",
+    "mineflayer-auto-eat": "^5.0.3",
+    "mineflayer-collectblock": "^1.6.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "prismarine-viewer": "^1.33.0"
+  }
+}

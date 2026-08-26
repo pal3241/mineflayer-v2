@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createApplication, Goal, DeterministicPlanner, TaskGraph, Task } from '../src/index.js';
+
+test('planner builds and validates an ordered dependency graph', () => {
+  const goal = new Goal({ id: 'goal', description: 'Gather logs', steps: [
+    { name: 'move', type: 'move', requiredCapabilities: ['navigation'] },
+    { name: 'collect', type: 'collect', requiredCapabilities: ['collection'] }
+  ] });
+  const graph = new DeterministicPlanner().plan(goal);
+  assert.deepEqual(graph.ready().map(task => task.type), ['move']);
+  graph.ready()[0].update('COMPLETED'); assert.deepEqual(graph.ready().map(task => task.type), ['collect']);
+});
+
+test('task graph rejects dependency cycles', () => {
+  assert.throws(() => new TaskGraph([
+    new Task({ id: 'a', goalId: 'g', type: 'a', dependencies: ['b'] }),
+    new Task({ id: 'b', goalId: 'g', type: 'b', dependencies: ['a'] })
+  ]), error => error.code === 'CONFLICT');
+});
+
+test('goal executes task chain through matched bot capabilities', async () => {
+  const app = createApplication({ env: { MINEHIVE_LOG_LEVEL: 'silent' } }); const calls = [];
+  app.bots.create({ id: 'worker', username: 'Worker', capabilities: ['navigation', 'collection'] });
+  app.capabilities.register({ name: 'navigation', execute: async (input, context) => { calls.push(['move', context.botId]); return { position: input.target }; } });
+  app.capabilities.register({ name: 'collection', execute: async input => { calls.push(['collect', input.count]); return { count: input.count }; } });
+  const goal = app.goals.create({ description: 'Gather 64 oak logs', steps: [
+    { name: 'move', type: 'move', input: { target: 'forest' }, requiredCapabilities: ['navigation'] },
+    { name: 'collect', type: 'collect', input: { count: 64 }, requiredCapabilities: ['collection'], verify: result => result.count === 64 }
+  ] });
+  const result = await app.goals.run(goal.id);
+  assert.equal(result.status, 'COMPLETED'); assert.equal(result.progress, 100); assert.deepEqual(calls, [['move', 'worker'], ['collect', 64]]);
+  assert.deepEqual(await app.checkpoints.list(), []);
+});
+
+test('failed verified task is retried, checkpointed and fails its goal', async () => {
+  const app = createApplication({ env: { MINEHIVE_LOG_LEVEL: 'silent' } }); let attempts = 0;
+  app.bots.create({ id: 'worker', capabilities: ['collection'] });
+  app.capabilities.register({ name: 'collection', execute: async () => ({ count: ++attempts }) });
+  const goal = app.goals.create({ description: 'Impossible collection', steps: [{ type: 'collect', requiredCapabilities: ['collection'], retries: 1, verify: result => result.count === 99 }] });
+  const result = await app.goals.run(goal.id);
+  assert.equal(result.status, 'FAILED'); assert.equal(attempts, 2); assert.equal((await app.checkpoints.list()).length, 1);
+});
