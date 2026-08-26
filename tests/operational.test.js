@@ -5,17 +5,23 @@ import { createApplication } from '../src/index.js';
 import { MineflayerAdapter } from '../src/plugins/minecraft/mineflayer-adapter.js';
 
 class OperationalAdapter extends EventEmitter {
-  constructor() { super(); this.status = 'READY'; this.messages = []; this.collected = []; }
+  constructor() { super(); this.status = 'READY'; this.messages = []; this.collected = []; this.items = []; }
   async connect() { this.connectCalls = (this.connectCalls ?? 0) + 1; this.status = 'READY'; this.emit('login'); this.emit('spawn'); }
   async disconnect() { this.status = 'DISCONNECTED'; this.emit('end'); }
   async chat(message) { this.messages.push(message); return { sent: true }; }
   async collect(input) { this.collected.push(input); return { block: input.block, collectedTargets: input.count }; }
+  async craftItem({ item }) { this.items.push({ name: item, count: 1 }); return { item, count: 1 }; }
+  async smartMove(input) { this.lastMove = input; return { position: input }; }
+  async setHome({ name = 'home' } = {}) { this.home = { name, x: 1, y: 64, z: 2 }; return this.home; }
+  async goHome() { return { position: this.home }; }
+  async dropItem({ item }) { const found = this.items.find(entry => entry.name === item && entry.count > 0); if (!found) throw new Error('missing item'); found.count--; this.worldDrop = item; return { item }; }
+  async pickupItem({ item }) { this.items.push({ name: item, count: 1 }); return { item, collected: true }; }
   async navigate(input) { return { position: input }; }
   async followPlayer(input) { return { player: input.username }; }
   async stopActions() {}
   async startViewer({ port }) { this.camera = { active: true, port }; return this.camera; }
   async stopViewer() { this.camera = { active: false, port: null }; return this.camera; }
-  snapshot() { return { connection: this.status, position: { x: 1, y: 64, z: 2 }, health: 20, food: 20, inventorySummary: [], plugins: {}, camera: this.camera ?? { active: false, port: null }, timestamp: new Date().toISOString() }; }
+  snapshot() { return { connection: this.status, position: { x: 1, y: 64, z: 2 }, health: 20, food: 20, inventorySummary: this.items.filter(item => item.count > 0), plugins: {}, camera: this.camera ?? { active: false, port: null }, timestamp: new Date().toISOString() }; }
 }
 
 async function waitFor(predicate, timeout = 1000) {
@@ -56,8 +62,38 @@ test('Mineflayer adapter normalizes client chat, snapshot and shutdown', async (
   }
   const client = new Client(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false });
   await adapter.connect({ username: 'Bot' }); client.emit('spawn'); await adapter.chat('hello');
+  assert.equal((await adapter.setHome({ name: 'base' })).name, 'base');
   assert.deepEqual(adapter.snapshot().position, { x: 1, y: 2, z: 3 }); assert.deepEqual(client.sent, ['hello']);
   await adapter.disconnect('done'); assert.equal(client.cleared, true); assert.equal(client.reason, 'done'); assert.equal(adapter.status, 'DISCONNECTED');
+});
+
+test('crafting capability resolves a ready recipe', async () => {
+  class CraftClient extends EventEmitter {
+    constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.health = 20; this.food = 20; this.items = [{ name: 'oak_planks', type: 1, count: 3 }, { name: 'stick', type: 2, count: 2 }];
+      this.inventory = { items: () => this.items }; this.registry = { itemsByName: { wooden_pickaxe: { id: 3 } }, items: { 1: { name: 'oak_planks' }, 2: { name: 'stick' } }, blocksByName: { crafting_table: { id: 4 } } };
+      this.recipe = { result: { id: 3, count: 1 }, delta: [{ id: 1, count: -3 }, { id: 2, count: -2 }], requiresTable: false }; }
+    findBlock() { return null; } recipesAll() { return [this.recipe]; } recipesFor() { return [this.recipe]; }
+    async craft() { this.items.push({ name: 'wooden_pickaxe', type: 3, count: 1 }); }
+    clearControlStates() {} quit() { this.emit('end'); }
+  }
+  const client = new CraftClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn');
+  const result = await adapter.craftItem({ item: 'wooden_pickaxe', count: 1 }); assert.equal(result.count, 1); await adapter.disconnect();
+});
+
+test('crafting builds and safely places a required crafting table', async () => {
+  const { Vec3 } = await import('vec3');
+  class TableCraftClient extends EventEmitter {
+    constructor() { super(); this.entity = { position: new Vec3(0, 64, 0) }; this.game = { dimension: 'overworld' }; this.items = [{ name: 'oak_planks', type: 1, count: 7 }, { name: 'stick', type: 2, count: 2 }]; this.placed = false;
+      this.inventory = { items: () => this.items }; this.registry = { itemsByName: { oak_planks: { id: 1 }, stick: { id: 2 }, wooden_pickaxe: { id: 3 }, crafting_table: { id: 4 } }, items: { 1: { name: 'oak_planks' }, 2: { name: 'stick' } }, blocksByName: { crafting_table: { id: 4 } } };
+      this.pickaxeRecipe = { result: { id: 3, count: 1 }, delta: [{ id: 1, count: -3 }, { id: 2, count: -2 }], requiresTable: true }; this.tableRecipe = { result: { id: 4, count: 1 }, delta: [{ id: 1, count: -4 }], requiresTable: false }; }
+    findBlock() { return this.placed ? { name: 'crafting_table', position: new Vec3(1, 64, 0) } : null; }
+    recipesAll(id) { return id === 4 ? [this.tableRecipe] : [this.pickaxeRecipe]; } recipesFor(id) { return id === 4 ? [this.tableRecipe] : [this.pickaxeRecipe]; }
+    async craft(recipe) { if (recipe === this.tableRecipe) this.items.push({ name: 'crafting_table', type: 4, count: 1 }); else this.items.push({ name: 'wooden_pickaxe', type: 3, count: 1 }); }
+    blockAt(position) { return position.y === 63 ? { name: 'stone', position } : { name: 'air', position }; } async equip() {} async placeBlock() { this.placed = true; this.items.find(item => item.name === 'crafting_table').count = 0; }
+    clearControlStates() {} quit() { this.emit('end'); }
+  }
+  const client = new TableCraftClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn');
+  const result = await adapter.craftItem({ item: 'wooden_pickaxe' }); assert.equal(result.count, 1); assert.equal(client.placed, true); await adapter.disconnect();
 });
 
 test('unexpected disconnect triggers bounded reconnect', async () => {

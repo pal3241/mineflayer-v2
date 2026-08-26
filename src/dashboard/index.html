@@ -9,7 +9,7 @@
 </head>
 <body>
   <aside class="sidebar">
-    <div class="brand"><span class="brand-mark">MH</span><div><strong>MineHive</strong><small>Control Center</small></div></div>
+    <div class="brand"><span class="brand-mark">FK</span><div><strong>MineHive</strong><small>Control Center</small></div></div>
     <nav>
       <button class="nav active" data-view="overview">⌂ <span>Overview</span></button>
       <button class="nav" data-view="bots">◆ <span>Bots & Join</span></button>
@@ -34,6 +34,7 @@
         <article><span>Total fleet</span><strong id="statBots">0</strong><small>Registered runtimes</small></article>
         <article><span>Active goals</span><strong id="statGoals">0</strong><small>Running workloads</small></article>
         <article><span>System health</span><strong id="statHealth" class="health-text">—</strong><small>Core and fleet</small></article>
+        <article><span>Coordinator</span><strong id="statAi" class="health-text">—</strong><small id="statAiModel">Deterministic fallback</small></article>
       </div>
       <div class="split">
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">FLEET</p><h2>Bot status</h2></div><button class="button secondary goto" data-target="bots">Manage bots</button></div><div id="overviewBots" class="bot-list"></div></section>
@@ -79,8 +80,9 @@
             <button class="button primary" type="submit">Execute command</button>
           </form>
           <div class="quick-commands">
-            <button data-command="status">status</button><button data-command="goto 100 64 100">goto x y z</button><button data-command="collect oak_log 16">collect block count</button><button data-command="follow Player">follow player</button><button data-command="inventory">inventory</button><button data-command="stop">stop action</button>
+            <button data-command="status">status</button><button data-command="goto 100 64 100">goto x y z</button><button data-command="collect oak_log 16">collect</button><button data-command="follow Player">follow</button><button data-command="sethome home">set home</button><button data-command="home home">home</button><button data-command="craft wooden_pickaxe 1">craft</button><button data-command="inventory">inventory</button><button data-command="stop">stop</button>
           </div>
+          <form id="aiForm" class="command-form ai-form"><label>AI coordinator request<input id="aiInput" placeholder="collect 32 stone; prepare or borrow a pickaxe"></label><button class="button secondary" type="submit">Ask coordinator</button></form>
         </section>
         <section class="panel terminal-panel"><div class="panel-title"><div><p class="eyebrow">OUTPUT</p><h2>Command log</h2></div><button id="clearLog" class="icon-button">Clear</button></div><pre id="commandLog">MineHive command center ready.</pre></section>
       </div>

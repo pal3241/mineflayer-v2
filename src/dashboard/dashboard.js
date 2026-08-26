@@ -1,4 +1,4 @@
-const state = { token: localStorage.getItem('minehive.token') ?? '', bots: [], goals: [], admins: [], health: null };
+const state = { token: localStorage.getItem('minehive.token') ?? '', bots: [], goals: [], admins: [], health: null, ai: null };
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 $('#apiToken').value = state.token;
@@ -15,14 +15,15 @@ function online(bot) { return ['READY', 'ACTIVE', 'PAUSED'].includes(bot.status)
 
 async function refresh() {
   try {
-    const [health, bots, goals, admins] = await Promise.all([api('/health'), api('/api/v1/bots'), api('/api/v1/goals'), api('/api/v1/admins')]);
-    Object.assign(state, { health, bots, goals, admins }); render();
+    const [health, bots, goals, admins, ai] = await Promise.all([api('/health'), api('/api/v1/bots'), api('/api/v1/goals'), api('/api/v1/admins'), api('/api/v1/ai/status')]);
+    Object.assign(state, { health, bots, goals, admins, ai }); render();
     $('#connectionDot').style.background = '#77e39e'; $('#connectionText').textContent = 'Connected'; $('#lastUpdate').textContent = new Date().toLocaleTimeString();
   } catch (error) { $('#connectionDot').style.background = '#ff7474'; $('#connectionText').textContent = 'Disconnected'; $('#lastUpdate').textContent = error.message; }
 }
 function render() {
   $('#statOnline').textContent = state.bots.filter(online).length; $('#statBots').textContent = state.bots.length;
   $('#statGoals').textContent = state.goals.filter(goal => goal.status === 'ACTIVE').length; $('#statHealth').textContent = state.health?.status ?? '—';
+  $('#statAi').textContent = state.ai?.llm?.enabled ? state.ai.llm.provider : 'RULES'; $('#statAiModel').textContent = state.ai?.llm?.model ?? 'Deterministic fallback';
   $('#overviewBots').innerHTML = state.bots.length ? state.bots.map(botRow).join('') : empty('No bots registered');
   $('#goalList').innerHTML = state.goals.length ? state.goals.slice(-6).reverse().map(goal => `<div class="goal-row"><div><b>${escapeHtml(goal.description)}</b><small>${goal.progress}% · ${new Date(goal.updatedAt).toLocaleTimeString()}</small></div><span class="badge">${goal.status}</span></div>`).join('') : empty('No goals yet');
   $('#botManager').innerHTML = state.bots.length ? state.bots.map(botCard).join('') : empty('Add your first bot using the form');
@@ -63,6 +64,7 @@ async function removeAdmin(username) { try { await api(`/api/v1/admins/${encodeU
 $('#botForm').onsubmit = async event => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.target)); data.port = Number(data.port); data.autoConnect = data.autoConnect === 'on'; if (!data.version) delete data.version; try { const bot = await api('/api/v1/bots', { method: 'POST', body: JSON.stringify(data) }); toast(`Bot ${bot.name} added`); event.target.reset(); await refresh(); } catch (error) { toast(error.message, true); } };
 $('#adminForm').onsubmit = async event => { event.preventDefault(); const username = new FormData(event.target).get('username'); try { await api('/api/v1/admins', { method: 'POST', body: JSON.stringify({ username }) }); event.target.reset(); toast('Admin added'); await refresh(); } catch (error) { toast(error.message, true); } };
 $('#commandForm').onsubmit = async event => { event.preventDefault(); await executeCommand($('#commandBot').value, $('#commandInput').value); };
+$('#aiForm').onsubmit = async event => { event.preventDefault(); const text = $('#aiInput').value.trim(); if (!text) return; log(`> AI ${$('#commandBot').value}: ${text}`); try { const result = await api('/api/v1/ai/command', { method: 'POST', body: JSON.stringify({ text, selector: selectorForApi($('#commandBot').value) }) }); log(JSON.stringify(result, null, 2)); await refresh(); } catch (error) { log(`AI ERROR: ${error.message}`, true); } };
 $$('.quick-commands button').forEach(button => button.onclick = () => { $('#commandInput').value = button.dataset.command; $('#commandInput').focus(); });
 async function executeCommand(target, text) {
   const [command, ...args] = text.trim().split(/\s+/); let action = command; let input = {};
@@ -70,6 +72,9 @@ async function executeCommand(target, text) {
   else if (command === 'goto') { action = 'navigate'; input = { x: Number(args[0]), y: Number(args[1]), z: Number(args[2]) }; }
   else if (command === 'collect') input = { block: args[0], count: Number(args[1] ?? 1) };
   else if (command === 'follow') input = { username: args[0] };
+  else if (command === 'sethome') { action = 'sethome'; input = { name: args[0] ?? 'home' }; }
+  else if (command === 'home') input = { name: args[0] ?? 'home' };
+  else if (command === 'craft') input = { item: args[0], count: Number(args[1] ?? 1) };
   else if (command === 'chat') input = { message: args.join(' ') };
   else if (command !== 'stop' && command !== 'observe') return log(`Unknown command: ${command}`, true);
   const targets = target === 'scope:global' ? state.bots : target.startsWith('class:') ? state.bots.filter(bot => bot.metadata?.className === target.slice(6)) : state.bots.filter(bot => bot.id === target.slice(4));
@@ -77,6 +82,7 @@ async function executeCommand(target, text) {
   log(`> ${target}: ${text}`); const results = await Promise.allSettled(targets.map(bot => api(`/api/v1/bots/${bot.id}/actions/${action}`, { method: 'POST', body: JSON.stringify(input) })));
   results.forEach((result, index) => log(`${targets[index].name}: ${result.status === 'fulfilled' ? JSON.stringify(result.value) : `ERROR ${result.reason.message}`}`, result.status === 'rejected')); await refresh();
 }
+function selectorForApi(target) { return target === 'scope:global' ? 'global' : target.startsWith('class:') ? target : `bot:${state.bots.find(bot => bot.id === target.slice(4))?.metadata?.commandAlias ?? target.slice(4)}`; }
 function log(message, error = false) { const output = $('#commandLog'); output.textContent += `\n[${new Date().toLocaleTimeString()}] ${message}`; output.scrollTop = output.scrollHeight; if (error) toast(message, true); }
 $('#clearLog').onclick = () => { $('#commandLog').textContent = 'Log cleared.'; }; $('#refreshBots').onclick = refresh;
 $('#saveToken').onclick = () => { state.token = $('#apiToken').value.trim(); localStorage.setItem('minehive.token', state.token); toast('API token saved in this browser'); refresh(); };

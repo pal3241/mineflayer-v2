@@ -49,6 +49,7 @@ test('API exposes health and versioned bot DTOs', async () => {
     assert.equal(adminCreated.status, 201); assert.ok((await adminCreated.json()).data.some(admin => admin.username === 'DashboardAdmin'));
     const adminDeleted = await fetch(`http://127.0.0.1:${port}/api/v1/admins/DashboardAdmin`, { method: 'DELETE' });
     assert.equal(adminDeleted.status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/ai/status`)).status, 200);
   } finally { await app.stop(); }
 });
 

@@ -1,6 +1,6 @@
 # MineHive
 
-MineHive adalah framework Mineflayer modular dan event-driven. Implementasi saat ini merupakan baseline operasional tervalidasi **0.3.3** dari spesifikasi 24 volume, bukan klaim bahwa AI, ML, koloni, atau milestone produksi sudah selesai.
+MineHive adalah framework Mineflayer modular dan event-driven. Versi operasional **0.4.0** menyediakan dashboard multi-bot, live camera berbasis canvas, command alias/class/global, crafting, home, follow, smart movement, dan koordinator LLM terbatas.
 
 Panduan instalasi dan penggunaan lengkap tersedia di [`PANDUAN_PENGGUNAAN.md`](PANDUAN_PENGGUNAAN.md).
 
@@ -16,6 +16,8 @@ Panduan instalasi dan penggunaan lengkap tersedia di [`PANDUAN_PENGGUNAAN.md`](P
 - Capability registry dan JSON repository
 - Fondasi HTTP API versioned dan CLI
 - Dashboard web untuk join, fleet monitoring, live camera, command, dan admin
+- Follow dinamis, named home, smart movement, recursive crafting, dan transfer item antar-bot
+- Koordinator OpenRouter atau LLM lokal kompatibel OpenAI dengan fallback deterministik
 - Structured goals, deterministic planning, task dependency graph, dan capability-aware scheduling
 - Bounded retry, timeout, cancellation, verification, checkpoint, dan failure propagation
 - Test tanpa kebutuhan server Minecraft
@@ -45,6 +47,9 @@ Isi `MINEHIVE_ADMINS` dengan username yang diizinkan. Setelah bot spawn, kirim m
 !bot1 come
 !bot1 collect oak_log 16
 !miner collect stone 8
+!bot1 sethome base
+!bot1 home base
+!miner ai collect stone 32
 !global status
 ```
 
@@ -78,6 +83,11 @@ Nama block memakai registry Minecraft, misalnya `oak_log`, `stone`, atau `iron_o
 - `POST /api/v1/bots/:id/actions/navigate`
 - `POST /api/v1/bots/:id/actions/follow`
 - `POST /api/v1/bots/:id/actions/collect`
+- `POST /api/v1/bots/:id/actions/craft`
+- `POST /api/v1/bots/:id/actions/sethome`
+- `POST /api/v1/bots/:id/actions/home`
+- `GET /api/v1/ai/status`
+- `POST /api/v1/ai/command`
 - `POST /api/v1/bots/:id/actions/chat`
 - `POST /api/v1/bots/:id/actions/observe`
 - `GET /api/v1/modules`
@@ -99,7 +109,7 @@ Core tidak mengimpor Mineflayer. Hanya `src/plugins/minecraft/mineflayer-adapter
 | 0.1.0 | Foundation dan core | Implemented |
 | 0.2.0 | Runtime bot dan behavior engine | Implemented |
 | 0.3.0 | Goal, task, recovery, advanced orchestration | Implemented |
-| 0.4.0 | Safe AI dan provider-agnostic LLM | Planned |
-| 0.5.0+ | Memory, ML, HiveMind, dashboard, database, production, autonomy | Planned |
+| 0.4.0 | Safe AI, provider-agnostic LLM, crafting, movement, dan fleet coordination | Implemented |
+| 0.5.0+ | Memory jangka panjang, ML, HiveMind lanjutan, database, production, autonomy | Planned |
 
 Dokumen di `instruksi/` tetap menjadi sumber persyaratan utama.

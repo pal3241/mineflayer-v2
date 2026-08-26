@@ -1,6 +1,6 @@
 # Panduan Penggunaan MineHive
 
-Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.3.3. MineHive membutuhkan Node.js 20 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
+Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.4.0. MineHive membutuhkan Node.js 20 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
 
 ## 1. Persiapan
 
@@ -80,6 +80,28 @@ MINEHIVE_ADMINS=PlayerSatu,PlayerDua,PlayerTiga
 
 Jika `MINEHIVE_ADMINS` kosong, semua command dari chat Minecraft akan ditolak.
 
+### Memilih koordinator LLM
+
+MineHive tetap dapat menjalankan command sederhana tanpa LLM melalui parser deterministik. Untuk menggunakan OpenRouter, tambahkan konfigurasi berikut. Jangan membagikan atau commit API key.
+
+```env
+MINEHIVE_LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=isi-api-key-anda
+MINEHIVE_LLM_MODEL=openrouter/auto
+```
+
+Untuk server LLM lokal yang menyediakan API kompatibel OpenAI `/v1/chat/completions`, gunakan:
+
+```env
+MINEHIVE_LLM_PROVIDER=local
+MINEHIVE_LOCAL_LLM_ENDPOINT=http://127.0.0.1:11434/v1
+MINEHIVE_LOCAL_LLM_MODEL=nama-model-lokal
+MINEHIVE_LOCAL_LLM_API_KEY=
+MINEHIVE_LOCAL_LLM_STRUCTURED=false
+```
+
+Mode `auto` memilih OpenRouter jika `OPENROUTER_API_KEY` tersedia, memilih lokal jika endpoint dan model lokal diisi, lalu menggunakan parser deterministik bila keduanya belum dikonfigurasi. Dashboard menampilkan provider dan model yang benar-benar aktif.
+
 ## 3. Menjalankan sistem
 
 Jalankan:
@@ -114,7 +136,7 @@ Dashboard menyediakan:
 - **Overview** untuk health, jumlah bot online, goal aktif, dan status fleet.
 - **Bots & Join** untuk menambah bot, join/disconnect server, membuka kamera, atau menghapus profil.
 - **Live Cameras** untuk melihat kamera first-person setiap bot yang kameranya diaktifkan.
-- **Command Center** untuk menjalankan `goto`, `collect`, `follow`, `chat`, `status`, `inventory`, dan `stop`.
+- **Command Center** untuk menjalankan `goto`, `collect`, `follow`, `sethome`, `home`, `craft`, command AI, `chat`, `status`, `inventory`, dan `stop`.
 - **Admins** untuk menambah atau menghapus administrator command chat.
 
 Profil bot dan admin yang ditambahkan melalui dashboard disimpan dalam folder `data/` dan dimuat kembali saat restart.
@@ -127,6 +149,8 @@ Profil bot dan admin yang ditambahkan melalui dashboard disimpan dalam folder `d
 4. Dashboard berpindah ke menu **Live Cameras**.
 
 Setiap bot memakai port kamera berbeda mulai dari `MINEHIVE_VIEWER_BASE_PORT`, default `3100`. Viewer kamera tidak memakai bearer-token API. Jangan membuka port kamera ke internet; batasi ke localhost atau LAN tepercaya menggunakan firewall/reverse proxy.
+
+Live camera melakukan preflight native `canvas` sebelum viewer dibuka. Jika binding canvas gagal dimuat, dashboard menampilkan error kamera dan viewer tidak dijalankan setengah aktif.
 
 ## 5. Command dari chat Minecraft
 
@@ -164,6 +188,12 @@ Bot akan menampilkan status, health, food, dan posisi.
 
 Pemain harus terlihat oleh bot.
 
+Untuk terus mengikuti pemain yang bergerak:
+
+```text
+!bot1 ai follow PlayerSatu
+```
+
 ### Bergerak ke koordinat
 
 ```text
@@ -189,6 +219,35 @@ sand
 ```
 
 MineHive mencari block dalam radius yang diizinkan, memilih alat, mendatangi block, menambangnya, lalu mengambil hasilnya.
+
+### Menyimpan dan kembali ke home
+
+```text
+!bot1 sethome base
+!bot1 home base
+```
+
+Home disimpan selama runtime bot aktif. Bot memakai Pathfinder untuk kembali ke koordinat tersebut dan menolak home yang berada di dimension berbeda.
+
+### Crafting
+
+```text
+!bot1 craft wooden_pickaxe 1
+```
+
+Crafting menyelesaikan bahan turunan secara rekursif. Jika resep membutuhkan crafting table, bot membuatnya bila bahan cukup lalu menempatkannya pada ruang aman di samping bot.
+
+### Koordinator AI untuk individu atau kelompok
+
+```text
+!bot1 ai collect stone 16
+!miner ai collect stone 64
+!global ai craft wooden_pickaxe 3
+```
+
+Selector tetap menggunakan alias bot, class, atau global. Untuk pekerjaan batu dan ore, koordinator memeriksa inventory terlebih dahulu. Jika target belum memiliki pickaxe, koordinator mencari bot idle pada server dan dimension yang sama untuk menyerahkan pickaxe. Jika tidak ada donor, target mencoba crafting pickaxe dan mengumpulkan kayu lebih dulu bila diperlukan. Jumlah pekerjaan class/global dibagi tepat di antara bot yang tersedia.
+
+Output LLM hanya boleh menghasilkan intent terstruktur yang telah diizinkan. LLM tidak memperoleh akses shell, JavaScript, API internal bebas, atau API key dari prompt. Output yang rusak atau tidak valid otomatis jatuh kembali ke parser deterministik.
 
 ### Melihat inventory
 
@@ -306,6 +365,19 @@ Invoke-RestMethod `
   -ContentType application/json `
   -Body '{"message":"MineHive aktif"}'
 ```
+
+### Menjalankan koordinator AI melalui API
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:3000/api/v1/ai/command `
+  -Headers $headers `
+  -ContentType application/json `
+  -Body '{"selector":"class:miner","text":"collect stone 32"}'
+```
+
+Gunakan `bot:alias`, `class:nama`, `global`, atau `auto` sebagai selector. Status provider dapat diperiksa melalui `GET /api/v1/ai/status`.
 
 ### Menghentikan bot
 
@@ -443,5 +515,6 @@ npm test
 ## 11. Batasan versi ini
 
 - Pengujian otomatis menggunakan fake Minecraft client; koneksi nyata tergantung server, jaringan, akun, dan versi protokol.
-- Dashboard grafis, AI/LLM, memory jangka panjang, ML, dan colony automation masih merupakan milestone berikutnya.
+- Koordinator saat ini mendukung intent aman `collect`, `craft`, `follow`, `move`, `set_home`, `home`, dan `status`; perencanaan koloni umum serta memory LLM jangka panjang belum tersedia.
+- Pertukaran item membutuhkan kedua bot berada pada server dan dimension yang sama serta cukup dekat untuk saling mendatangi.
 - Checkpoint task tersedia saat proses berjalan, tetapi recovery penuh setelah restart belum menjadi persistence production.

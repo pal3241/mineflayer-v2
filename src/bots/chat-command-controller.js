@@ -1,8 +1,8 @@
-const HELP = 'commands: status, come, goto <x> <y> <z>, collect <block> [count], inventory, stop';
+const HELP = 'commands: status, come, goto <x> <y> <z>, collect <block> [count], sethome [name], home [name], craft <item> [count], ai <request>, inventory, stop';
 
 export class ChatCommandController {
-  constructor({ goalService, executor, capabilities, config, logger }) {
-    this.goals = goalService; this.executor = executor; this.capabilities = capabilities; this.config = config; this.logger = logger;
+  constructor({ goalService, executor, capabilities, coordinator, config, logger }) {
+    this.goals = goalService; this.executor = executor; this.capabilities = capabilities; this.coordinator = coordinator; this.config = config; this.logger = logger;
   }
   attach(runtime) {
     if (!this.config.enabled) return () => {};
@@ -22,8 +22,17 @@ export class ChatCommandController {
     }
     try {
       if (command === 'help') return this.#reply(runtime, `use !${alias} <command>, !${className || 'class'} <command>, or !global <command>. ${HELP}`);
+      if (command === 'ai') {
+        const targetSelector = selector === 'global' ? 'global' : selector === className ? `class:${className}` : `bot:${alias}`;
+        if (!this.coordinator.shouldHandle(runtime.bot.id, targetSelector)) return;
+        const result = await this.coordinator.coordinateOnce(`${username}:${message}`, { text: args.join(' '), selector: targetSelector, actor: username });
+        return this.#reply(runtime, `AI completed ${result.results.filter(item => item.status === 'COMPLETED').length}/${result.results.length}`);
+      }
       if (command === 'status') { const state = runtime.snapshot(); return this.#reply(runtime, `${state.status}, hp=${state.runtime.health}, food=${state.runtime.food}, pos=${formatPosition(state.runtime.position)}`); }
       if (command === 'inventory') { const items = runtime.adapter.snapshot().inventorySummary; return this.#reply(runtime, items.length ? items.map(item => `${item.name}:${item.count}`).join(', ').slice(0, 200) : 'inventory empty'); }
+      if (command === 'sethome') { const result = await runtime.adapter.setHome({ name: args[0] ?? 'home' }); return this.#reply(runtime, `home ${result.name} saved`); }
+      if (command === 'home') { await runtime.adapter.goHome({ name: args[0] ?? 'home' }); return this.#reply(runtime, 'going home'); }
+      if (command === 'craft') { const result = await runtime.adapter.craftItem({ item: args[0], count: Number(args[1] ?? 1) }); return this.#reply(runtime, `crafted ${result.item}`); }
       if (command === 'stop') { await runtime.adapter.stopActions(); for (const task of this.goals.allTasks().filter(task => task.assignedBot === runtime.bot.id && task.status === 'RUNNING')) this.executor.cancel(task.id, `Stopped by ${username}`); return this.#reply(runtime, 'actions stopped'); }
       let step;
       if (command === 'come') step = { type: 'follow-player', input: { username }, requiredCapabilities: ['minecraft.follow-player'], timeout: 120_000 };
