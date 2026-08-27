@@ -6,7 +6,7 @@ export class OpenAICompatibleProvider {
   constructor({ endpoint, apiKey, apiKeys = [], model, structuredOutput = true, headers = {}, timeoutMs = 30_000, rotateOn = [401, 402, 429] }) { this.endpoint = endpoint.replace(/\/$/, ''); this.keys = [...new Set([...apiKeys, apiKey].filter(Boolean))].map(key => ({ key, cooldownUntil: 0 })); this.model = model; this.structuredOutput = structuredOutput; this.headers = headers; this.timeoutMs = timeoutMs; this.rotateOn = new Set(rotateOn); this.keyIndex = 0; }
   async complete(messages, schema) {
     const request = (structured, apiKey) => fetch(`${this.endpoint}/chat/completions`, { method: 'POST', signal: AbortSignal.timeout(this.timeoutMs), headers: { 'content-type': 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}), ...this.headers },
-      body: JSON.stringify({ model: this.model, messages, temperature: 0, ...(structured ? { response_format: { type: 'json_schema', json_schema: { name: 'minehive_command', strict: true, schema } } } : {}) }) });
+      body: JSON.stringify({ model: this.model, messages, temperature: 0, max_tokens: 10, ...(structured ? { response_format: { type: 'json_schema', json_schema: { name: 'minehive_command', strict: true, schema } } } : {}) }) });
     const attempts = Math.max(1, this.keys.length); let lastError;
     for (let attempt = 0; attempt < attempts; attempt++) {
       const entry = this.#nextKey(); if (this.keys.length && !entry) throw new Error('All LLM API keys are cooling down after rate limits');

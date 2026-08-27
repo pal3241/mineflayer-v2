@@ -1,0 +1,22 @@
+services:
+  minehive:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - config/minehive.env
+    environment:
+      MINEHIVE_PROFILE: production
+      MINEHIVE_DATABASE_DRIVER: sqlite
+      MINEHIVE_DATABASE_FILE: /app/data/minehive.sqlite
+      MINEHIVE_DATA_PATH: /app/data
+      MINEHIVE_API_HOST: 0.0.0.0
+    ports:
+      - "3000:3000"
+      - "3100-3110:3100-3110"
+    volumes:
+      - minehive-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  minehive-data:

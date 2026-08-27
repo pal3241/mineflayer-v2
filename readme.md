@@ -1,6 +1,6 @@
 # MineHive
 
-MineHive adalah framework Mineflayer modular dan event-driven. Versi operasional **0.5.0** menyediakan dashboard multi-bot, live camera berbasis canvas, natural-language coordinator, shared world memory, farming, forestry, combat states, crafting, home, follow, dan smart movement.
+MineHive adalah framework Mineflayer modular dan event-driven. Versi operasional **0.6.0** menyediakan semantic memory, ML outcome scoring, HiveMind consensus, SQLite production persistence, autonomy terbatas, dashboard multi-bot, live camera berbasis canvas, dan natural-language coordinator.
 
 Panduan instalasi dan penggunaan lengkap tersedia di [`PANDUAN_PENGGUNAAN.md`](PANDUAN_PENGGUNAAN.md).
 
@@ -23,6 +23,12 @@ Panduan instalasi dan penggunaan lengkap tersedia di [`PANDUAN_PENGGUNAAN.md`](P
 - Recipe resolver semua alternatif kayu/stone ingredient dengan inventory-aware ranking
 - Shared place memory terisolasi per server dan dimension
 - Farming, full-tree deforestation/replanting, reforestation, guard/full-combat/meat states
+- Semantic retrieval dengan provenance, confidence, dedupe, ranking, dan embedding provider abstraction
+- ML success prediction yang belajar dari outcome tanpa mengeksekusi action langsung
+- HiveMind membership, idempotent messaging, versioned state, expiring locks, dan weighted consensus
+- SQLite production storage dengan migration, WAL, integrity health, serta backup
+- Autonomy allowlist dengan objective, consensus gate, cooldown, health pause, dan hourly budget
+- Docker Compose dan unit systemd untuk deployment produksi
 - Structured goals, deterministic planning, task dependency graph, dan capability-aware scheduling
 - Bounded retry, timeout, cancellation, verification, checkpoint, dan failure propagation
 - Test tanpa kebutuhan server Minecraft
@@ -115,6 +121,17 @@ Nama block memakai registry Minecraft, misalnya `oak_log`, `stone`, atau `iron_o
 - `GET|POST /api/v1/memory`
 - `DELETE /api/v1/memory/:id`
 - `POST /api/v1/bots/:id/memory`
+- `GET|POST /api/v1/memory/semantic`
+- `GET /api/v1/ml/status`
+- `GET /api/v1/ml/models`
+- `GET /api/v1/hivemind/status`
+- `GET|POST /api/v1/hivemind/state`
+- `POST /api/v1/hivemind/proposals`
+- `GET /api/v1/autonomy/status`
+- `GET|POST /api/v1/autonomy/objectives`
+- `POST /api/v1/autonomy/tick`
+- `GET /api/v1/database/status`
+- `POST /api/v1/database/backup`
 - `POST /api/v1/bots/:id/actions/chat`
 - `POST /api/v1/bots/:id/actions/observe`
 - `GET /api/v1/modules`
@@ -138,6 +155,6 @@ Core tidak mengimpor Mineflayer. Hanya `src/plugins/minecraft/mineflayer-adapter
 | 0.3.0 | Goal, task, recovery, advanced orchestration | Implemented |
 | 0.4.0-0.4.1 | Safe AI, LLM key pool, crafting, movement, dan nearest-bot coordination | Implemented |
 | 0.5.0 | Shared world memory, natural chat, farming, forestry, dan combat states | Implemented |
-| 0.6.0+ | Semantic memory, ML, HiveMind lanjutan, database, production, autonomy | Planned |
+| 0.6.0 | Semantic memory, adaptive ML, HiveMind lanjutan, SQLite production, dan safe autonomy | Implemented |
 
 Dokumen di `instruksi/` tetap menjadi sumber persyaratan utama.

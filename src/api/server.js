@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { MineHiveError, ValidationError } from '../core/errors.js';
 import { readFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 
 const DASHBOARD_FILES = Object.freeze({
   '/': [new URL('../dashboard/index.html', import.meta.url), 'text/html; charset=utf-8'],
@@ -18,7 +19,7 @@ async function body(request) {
 }
 
 export class ApiServer {
-  constructor({ application, host, port, logger }) { this.application = application; this.host = host; this.port = port; this.logger = logger; }
+  constructor({ application, host, port, logger, rateLimitPerMinute }) { this.application = application; this.host = host; this.port = port; this.logger = logger; this.rateLimitPerMinute = rateLimitPerMinute; this.clients = new Map(); }
   async start() {
     if (this.server) return this.address();
     this.server = createServer(async (req, res) => {
@@ -26,6 +27,7 @@ export class ApiServer {
       const send = (status, value) => { res.writeHead(status, { 'content-type': 'application/json', 'x-request-id': requestId }); res.end(JSON.stringify(value)); };
       const sendFile = async ([file, contentType]) => { res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-cache' }); res.end(await readFile(file)); };
       try {
+        if (!consumeRequest(this.clients, req.socket.remoteAddress ?? 'unknown', this.rateLimitPerMinute)) return send(429, { error: { code: 'RATE_LIMITED', message: 'API request limit exceeded; retry after one minute', requestId } });
         const url = new URL(req.url, 'http://localhost'); const parts = url.pathname.split('/').filter(Boolean);
         if (req.method === 'GET' && DASHBOARD_FILES[url.pathname]) return await sendFile(DASHBOARD_FILES[url.pathname]);
         if (req.method === 'GET' && url.pathname === '/health') return send(200, await this.application.health.check());
@@ -43,6 +45,24 @@ export class ApiServer {
         if (req.method === 'GET' && url.pathname === '/api/v1/ai/status') return send(200, { data: this.application.coordinator.status() });
         if (req.method === 'GET' && url.pathname === '/api/v1/ai/fleet') return send(200, { data: this.application.coordinator.fleetView() });
         if (req.method === 'POST' && url.pathname === '/api/v1/ai/command') { const input = await body(req); return send(200, { data: await this.application.coordinator.coordinate({ text: input.text, selector: input.selector, actor: 'api' }) }); }
+        if (req.method === 'GET' && url.pathname === '/api/v1/memory/semantic') return send(200, { data: await this.application.semanticMemory.search({ text: url.searchParams.get('q') ?? '', worldKey: url.searchParams.get('worldKey') ?? undefined, dimension: url.searchParams.get('dimension') ?? undefined, type: url.searchParams.get('type') ?? undefined, limit: url.searchParams.get('limit') ?? 10 }) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/memory/semantic') return send(201, { data: await this.application.semanticMemory.remember(await body(req)) });
+        if (req.method === 'GET' && url.pathname === '/api/v1/ml/status') return send(200, { data: await this.application.ml.status() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/ml/models') return send(200, { data: await this.application.ml.models() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/hivemind/status') { this.application.hive.syncMembers(this.application.bots.list()); return send(200, { data: await this.application.hive.status() }); }
+        if (req.method === 'GET' && url.pathname === '/api/v1/hivemind/state') return send(200, { data: await this.application.hive.state() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/hivemind/decisions') return send(200, { data: await this.application.hive.decisions() });
+        if (req.method === 'POST' && url.pathname === '/api/v1/hivemind/messages') return send(201, { data: await this.application.hive.publish(await body(req)) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/hivemind/state') return send(201, { data: await this.application.hive.setState(await body(req)) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/hivemind/proposals') { this.application.hive.syncMembers(this.application.bots.list()); return send(201, { data: await this.application.hive.propose(await body(req)) }); }
+        if (req.method === 'GET' && url.pathname === '/api/v1/autonomy/status') return send(200, { data: this.application.autonomy.status() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/autonomy/objectives') return send(200, { data: await this.application.autonomy.objectives() });
+        if (req.method === 'POST' && url.pathname === '/api/v1/autonomy/objectives') return send(201, { data: await this.application.autonomy.createObjective(await body(req)) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/autonomy/tick') return send(200, { data: await this.application.autonomy.tick() });
+        if (req.method === 'POST' && url.pathname === '/api/v1/autonomy/enabled') return send(200, { data: this.application.autonomy.setEnabled(Boolean((await body(req)).enabled)) });
+        if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'autonomy' && parts[3] === 'objectives' && parts[4]) return send(200, { data: { removed: await this.application.autonomy.removeObjective(parts[4]) } });
+        if (req.method === 'GET' && url.pathname === '/api/v1/database/status') return send(200, { data: this.application.database?.health() ?? { status: 'HEALTHY', driver: this.application.config.profile === 'test' ? 'memory' : 'json' } });
+        if (req.method === 'POST' && url.pathname === '/api/v1/database/backup') { if (!this.application.database) throw new ValidationError('Database backup requires the sqlite driver'); const input = await body(req); const name = String(input.name ?? `minehive-${Date.now()}.sqlite`); if (!/^[A-Za-z0-9_.-]{1,100}\.sqlite$/.test(name)) throw new ValidationError('Backup name must be a safe .sqlite filename'); return send(201, { data: await this.application.database.backup(join(resolve(this.application.config.dataPath), 'backups', name)) }); }
         if (req.method === 'GET' && url.pathname === '/api/v1/memory') return send(200, { data: await this.application.worldMemory.search({ host: url.searchParams.get('host') || undefined, port: url.searchParams.get('port') || undefined, dimension: url.searchParams.get('dimension') || undefined, name: url.searchParams.get('name') || undefined, type: url.searchParams.get('type') || undefined }) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory') return send(201, { data: await this.application.worldMemory.remember(await body(req)) });
         if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3]) return send(200, { data: { removed: await this.application.worldMemory.forget(parts[3]) } });
@@ -87,3 +107,5 @@ export class ApiServer {
   address() { return this.server?.address(); }
   async stop() { if (!this.server) return; await new Promise((resolve, reject) => this.server.close(error => error ? reject(error) : resolve())); this.server = null; }
 }
+
+function consumeRequest(clients, address, limit) { const now = Date.now(); const current = clients.get(address); if (!current || current.resetAt <= now) { clients.set(address, { count: 1, resetAt: now + 60_000 }); return true; } current.count++; if (clients.size > 10_000) for (const [key, value] of clients) if (value.resetAt <= now) clients.delete(key); return current.count <= limit; }

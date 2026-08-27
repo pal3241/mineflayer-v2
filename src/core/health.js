@@ -4,7 +4,7 @@ export class HealthManager {
   async check() {
     const checks = {};
     for (const [name, item] of this.#checks) {
-      try { checks[name] = { status: (await item.check())?.status ?? 'HEALTHY', critical: item.critical }; }
+      try { const result = await item.check(); checks[name] = { ...result, status: result?.status ?? 'HEALTHY', critical: item.critical }; }
       catch (error) { checks[name] = { status: 'FAILED', critical: item.critical, error: error.message }; }
     }
     const values = Object.values(checks);

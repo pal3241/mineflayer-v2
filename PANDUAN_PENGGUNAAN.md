@@ -1,12 +1,12 @@
 # Panduan Penggunaan MineHive
 
-Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.5.0. MineHive membutuhkan Node.js 20 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
+Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.6.0. MineHive membutuhkan Node.js 22 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
 
 ## 1. Persiapan
 
 Pastikan perangkat memiliki:
 
-- Node.js 20 atau lebih baru
+- Node.js 22 atau lebih baru
 - npm
 - Alamat dan port server Minecraft
 - Username bot atau akun Microsoft yang akan digunakan
@@ -587,11 +587,27 @@ npm test
 - Batasi `MINEHIVE_ADMINS` hanya kepada pemain tepercaya.
 - Command chat tidak dapat menjalankan shell, JavaScript, atau fungsi internal bebas.
 
-## 11. Batasan versi ini
+## 11. Intelligence dan production
+
+Profil production wajib memakai API token dan secara default memakai SQLite:
+
+```env
+MINEHIVE_PROFILE=production
+MINEHIVE_API_TOKEN=token-panjang-dan-acak
+MINEHIVE_DATABASE_DRIVER=sqlite
+MINEHIVE_DATABASE_FILE=./data/minehive.sqlite
+MINEHIVE_AUTONOMY_ENABLED=false
+```
+
+Autonomy sengaja nonaktif secara default. Tambahkan objective aman melalui `POST /api/v1/autonomy/objectives`, aktifkan melalui `POST /api/v1/autonomy/enabled`, lalu monitor `/health`, `/api/v1/hivemind/status`, `/api/v1/ml/status`, dan `/api/v1/autonomy/status`. Aksi autonomy dibatasi pada `collect`, `farm`, `reforest`, `deforest`, `guard`, dan `status` serta tetap melewati consensus dan safety coordinator.
+
+Backup SQLite dapat dibuat dengan `node src/cli.js backup nama-backup.sqlite` atau `POST /api/v1/database/backup`. Untuk Docker gunakan `docker compose up -d --build`; data disimpan dalam volume `minehive-data`.
+
+## 12. Batasan versi ini
 
 - Pengujian otomatis menggunakan fake Minecraft client; koneksi nyata tergantung server, jaringan, akun, dan versi protokol.
 - Koordinator mendukung intent aman `collect`, `craft`, `follow`, `come`, `move`, `set_home`, `home`, `farm`, `deforest`, `reforest`, `combat`, `remember`, `place`, `status`, dan `converse`.
-- Shared memory versi ini berfokus pada lokasi dunia terstruktur; semantic vector memory dan consolidation LLM penuh belum tersedia.
+- Semantic memory memakai embedding hash lokal deterministik. Model embedding neural eksternal dan consolidation LLM terjadwal belum tersedia.
 - Farming mendukung wheat, carrots, potatoes, dan beetroot. Combat memakai mob allowlist dan hanya bekerja pada entity yang sedang termuat oleh client.
 - Pertukaran item membutuhkan kedua bot berada pada server dan dimension yang sama serta cukup dekat untuk saling mendatangi.
-- Checkpoint task tersedia saat proses berjalan, tetapi recovery penuh setelah restart belum menjadi persistence production.
+- Goal/task runtime belum direkonstruksi otomatis setelah process restart; SQLite saat ini mempersist memory, ML, HiveMind, autonomy, admin, dan profil bot.

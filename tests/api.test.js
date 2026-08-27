@@ -4,8 +4,8 @@ import { createApplication } from '../src/index.js';
 
 test('API exposes health and versioned bot DTOs', async () => {
   const app = createApplication({ config: {
-    profile: 'test', log: { level: 'silent' }, dataPath: './data',
-    api: { host: '127.0.0.1', port: 0 },
+    profile: 'test', log: { level: 'silent' }, dataPath: './data', database: { driver: 'json', file: './data/test.sqlite' }, semanticMemory: { maxRecords: 1000, dimensions: 64 }, ml: { minimumSamples: 2 }, hive: { heartbeatTimeoutMs: 30000 }, autonomy: { enabled: false, intervalMs: 60000, maxActionsPerHour: 10 },
+    api: { host: '127.0.0.1', port: 0, rateLimitPerMinute: 120 },
     bot: { host: 'localhost', port: 25565, username: 'test', auth: 'offline', autoConnect: false }
   }});
   try {
@@ -53,13 +53,18 @@ test('API exposes health and versioned bot DTOs', async () => {
     const fleet = await fetch(`http://127.0.0.1:${port}/api/v1/ai/fleet`); assert.equal(fleet.status, 200); assert.equal((await fleet.json()).data[0].id, 'api-bot');
     const remembered = await fetch(`http://127.0.0.1:${port}/api/v1/memory`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"host":"localhost","port":25565,"dimension":"overworld","type":"village","name":"desa-test","position":{"x":10,"y":64,"z":20}}' }); assert.equal(remembered.status, 201);
     const memories = await fetch(`http://127.0.0.1:${port}/api/v1/memory?host=localhost&port=25565&dimension=overworld`); assert.equal((await memories.json()).data[0].name, 'desa-test');
+    const semantic = await fetch(`http://127.0.0.1:${port}/api/v1/memory/semantic`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"type":"SEMANTIC","content":"desa aman dekat sungai","visibility":"HIVE","worldKey":"localhost:25565","dimension":"overworld","source":"api-test"}' }); assert.equal(semantic.status, 201);
+    assert.equal((await (await fetch(`http://127.0.0.1:${port}/api/v1/memory/semantic?q=desa+sungai`)).json()).data[0].source, 'api-test');
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/ml/status`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/hivemind/status`)).status, 200);
+    const objective = await fetch(`http://127.0.0.1:${port}/api/v1/autonomy/objectives`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"text":"collect stone 1","selector":"bot:api"}' }); assert.equal(objective.status, 201); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/autonomy/status`)).status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/database/status`)).status, 200);
   } finally { await app.stop(); }
 });
 
 test('API bearer token protects control routes but not health', async () => {
   const app = createApplication({ config: {
-    profile: 'test', log: { level: 'silent' }, dataPath: './data', commands: { enabled: false, prefix: '!hive', admins: [] },
-    api: { host: '127.0.0.1', port: 0, token: 'secret' },
+    profile: 'test', log: { level: 'silent' }, dataPath: './data', database: { driver: 'json', file: './data/test.sqlite' }, semanticMemory: { maxRecords: 1000, dimensions: 64 }, ml: { minimumSamples: 2 }, hive: { heartbeatTimeoutMs: 30000 }, autonomy: { enabled: false, intervalMs: 60000, maxActionsPerHour: 10 }, commands: { enabled: false, prefix: '!hive', admins: [] },
+    api: { host: '127.0.0.1', port: 0, token: 'secret', rateLimitPerMinute: 120 },
     bot: { host: 'localhost', port: 25565, username: 'test', auth: 'offline', autoConnect: false }
   }});
   try {

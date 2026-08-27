@@ -17,5 +17,9 @@ venv/
 node_modules/
 data/*.json
 data/*.tmp
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
+data/backups/
 npm-debug.log*
 coverage/

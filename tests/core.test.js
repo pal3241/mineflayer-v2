@@ -45,3 +45,8 @@ test('configuration loads three OpenRouter keys and provider deduplicates fallba
   const config = loadConfig({ OPENROUTER_API_KEY_1: 'one', OPENROUTER_API_KEY_2: 'two', OPENROUTER_API_KEY_3: 'three', OPENROUTER_API_KEY: 'one' }); assert.deepEqual(config.llm.apiKeys, ['one', 'two', 'three', 'one']);
   const gateway = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent', OPENROUTER_API_KEY_1: 'one', OPENROUTER_API_KEY_2: 'two', OPENROUTER_API_KEY_3: 'three' } }).llm; assert.equal(gateway.status().keyCount, 3);
 });
+
+test('production configuration requires API authentication', () => {
+  assert.throws(() => loadConfig({ MINEHIVE_PROFILE: 'production' }), /MINEHIVE_API_TOKEN is required/);
+  assert.equal(loadConfig({ MINEHIVE_PROFILE: 'production', MINEHIVE_API_TOKEN: 'secure-token' }).database.driver, 'sqlite');
+});

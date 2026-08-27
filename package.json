@@ -1,6 +1,6 @@
 {
   "name": "minehive",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Modular, event-driven Mineflayer bot framework",
   "type": "module",
   "private": true,
@@ -15,9 +15,10 @@
     "health": "node src/cli.js health"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "canvas": "^3.2.3",
     "dotenv": "^17.4.2",
     "mineflayer": "^4.33.0",
