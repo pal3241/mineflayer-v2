@@ -68,13 +68,13 @@ $('#aiForm').onsubmit = async event => { event.preventDefault(); const text = $(
 $$('.quick-commands button').forEach(button => button.onclick = () => { $('#commandInput').value = button.dataset.command; $('#commandInput').focus(); });
 async function executeCommand(target, text) {
   const [command, ...args] = text.trim().split(/\s+/); let action = command; let input = {};
-  if (command === 'collect') { log(`> coordinator ${target}: ${text}`); try { const result = await api('/api/v1/ai/command', { method: 'POST', body: JSON.stringify({ text, selector: selectorForApi(target) }) }); log(JSON.stringify(result, null, 2)); await refresh(); } catch (error) { log(`COORDINATOR ERROR: ${error.message}`, true); } return; }
+  if (['collect', 'craft', 'farm', 'farming', 'deforest', 'reforest', 'guard', 'combat', 'meat', 'remember', 'place', 'tebang', 'reboisasi'].includes(command)) { log(`> coordinator ${target}: ${text}`); try { const result = await api('/api/v1/ai/command', { method: 'POST', body: JSON.stringify({ text, selector: selectorForApi(target) }) }); log(JSON.stringify(result, null, 2)); await refresh(); } catch (error) { log(`COORDINATOR ERROR: ${error.message}`, true); } return; }
   if (command === 'status' || command === 'inventory') action = 'observe';
   else if (command === 'goto') { action = 'navigate'; input = { x: Number(args[0]), y: Number(args[1]), z: Number(args[2]) }; }
   else if (command === 'follow') input = { username: args[0] };
+  else if (command === 'come') input = { username: args[0] };
   else if (command === 'sethome') { action = 'sethome'; input = { name: args[0] ?? 'home' }; }
   else if (command === 'home') input = { name: args[0] ?? 'home' };
-  else if (command === 'craft') input = { item: args[0], count: Number(args[1] ?? 1) };
   else if (command === 'chat') input = { message: args.join(' ') };
   else if (command !== 'stop' && command !== 'observe') return log(`Unknown command: ${command}`, true);
   const targets = target === 'scope:global' ? state.bots : target.startsWith('class:') ? state.bots.filter(bot => bot.metadata?.className === target.slice(6)) : state.bots.filter(bot => bot.id === target.slice(4));

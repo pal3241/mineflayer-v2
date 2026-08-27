@@ -80,9 +80,9 @@
             <button class="button primary" type="submit">Execute command</button>
           </form>
           <div class="quick-commands">
-            <button data-command="status">status</button><button data-command="goto 100 64 100">goto x y z</button><button data-command="collect oak_log 16">collect</button><button data-command="follow Player">follow</button><button data-command="sethome home">set home</button><button data-command="home home">home</button><button data-command="craft wooden_pickaxe 1">craft</button><button data-command="inventory">inventory</button><button data-command="stop">stop</button>
+            <button data-command="status">status</button><button data-command="goto 100 64 100">goto x y z</button><button data-command="collect oak_log 16">collect</button><button data-command="come Player">come</button><button data-command="follow Player">follow</button><button data-command="farm wheat 16">farm</button><button data-command="tebang pohon 1">deforest</button><button data-command="reboisasi 8">reforest</button><button data-command="guard 16">guard</button><button data-command="combat">combat</button><button data-command="meat">meat</button><button data-command="sethome home">set home</button><button data-command="home home">home</button><button data-command="craft wooden_sword 1">craft</button><button data-command="inventory">inventory</button><button data-command="stop">stop</button>
           </div>
-          <form id="aiForm" class="command-form ai-form"><label>AI coordinator request<input id="aiInput" placeholder="collect 32 stone; prepare or borrow a pickaxe"></label><button class="button secondary" type="submit">Ask coordinator</button></form>
+          <form id="aiForm" class="command-form ai-form"><label>Natural language / chat<input id="aiInput" placeholder="tebang pohon, jaga village, atau berapa 1+1"></label><button class="button secondary" type="submit">Kirim ke coordinator</button></form>
         </section>
         <section class="panel terminal-panel"><div class="panel-title"><div><p class="eyebrow">OUTPUT</p><h2>Command log</h2></div><button id="clearLog" class="icon-button">Clear</button></div><pre id="commandLog">MineHive command center ready.</pre></section>
       </div>

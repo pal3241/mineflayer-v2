@@ -1,6 +1,6 @@
 # Panduan Penggunaan MineHive
 
-Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.4.1. MineHive membutuhkan Node.js 20 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
+Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.5.0. MineHive membutuhkan Node.js 20 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
 
 ## 1. Persiapan
 
@@ -140,7 +140,7 @@ Dashboard menyediakan:
 - **Overview** untuk health, jumlah bot online, goal aktif, dan status fleet.
 - **Bots & Join** untuk menambah bot, join/disconnect server, membuka kamera, atau menghapus profil.
 - **Live Cameras** untuk melihat kamera first-person setiap bot yang kameranya diaktifkan.
-- **Command Center** untuk menjalankan `goto`, `collect`, `follow`, `sethome`, `home`, `craft`, command AI, `chat`, `status`, `inventory`, dan `stop`.
+- **Command Center** untuk menjalankan navigasi, collect, follow/come, farming, kehutanan, combat, memory, crafting, percakapan natural-language, inventory, dan stop.
 - **Admins** untuk menambah atau menghapus administrator command chat.
 
 Profil bot dan admin yang ditambahkan melalui dashboard disimpan dalam folder `data/` dan dimuat kembali saat restart.
@@ -190,13 +190,15 @@ Bot akan menampilkan status, health, food, dan posisi.
 !bot1 come
 ```
 
-Pemain harus terlihat oleh bot.
+`come` hanya mengambil posisi pemain saat command diterima, berjalan ke posisi tersebut, lalu selesai. Pemain harus terlihat oleh bot.
 
-Untuk terus mengikuti pemain yang bergerak:
+Untuk terus mengikuti pemain yang bergerak gunakan command `follow` yang terpisah:
 
 ```text
-!bot1 ai follow PlayerSatu
+!bot1 follow PlayerSatu
 ```
+
+Follow tetap aktif sampai `!bot1 stop` atau diganti aktivitas lain.
 
 ### Bergerak ke koordinat
 
@@ -240,6 +242,62 @@ Home disimpan selama runtime bot aktif. Bot memakai Pathfinder untuk kembali ke 
 ```
 
 Crafting menyelesaikan bahan turunan secara rekursif. Jika resep membutuhkan crafting table, bot membuatnya bila bahan cukup lalu menempatkannya pada ruang aman di samping bot.
+
+Resolver membaca seluruh alternatif resep untuk setiap item, lalu memberi peringkat berdasarkan inventory nyata dan rantai bahan yang dapat dibuat. Contohnya, jika bot memiliki `birch_log`, resep wooden sword berbasis birch dipilih sebelum cherry; jika stone pickaxe membutuhkan varian stone ingredient dan bot memiliki `cobbled_deepslate`, resep tersebut dipilih. Hanya `selectedRecipe.missing` dari plan terbaik yang dianggap benar-benar kurang.
+
+### Bahasa natural dan teman ngobrol
+
+Setelah selector, teks tidak harus berupa command baku:
+
+```text
+!bot1 tebang pohon
+!bot1 tolong bertani wheat 16
+!bot1 jaga desa-utara
+!bot1 berapa 1+1
+!bot1 halo, keadaanmu bagaimana?
+```
+
+OpenRouter menerjemahkan teks menjadi intent JSON yang dibatasi. Pertanyaan atau percakapan memakai intent `converse` dan dibalas melalui chat Minecraft. Jika LLM tidak aktif, parser lokal masih memahami command umum dan operasi aritmetika sederhana.
+
+### Shared world memory
+
+Memory lokasi dipisahkan berdasarkan `host:port` dan dimension, sehingga lokasi overworld server A tidak tercampur dengan Nether atau server B.
+
+```text
+!bot1 ingat desa-utara
+!bot2 tempat desa-utara
+!bot1 ingat stronghold
+!bot2 tempat stronghold
+```
+
+Bot kedua dapat memakai lokasi yang disimpan bot pertama selama berada di server dan dimension yang sama. Record menyimpan sumber bot, confidence, importance, timestamp, dan version, kemudian dipersistenkan ke `data/world-memory.json`.
+
+### Farming dan kehutanan
+
+```text
+!farmer farm wheat 16
+!lumber tebang pohon 4
+!lumber reboisasi 8
+```
+
+Farming memanen crop matang, menanam ulang lahan kosong, dan hanya menyiapkan hoe melalui sistem pinjam/crafting/resource gathering ketika tanah baru perlu dicangkul. Deforestasi menelusuri semua log yang terhubung dari pucuk hingga pangkal agar tidak meninggalkan batang melayang. Setelah ditebang, sapling yang sesuai langsung ditanam pada bekas pangkal bila tersedia. Lokasi pohon juga masuk shared memory sebagai `tree_site`, sehingga command reboisasi dapat mencoba lokasi tersebut lagi.
+
+### Combat state
+
+```text
+!guard guard 16
+!guard jaga desa-utara
+!fighter combat
+!hunter meat
+!global stop
+```
+
+- `guard` menyerang hostile mob di sekitar anchor coordinate atau tempat dari shared memory, lalu kembali ke anchor.
+- `full_combat`/`combat` memburu hostile mob yang termuat di sekitar bot.
+- `meat` hanya memburu mob pasif penghasil makanan seperti sapi, domba, babi, ayam, kelinci, dan mooshroom.
+- Bot tidak menargetkan pemain. Combat masuk state `RETREATING` bila health kurang dari 6 dan dapat dihentikan dengan `stop`.
+
+Hoe, axe, atau sword diperiksa dan disiapkan melalui sistem inventory/donor/crafting yang sama dengan pickaxe.
 
 ### Koordinator AI untuk individu atau kelompok
 
@@ -394,7 +452,7 @@ Invoke-RestMethod `
   -Body '{"selector":"class:miner","text":"collect stone 32"}'
 ```
 
-Gunakan `bot:alias`, `class:nama`, `global`, atau `auto` sebagai selector. Status provider dan pool key dapat diperiksa melalui `GET /api/v1/ai/status`. Snapshot koordinasi berisi posisi, inventory, dan urutan bot terdekat tersedia melalui `GET /api/v1/ai/fleet`; endpoint ini dilindungi bearer token bila token API dikonfigurasi.
+Gunakan `bot:alias`, `class:nama`, `global`, atau `auto` sebagai selector. Status provider dan pool key dapat diperiksa melalui `GET /api/v1/ai/status`. Snapshot koordinasi berisi posisi, inventory, dan urutan bot terdekat tersedia melalui `GET /api/v1/ai/fleet`. Shared memory memakai `GET|POST /api/v1/memory`, `DELETE /api/v1/memory/:id`, dan `POST /api/v1/bots/:id/memory`; endpoint ini dilindungi bearer token bila token API dikonfigurasi.
 
 ### Menghentikan bot
 
@@ -532,6 +590,8 @@ npm test
 ## 11. Batasan versi ini
 
 - Pengujian otomatis menggunakan fake Minecraft client; koneksi nyata tergantung server, jaringan, akun, dan versi protokol.
-- Koordinator saat ini mendukung intent aman `collect`, `craft`, `follow`, `move`, `set_home`, `home`, dan `status`; perencanaan koloni umum serta memory LLM jangka panjang belum tersedia.
+- Koordinator mendukung intent aman `collect`, `craft`, `follow`, `come`, `move`, `set_home`, `home`, `farm`, `deforest`, `reforest`, `combat`, `remember`, `place`, `status`, dan `converse`.
+- Shared memory versi ini berfokus pada lokasi dunia terstruktur; semantic vector memory dan consolidation LLM penuh belum tersedia.
+- Farming mendukung wheat, carrots, potatoes, dan beetroot. Combat memakai mob allowlist dan hanya bekerja pada entity yang sedang termuat oleh client.
 - Pertukaran item membutuhkan kedua bot berada pada server dan dimension yang sama serta cukup dekat untuk saling mendatangi.
 - Checkpoint task tersedia saat proses berjalan, tetapi recovery penuh setelah restart belum menjadi persistence production.

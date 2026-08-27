@@ -21,7 +21,8 @@ class OperationalAdapter extends EventEmitter {
   async dropItem({ item }) { const found = this.items.find(entry => entry.name === item && entry.count > 0); if (!found) throw new Error('missing item'); found.count--; this.worldDrop = item; return { item }; }
   async pickupItem({ item }) { this.items.push({ name: item, count: 1 }); return { item, collected: true }; }
   async navigate(input) { return { position: input }; }
-  async followPlayer(input) { return { player: input.username }; }
+  async followPlayer(input) { this.following = input.username; return { player: input.username }; }
+  async comeToPlayer(input) { this.cameTo = input.username; return { player: input.username }; }
   async stopActions() {}
   async startViewer({ port }) { this.camera = { active: true, port }; return this.camera; }
   async stopViewer() { this.camera = { active: false, port: null }; return this.camera; }
@@ -44,6 +45,7 @@ test('authorized chat command creates and completes a real capability goal', asy
   adapter.emit('chat', 'Alice', '!worker collect oak_log 2');
   await waitFor(() => app.goals.list()[0]?.status === 'COMPLETED');
   assert.deepEqual(adapter.collected, [{ block: 'oak_log', count: 2 }]); assert.ok(adapter.messages.some(message => message.includes('coordinator completed')));
+  adapter.emit('chat', 'Alice', '!worker follow Bob'); await waitFor(() => adapter.following === 'Bob'); adapter.emit('chat', 'Alice', '!worker come'); await waitFor(() => adapter.cameTo === 'Alice'); adapter.emit('chat', 'Alice', '!worker berapa 1+1'); await waitFor(() => adapter.messages.some(message => message.includes('1 + 1 = 2'))); assert.equal(adapter.following, 'Bob'); assert.equal(adapter.cameTo, 'Alice'); await app.stop();
 });
 
 test('class and global selectors route commands to the intended bots', async () => {
@@ -70,6 +72,12 @@ test('Mineflayer adapter normalizes client chat, snapshot and shutdown', async (
   assert.equal((await adapter.setHome({ name: 'base' })).name, 'base');
   assert.deepEqual(adapter.snapshot().position, { x: 1, y: 2, z: 3 }); assert.deepEqual(client.sent, ['hello']);
   await adapter.disconnect('done'); assert.equal(client.cleared, true); assert.equal(client.reason, 'done'); assert.equal(adapter.status, 'DISCONNECTED');
+});
+
+test('come is one-shot navigation while follow keeps a dynamic player goal', async () => {
+  class GoalNear { constructor(x, y, z, range) { Object.assign(this, { kind: 'near', x, y, z, range }); } } class GoalFollow { constructor(entity, range) { Object.assign(this, { kind: 'follow', entity, range }); } }
+  class MoveClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.players = { Steve: { entity: { position: { x: 10, y: 64, z: 5 } } } }; this.pathfinder = { goto: async goal => { this.gotoGoal = goal; }, setGoal: (goal, dynamic) => { this.followGoal = goal; this.dynamic = dynamic; } }; } clearControlStates() {} quit() { this.emit('end'); } }
+  const client = new MoveClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear, GoalFollow } }; client.emit('spawn'); await adapter.comeToPlayer({ username: 'Steve' }); assert.equal(client.gotoGoal.kind, 'near'); await adapter.followPlayer({ username: 'Steve' }); assert.equal(client.followGoal.kind, 'follow'); assert.equal(client.dynamic, true); await adapter.disconnect();
 });
 
 test('crafting capability resolves a ready recipe', async () => {
@@ -104,13 +112,26 @@ test('crafting builds and safely places a required crafting table', async () => 
 test('registry analysis identifies mandatory tools and recursive raw materials', async () => {
   const require = createRequire(import.meta.url); const registry = require('prismarine-registry')('1.20.4'); const Recipe = require('prismarine-recipe')(registry).Recipe;
   class RegistryClient extends EventEmitter {
-    constructor() { super(); this.registry = registry; this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; }
+    constructor(items = []) { super(); this.registry = registry; this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => items }; }
     recipesAll(id, metadata, table) { return Recipe.find(id, metadata).filter(recipe => !recipe.requiresTable || table); } findBlock() { return null; } clearControlStates() {} quit() { this.emit('end'); }
   }
   const client = new RegistryClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn');
   const block = await adapter.analyzeBlock({ block: 'iron_ore' }); assert.equal(block.handMineable, false); assert.ok(block.requiredTools.includes('stone_pickaxe')); assert.ok(!block.requiredTools.includes('wooden_pickaxe'));
   const plan = await adapter.craftRequirements({ item: 'wooden_pickaxe', count: 1 }); assert.deepEqual(plan.missing, [{ name: 'oak_log', count: 3 }]); assert.ok((await adapter.findSourceBlocks({ item: 'diamond' })).includes('diamond_ore'));
   assert.deepEqual(await adapter.smeltRequirements({ item: 'iron_ingot', count: 9 }), { item: 'iron_ingot', count: 9, input: { name: 'raw_iron', count: 9 }, fuel: { name: 'coal', count: 2 }, furnace: false }); await adapter.disconnect();
+
+  const items = [{ name: 'birch_log', count: 2, type: registry.itemsByName.birch_log.id }, { name: 'cobbled_deepslate', count: 3, type: registry.itemsByName.cobbled_deepslate.id }]; const materialClient = new RegistryClient(items); const materialAdapter = new MineflayerAdapter({ factory: () => materialClient, plugins: false }); await materialAdapter.connect({}); materialClient.emit('spawn');
+  const sword = await materialAdapter.craftRequirements({ item: 'wooden_sword' }); assert.equal(sword.missing.length, 0); assert.ok(sword.selectedRecipe.ingredients.some(item => item.name === 'birch_planks'));
+  const pickaxe = await materialAdapter.craftRequirements({ item: 'stone_pickaxe' }); assert.equal(pickaxe.missing.length, 0); assert.ok(pickaxe.selectedRecipe.ingredients.some(item => item.name === 'cobbled_deepslate')); await materialAdapter.disconnect();
+});
+
+test('deforestation removes the connected trunk and replants its sapling', async () => {
+  const { Vec3 } = await import('vec3');
+  class ForestClient extends EventEmitter {
+    constructor() { super(); this.entity = { position: new Vec3(0, 64, 0) }; this.game = { dimension: 'overworld' }; this.health = 20; this.food = 20; this.items = [{ name: 'oak_sapling', count: 1 }]; this.inventory = { items: () => this.items }; this.blocks = new Map([['0,63,0', 'dirt'], ['0,64,0', 'oak_log'], ['0,65,0', 'oak_log'], ['0,66,0', 'oak_log']]); this.collectBlock = { collect: async blocks => { for (const block of blocks) this.blocks.delete(this.key(block.position)); }, cancelTask: async () => {} }; }
+    key(position) { return `${position.x},${position.y},${position.z}`; } findBlocks() { return [new Vec3(0, 64, 0)]; } blockAt(position) { const name = this.blocks.get(this.key(position)) ?? 'air'; return { name, position }; } async equip() {} async placeBlock(ground) { this.blocks.set(this.key(ground.position.offset(0, 1, 0)), 'oak_sapling'); this.items[0].count--; } clearControlStates() {} quit() { this.emit('end'); }
+  }
+  const client = new ForestClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn'); const result = await adapter.deforest({ count: 1, replant: true }); assert.equal(result.logs, 3); assert.equal(result.replanted, 1); assert.equal(client.blocks.get('0,64,0'), 'oak_sapling'); await adapter.disconnect();
 });
 
 test('unexpected disconnect triggers bounded reconnect', async () => {

@@ -1,6 +1,6 @@
 # MineHive
 
-MineHive adalah framework Mineflayer modular dan event-driven. Versi operasional **0.4.1** menyediakan dashboard multi-bot, live camera berbasis canvas, command alias/class/global, crafting, home, follow, smart movement, dan koordinator LLM terbatas.
+MineHive adalah framework Mineflayer modular dan event-driven. Versi operasional **0.5.0** menyediakan dashboard multi-bot, live camera berbasis canvas, natural-language coordinator, shared world memory, farming, forestry, combat states, crafting, home, follow, dan smart movement.
 
 Panduan instalasi dan penggunaan lengkap tersedia di [`PANDUAN_PENGGUNAAN.md`](PANDUAN_PENGGUNAAN.md).
 
@@ -20,6 +20,9 @@ Panduan instalasi dan penggunaan lengkap tersedia di [`PANDUAN_PENGGUNAAN.md`](P
 - Koordinator OpenRouter tiga-key failover atau LLM lokal kompatibel OpenAI dengan fallback deterministik
 - Fleet view berisi posisi, inventory, dan daftar donor terdekat; tool/material planning berlaku otomatis pada semua command collect
 - Recursive resource gathering, crafting table, furnace, dan smelting bahan alat
+- Recipe resolver semua alternatif kayu/stone ingredient dengan inventory-aware ranking
+- Shared place memory terisolasi per server dan dimension
+- Farming, full-tree deforestation/replanting, reforestation, guard/full-combat/meat states
 - Structured goals, deterministic planning, task dependency graph, dan capability-aware scheduling
 - Bounded retry, timeout, cancellation, verification, checkpoint, dan failure propagation
 - Test tanpa kebutuhan server Minecraft
@@ -57,11 +60,14 @@ Isi `MINEHIVE_ADMINS` dengan username yang diizinkan. Setelah bot spawn, kirim m
 ```text
 !bot1 status
 !bot1 come
+!bot1 follow PlayerSatu
 !bot1 collect oak_log 16
 !miner collect stone 8
 !bot1 sethome base
 !bot1 home base
 !miner ai collect stone 32
+!bot1 tebang pohon
+!bot1 berapa 1+1
 !global status
 ```
 
@@ -93,14 +99,22 @@ Nama block memakai registry Minecraft, misalnya `oak_log`, `stone`, atau `iron_o
 - `POST /api/v1/bots/:id/start`
 - `POST /api/v1/bots/:id/stop`
 - `POST /api/v1/bots/:id/actions/navigate`
+- `POST /api/v1/bots/:id/actions/come`
 - `POST /api/v1/bots/:id/actions/follow`
 - `POST /api/v1/bots/:id/actions/collect`
+- `POST /api/v1/bots/:id/actions/farm`
+- `POST /api/v1/bots/:id/actions/deforest`
+- `POST /api/v1/bots/:id/actions/reforest`
+- `POST /api/v1/bots/:id/actions/combat`
 - `POST /api/v1/bots/:id/actions/craft`
 - `POST /api/v1/bots/:id/actions/sethome`
 - `POST /api/v1/bots/:id/actions/home`
 - `GET /api/v1/ai/status`
 - `GET /api/v1/ai/fleet`
 - `POST /api/v1/ai/command`
+- `GET|POST /api/v1/memory`
+- `DELETE /api/v1/memory/:id`
+- `POST /api/v1/bots/:id/memory`
 - `POST /api/v1/bots/:id/actions/chat`
 - `POST /api/v1/bots/:id/actions/observe`
 - `GET /api/v1/modules`
@@ -123,6 +137,7 @@ Core tidak mengimpor Mineflayer. Hanya `src/plugins/minecraft/mineflayer-adapter
 | 0.2.0 | Runtime bot dan behavior engine | Implemented |
 | 0.3.0 | Goal, task, recovery, advanced orchestration | Implemented |
 | 0.4.0-0.4.1 | Safe AI, LLM key pool, crafting, movement, dan nearest-bot coordination | Implemented |
-| 0.5.0+ | Memory jangka panjang, ML, HiveMind lanjutan, database, production, autonomy | Planned |
+| 0.5.0 | Shared world memory, natural chat, farming, forestry, dan combat states | Implemented |
+| 0.6.0+ | Semantic memory, ML, HiveMind lanjutan, database, production, autonomy | Planned |
 
 Dokumen di `instruksi/` tetap menjadi sumber persyaratan utama.

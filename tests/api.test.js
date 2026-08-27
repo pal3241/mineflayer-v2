@@ -51,6 +51,8 @@ test('API exposes health and versioned bot DTOs', async () => {
     assert.equal(adminDeleted.status, 200);
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/ai/status`)).status, 200);
     const fleet = await fetch(`http://127.0.0.1:${port}/api/v1/ai/fleet`); assert.equal(fleet.status, 200); assert.equal((await fleet.json()).data[0].id, 'api-bot');
+    const remembered = await fetch(`http://127.0.0.1:${port}/api/v1/memory`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"host":"localhost","port":25565,"dimension":"overworld","type":"village","name":"desa-test","position":{"x":10,"y":64,"z":20}}' }); assert.equal(remembered.status, 201);
+    const memories = await fetch(`http://127.0.0.1:${port}/api/v1/memory?host=localhost&port=25565&dimension=overworld`); assert.equal((await memories.json()).data[0].name, 'desa-test');
   } finally { await app.stop(); }
 });
 

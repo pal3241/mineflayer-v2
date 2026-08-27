@@ -17,6 +17,12 @@ class FleetAdapter extends EventEmitter {
   async findSourceBlocks({ item }) { return item === 'oak_log' ? ['oak_log'] : []; }
   async craftItem({ item }) { if (this.requireMaterials && item.endsWith('_pickaxe') && this.count('oak_log') < 3) throw new Error('missing wood'); this.items.push({ name: item, count: 1 }); }
   async collect(input) { this.collected.push(input); if (input.block === 'oak_log') this.items.push({ name: 'oak_log', count: input.count }); return { collectedTargets: input.count }; }
+  async farm(input) { this.farmed = input; return input; }
+  async deforest(input) { this.deforested = input; return { trees: 1, logs: 5, replanted: 1, sites: [{ x: 2, y: 64, z: 2, log: 'oak_log' }] }; }
+  async reforest(input) { this.reforested = input; return { planted: input.sites.length }; }
+  async startCombat(input) { this.combat = input; return { mode: input.mode.toUpperCase(), status: 'ACTIVE' }; }
+  async comeToPlayer(input) { this.cameTo = input; return input; }
+  async followPlayer(input) { this.following = input; return input; }
   count(name) { return this.items.filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0); }
   async stopActions() {}
   snapshot() { return { connection: 'READY', position: this.position, dimension: 'overworld', health: 20, food: 20, inventorySummary: this.items.filter(item => item.count > 0), camera: { active: false }, timestamp: new Date().toISOString() }; }
@@ -44,7 +50,7 @@ test('auto provider stays deterministic until a local model or OpenRouter key is
   const gateway = new LlmGateway({ provider: 'auto', localEndpoint: 'http://127.0.0.1:11434/v1', model: 'openrouter/auto' }, { warn() {} });
   assert.equal(gateway.status().enabled, false);
   const result = await gateway.interpret('ikuti Steve', { selector: 'bot:worker' });
-  assert.deepEqual(result, { intent: 'follow', selector: 'bot:worker', block: undefined, item: undefined, count: 1, player: 'steve', x: undefined, y: undefined, z: undefined, home: 'home' });
+  assert.equal(result.intent, 'follow'); assert.equal(result.selector, 'bot:worker'); assert.equal(result.player, 'steve');
 });
 
 test('invalid LLM command safely falls back to the deterministic parser', async () => {
@@ -99,4 +105,16 @@ test('group coordinator distributes collection count exactly across bots', async
   for (const id of ['one', 'two', 'three']) { app.bots.create({ id, metadata: { commandAlias: id, className: 'miner' } }); await app.bots.start(id); await app.bots.get(id).transitionQueue; }
   app.coordinator.gateway.provider = null; const result = await app.coordinator.coordinate({ text: 'collect dirt 5', selector: 'class:miner', actor: 'test' });
   assert.equal(result.results.length, 3); assert.deepEqual([...adapters.values()].map(adapter => adapter.collected[0].count), [2, 2, 1]); assert.equal([...adapters.values()].reduce((sum, adapter) => sum + adapter.collected[0].count, 0), 5); await app.stop();
+});
+
+test('natural-language coordinator prepares hoe, axe, and sword for world actions', async () => {
+  let adapter; const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: () => (adapter = new FleetAdapter()) } }); app.bots.create({ id: 'worker', metadata: { commandAlias: 'worker', className: 'worker' } }); await app.bots.start('worker'); await app.bots.get('worker').transitionQueue; app.coordinator.gateway.provider = null;
+  assert.equal((await app.coordinator.coordinate({ text: 'farm wheat 4', selector: 'bot:worker' })).results[0].status, 'COMPLETED'); assert.ok(adapter.count('wooden_hoe'));
+  assert.equal((await app.coordinator.coordinate({ text: 'tebang pohon', selector: 'bot:worker' })).results[0].status, 'COMPLETED'); assert.ok(adapter.count('wooden_axe'));
+  assert.equal((await app.coordinator.coordinate({ text: 'guard 12', selector: 'bot:worker' })).results[0].status, 'COMPLETED'); assert.ok(adapter.count('wooden_sword')); assert.equal(adapter.combat.mode, 'guard');
+  const memories = await app.worldMemory.forBot(app.bots.get('worker'), { type: 'tree_site' }); assert.equal(memories.length, 1); await app.stop();
+});
+
+test('deterministic companion translates natural commands and answers simple arithmetic', async () => {
+  const gateway = new LlmGateway({ provider: 'auto' }, { warn() {} }); assert.equal((await gateway.interpret('tebang pohon')).intent, 'deforest'); assert.equal((await gateway.interpret('berapa 1+1')).reply, '1 + 1 = 2'); assert.equal((await gateway.interpret('follow Steve')).intent, 'follow'); assert.equal((await gateway.interpret('come Steve')).intent, 'come'); assert.equal((await gateway.interpret('craft wooden sword')).item, 'wooden_sword');
 });

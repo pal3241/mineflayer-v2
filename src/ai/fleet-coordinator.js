@@ -2,11 +2,14 @@ import { ConflictError, ValidationError } from '../core/errors.js';
 
 const AVAILABLE_STATES = new Set(['READY', 'ACTIVE', 'PAUSED']);
 const TOOL_TIER = Object.freeze({ wooden: 1, golden: 2, stone: 3, iron: 4, diamond: 5, netherite: 6 });
+const HOES = ['wooden_hoe', 'golden_hoe', 'stone_hoe', 'iron_hoe', 'diamond_hoe', 'netherite_hoe'];
+const AXES = ['wooden_axe', 'golden_axe', 'stone_axe', 'iron_axe', 'diamond_axe', 'netherite_axe'];
+const SWORDS = ['wooden_sword', 'golden_sword', 'stone_sword', 'iron_sword', 'diamond_sword', 'netherite_sword'];
 
 export class FleetCoordinator {
   #recent = new Map();
   #busy = new Map();
-  constructor({ gateway, bots, goals, events, logger }) { this.gateway = gateway; this.bots = bots; this.goals = goals; this.events = events; this.logger = logger; }
+  constructor({ gateway, bots, goals, memory, events, logger }) { this.gateway = gateway; this.bots = bots; this.goals = goals; this.memory = memory; this.events = events; this.logger = logger; }
   status() { return { llm: this.gateway.status(), bots: this.bots.list().length, coordination: 'nearest-first-tool-and-material-planning' }; }
   fleetView() {
     const bots = this.bots.list();
@@ -18,7 +21,8 @@ export class FleetCoordinator {
   coordinateOnce(key, request) { const recent = this.#recent.get(key); if (recent && Date.now() - recent.createdAt < 3000) return recent.promise; const promise = this.coordinate(request).finally(() => { const timer = setTimeout(() => this.#recent.delete(key), 3000); timer.unref?.(); }); this.#recent.set(key, { createdAt: Date.now(), promise }); return promise; }
   async coordinate({ text, selector, actor = 'api' }) {
     if (typeof text !== 'string' || !text.trim()) throw new ValidationError('Coordinator request text is required');
-    const intent = await this.gateway.interpret(text, { selector, fleet: this.fleetView() });
+    const memoryTargets = this.#select(selector ?? 'auto'); const rawMemories = memoryTargets.length ? await this.memory?.forBot(this.bots.get(memoryTargets[0].id), { limit: 20 }) : []; const memories = rawMemories.map(memory => ({ type: memory.type, name: memory.name, position: memory.position, confidence: memory.confidence, updatedAt: memory.updatedAt }));
+    const intent = await this.gateway.interpret(text, { selector, fleet: this.fleetView(), memories, conversationId: `${actor}:${selector ?? 'auto'}` });
     const selected = this.#select(intent.selector); if (!selected.length) throw new ConflictError(`No available bots match '${intent.selector}'`);
     const targets = ['collect', 'craft'].includes(intent.intent) ? selected.slice(0, Math.min(selected.length, intent.count)) : selected; const counts = distribute(intent.count, targets.length);
     this.#reserve(targets.map(bot => bot.id));
@@ -39,10 +43,18 @@ export class FleetCoordinator {
   async #execute(botId, intent) {
     const runtime = this.bots.get(botId); const adapter = runtime.adapter;
     if (intent.intent === 'status') return runtime.snapshot();
+    if (intent.intent === 'converse') return { reply: intent.reply };
     if (intent.intent === 'follow') return adapter.followPlayer({ username: intent.player });
+    if (intent.intent === 'come') return adapter.comeToPlayer({ username: intent.player });
     if (intent.intent === 'move') return adapter.smartMove({ x: intent.x, y: intent.y, z: intent.z });
     if (intent.intent === 'set_home') return adapter.setHome({ name: intent.home });
     if (intent.intent === 'home') return adapter.goHome({ name: intent.home });
+    if (intent.intent === 'remember') { const snapshot = adapter.snapshot(); return this.memory.remember({ ...runtime.options, dimension: snapshot.dimension, position: snapshot.position, name: intent.name, type: intent.type, sourceBotId: botId }); }
+    if (intent.intent === 'place') { const places = await this.memory.forBot(runtime, { name: intent.name, limit: 1 }); if (!places.length) throw new ConflictError(`Shared memory '${intent.name}' was not found in this world`); return { memory: places[0], movement: await adapter.smartMove({ ...places[0].position, range: 2 }) }; }
+    if (intent.intent === 'farm') { const requirements = typeof adapter.farmRequirements === 'function' ? await adapter.farmRequirements({ crop: intent.crop, count: intent.count }) : { needsHoe: true, needsSeed: false }; const equipment = requirements.needsHoe ? await this.#ensureEquipment(botId, HOES) : null; const seed = requirements.needsSeed ? await this.#acquireItem(botId, requirements.seed, 1, new Set()) : null; return { requirements, equipment, seed, farming: await adapter.farm({ crop: intent.crop, count: intent.count }) }; }
+    if (intent.intent === 'deforest') { const equipment = await this.#ensureEquipment(botId, AXES); const result = await adapter.deforest({ log: intent.block ?? 'any', count: intent.count, replant: intent.replant }); for (const [index, site] of result.sites.entries()) await this.memory.remember({ ...runtime.options, dimension: adapter.snapshot().dimension, position: site, name: `tree-site-${Date.now()}-${index}`, type: 'tree_site', sourceBotId: botId, metadata: { log: site.log, replantRequested: intent.replant } }); return { equipment, ...result }; }
+    if (intent.intent === 'reforest') { const sites = await this.memory.forBot(runtime, { type: 'tree_site', limit: intent.count }); return adapter.reforest({ count: intent.count, sites: sites.map(site => ({ ...site.position, log: site.metadata?.log })) }); }
+    if (intent.intent === 'combat') { const equipment = await this.#ensureEquipment(botId, SWORDS); const snapshot = adapter.snapshot(); let position = intent.mode === 'guard' ? snapshot.position : undefined; if (intent.mode === 'guard' && intent.name) { const place = (await this.memory.forBot(runtime, { name: intent.name, limit: 1 }))[0]; if (!place) throw new ConflictError(`Guard place '${intent.name}' was not found in shared memory`); position = place.position; } return { equipment, combat: await adapter.startCombat({ mode: intent.mode, position, radius: intent.radius }) }; }
     if (intent.intent === 'craft') { const preparation = await this.#prepareCraft(botId, intent.item, intent.count, new Set()); return { preparation, crafted: await adapter.craftItem({ item: intent.item, count: intent.count }) }; }
     if (intent.intent === 'collect') {
       const preparation = await this.#ensureToolForBlock(botId, intent.block, new Set());
@@ -108,6 +120,7 @@ export class FleetCoordinator {
     }
     return null;
   }
+  async #ensureEquipment(botId, acceptedItems) { const target = this.bots.get(botId); const existing = findInventoryItem(target.adapter.snapshot(), acceptedItems); if (existing) return { item: existing, source: 'inventory' }; const borrowed = await this.#borrowNearest(botId, acceptedItems, 1); if (borrowed) return { ...borrowed, source: 'nearest-bot' }; let lastError; for (const item of [...acceptedItems].sort(toolOrder)) { try { const preparation = await this.#prepareCraft(botId, item, 1, new Set()); await target.adapter.craftItem({ item, count: 1 }); if (itemCount(target.adapter.snapshot(), item)) return { item, source: 'crafted', preparation }; } catch (error) { lastError = error; } } throw new ConflictError(`Unable to prepare equipment: ${lastError?.message ?? 'no item, donor, or recipe'}`); }
   #reserve(ids) { for (const id of ids) this.#busy.set(id, (this.#busy.get(id) ?? 0) + 1); }
   #release(ids) { for (const id of ids) { const count = (this.#busy.get(id) ?? 1) - 1; if (count > 0) this.#busy.set(id, count); else this.#busy.delete(id); } }
 }

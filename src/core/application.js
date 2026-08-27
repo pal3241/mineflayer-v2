@@ -23,6 +23,7 @@ import { resolve, join } from 'node:path';
 import { createServer as createNetServer } from 'node:net';
 import { LlmGateway } from '../ai/llm-gateway.js';
 import { FleetCoordinator } from '../ai/fleet-coordinator.js';
+import { WorldMemoryService } from '../memory/world-memory-service.js';
 
 export class Application {
   constructor(config, overrides = {}) {
@@ -36,15 +37,16 @@ export class Application {
     this.scheduler = new FleetScheduler({ botManager: this.bots }); this.checkpoints = new CheckpointManager();
     this.executor = new TaskExecutor({ capabilities: this.capabilities, scheduler: this.scheduler, eventBus: this.events, metrics: this.metrics, checkpointRepository: this.checkpoints });
     this.goals = new GoalService({ planner: this.planner, scheduler: this.scheduler, executor: this.executor, eventBus: this.events, metrics: this.metrics });
-    this.llm = new LlmGateway(config.llm ?? { provider: 'none' }, this.logger); this.coordinator = new FleetCoordinator({ gateway: this.llm, bots: this.bots, goals: this.goals, events: this.events, logger: this.logger });
-    registerMinecraftCapabilities(this.capabilities, this.bots);
     const repository = name => config.profile === 'test' ? new MemoryRepository() : new JsonRepository(join(resolve(config.dataPath), `${name}.json`));
+    this.worldMemory = new WorldMemoryService({ repository: repository('world-memory'), events: this.events, logger: this.logger });
+    this.llm = new LlmGateway(config.llm ?? { provider: 'none' }, this.logger); this.coordinator = new FleetCoordinator({ gateway: this.llm, bots: this.bots, goals: this.goals, memory: this.worldMemory, events: this.events, logger: this.logger });
+    registerMinecraftCapabilities(this.capabilities, this.bots);
     this.admins = new AdminManager({ repository: repository('admins'), bootstrap: [...(config.commands?.admins ?? [])], target: config.commands?.admins ?? [] });
     this.botProfiles = new BotProfileManager({ repository: repository('bots'), botManager: this.bots });
     this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, coordinator: this.coordinator, config: config.commands ?? { enabled: false, admins: [] }, logger: this.logger });
     this.bots.onCreated(runtime => this.chatCommands.attach(runtime));
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
-    Object.entries({ config, logger: this.logger, eventBus: this.events, health: this.health, metrics: this.metrics, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, llm: this.llm, coordinator: this.coordinator }).forEach(([name, value]) => this.container.register(name, value));
+    Object.entries({ config, logger: this.logger, eventBus: this.events, health: this.health, metrics: this.metrics, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, llm: this.llm, coordinator: this.coordinator }).forEach(([name, value]) => this.container.register(name, value));
     this.health.register('application', async () => ({ status: ['READY', 'RUNNING'].includes(this.state) ? 'HEALTHY' : 'DEGRADED' }), { critical: true });
     this.health.register('bots', async () => ({ status: this.bots.list().some(bot => ['FAILED', 'DEGRADED'].includes(bot.status)) ? 'DEGRADED' : 'HEALTHY' }));
   }
@@ -77,7 +79,7 @@ export class Application {
     const result = await runtime.adapter.startViewer({ port, firstPerson: true, viewDistance: this.config.viewer?.viewDistance ?? 6 }); return { ...result, botId };
   }
   async stopCamera(botId) { const result = await this.bots.get(botId).adapter.stopViewer(); this.cameraPorts.delete(botId); return { ...result, botId }; }
-  status() { return { name: 'MineHive', version: '0.4.1', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status() }; }
+  status() { return { name: 'MineHive', version: '0.5.0', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status() }; }
 }
 
 function portAvailable(port) {
