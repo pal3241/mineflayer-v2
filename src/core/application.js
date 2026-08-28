@@ -33,10 +33,12 @@ import { RotatingLogStore } from '../observability/rotating-log-store.js';
 import { createDiscoveryService } from '../world/discovery-service.js';
 import { createStructureObserver } from '../world/structure-observer.js';
 import { createLogisticsService } from '../logistics/logistics-service.js';
+import { createTaskReporter } from '../tasks/task-reporter.js';
 
 export class Application {
   constructor(config, overrides = {}) {
     this.config = config; this.state = 'CREATED'; this.startedAt = null;
+    this.runtimeDefaults = structuredClone({ llm: config.llm ?? { provider: 'none' }, logLevel: config.log.level, autonomy: config.autonomy });
     this.cameraPorts = new Map();
     this.container = new Container(); this.events = overrides.eventBus ?? new EventBus(); this.logStore = config.profile === 'test' ? null : new RotatingLogStore({ directory: config.log.directory ?? join(resolve(config.dataPath), 'logs'), maxFiles: config.log.maxFiles }); this.logger = overrides.logger ?? new Logger({ ...config.log, store: this.logStore });
     this.modules = new ComponentRegistry('Module'); this.plugins = new ComponentRegistry('Plugin'); this.services = new Registry('Service');
@@ -60,9 +62,10 @@ export class Application {
     this.admins = new AdminManager({ repository: repository('admins'), bootstrap: [...(config.commands?.admins ?? [])], target: config.commands?.admins ?? [] });
     this.botProfiles = new BotProfileManager({ repository: repository('bots'), botManager: this.bots });
     this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, coordinator: this.coordinator, config: config.commands ?? { enabled: false, admins: [] }, logger: this.logger });
+    this.taskReporter = createTaskReporter({ events: this.events, bots: this.bots, logger: this.logger });
     this.bots.onCreated(runtime => { this.chatCommands.attach(runtime); this.structureObserver.attach(runtime); });
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
-    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
+    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
     this.health.register('application', async () => ({ status: ['READY', 'RUNNING'].includes(this.state) ? 'HEALTHY' : 'DEGRADED' }), { critical: true });
     this.health.register('bots', async () => ({ status: this.bots.list().some(bot => ['FAILED', 'DEGRADED'].includes(bot.status)) ? 'DEGRADED' : 'HEALTHY' }));
     this.health.register('database', async () => this.database?.health() ?? { status: 'HEALTHY', driver: config.profile === 'test' ? 'memory' : 'json' }, { critical: true });
@@ -91,7 +94,7 @@ export class Application {
   }
   async stop() {
     if (['STOPPED', 'CREATED'].includes(this.state)) { this.state = 'STOPPED'; await this.logStore?.flush(); return; }
-    this.state = 'SHUTTING_DOWN'; this.autonomy.stop(); this.structureObserver.stop(); await this.api.stop(); await this.goals.stop(); await this.bots.stopAll();
+    this.state = 'SHUTTING_DOWN'; this.autonomy.stop(); this.structureObserver.stop(); this.taskReporter.stop(); await this.api.stop(); await this.goals.stop(); await this.bots.stopAll();
     await this.plugins.run('stop', this.context(), { reverse: true }); await this.modules.run('stop', this.context(), { reverse: true });
     this.state = 'STOPPED'; await this.events.publish('application.stopped', {}, { source: 'application' }); this.events.clear(); this.database?.close(); this.logger.info('application.stopped'); await this.logStore?.flush();
   }
@@ -101,6 +104,7 @@ export class Application {
     const result = await runtime.adapter.startViewer({ port, firstPerson: true, viewDistance: this.config.viewer?.viewDistance ?? 6 }); return { ...result, botId };
   }
   async stopCamera(botId) { const result = await this.bots.get(botId).adapter.stopViewer(); this.cameraPorts.delete(botId); return { ...result, botId }; }
+  resetRuntimeSettings() { const defaults = this.runtimeDefaults.llm; const keys = [...new Set([...(defaults.apiKeys ?? []), defaults.apiKey].filter(Boolean))]; const llm = this.llm.configure({ provider: defaults.provider ?? 'none', endpoint: defaults.endpoint ?? '', model: defaults.model ?? '', localEndpoint: defaults.localEndpoint ?? '', localModel: defaults.localModel ?? '', ...(keys.length ? { apiKeys: keys } : { clearKeys: true }) }); const log = this.logger.setLevel(this.runtimeDefaults.logLevel); const autonomy = this.autonomy.configure({ enabled: this.runtimeDefaults.autonomy.enabled, intervalMs: this.runtimeDefaults.autonomy.intervalMs, maxActionsPerHour: this.runtimeDefaults.autonomy.maxActionsPerHour }); this.logger.info('settings.runtime.reset', { provider: llm.provider, logLevel: log.level, autonomy: autonomy.status }); return { llm, log, autonomy, preserved: ['bot profiles', 'admins', 'memory', 'database', 'API token'] }; }
   status() { return { name: 'MineHive', version: '0.6.0', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), autonomy: this.autonomy.status() }; }
 }
 

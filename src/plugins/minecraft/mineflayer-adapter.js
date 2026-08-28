@@ -47,7 +47,7 @@ export class MineflayerAdapter extends EventEmitter {
   async #configureMovement() {
     if (!this.client?.pathfinder || !this.pathfinderModule) return;
     const Movements = this.pathfinderModule.Movements ?? this.pathfinderModule.default?.Movements;
-    if (Movements) { const movements = new Movements(this.client); movements.allow1by1towers = false; this.client.pathfinder.setMovements(movements); }
+    if (Movements) { const movements = new Movements(this.client); movements.allow1by1towers = false; movements.allowParkour = false; movements.allowFreeMotion = false; movements.scafoldingBlocks = []; movements.placeCost = Number.POSITIVE_INFINITY; movements.maxDropDown = Math.min(3, movements.maxDropDown); this.client.pathfinder.setMovements(movements); }
     if (this.autoEatLoader && !this.client.autoEat) {
       this.client.loadPlugin(this.autoEatLoader); this.client.autoEat.setOpts({ minHunger: this.autoEatConfig.minHunger }); this.client.autoEat.enableAuto(); this.pluginStatus.autoEat = 'HEALTHY';
     }
@@ -60,9 +60,10 @@ export class MineflayerAdapter extends EventEmitter {
   async navigate({ x, y, z, range = 1 }, { signal } = {}) {
     const bot = this.#ready('navigation'); if (!bot.pathfinder) throw new ValidationError('Pathfinder plugin is unavailable');
     for (const value of [x, y, z]) if (!Number.isFinite(Number(value))) throw new ValidationError('Navigation requires numeric x, y, z');
-    const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const goal = new goals.GoalNear(Number(x), Number(y), Number(z), Math.max(1, Number(range)));
-    const cleanup = this.#abort(signal, () => bot.pathfinder.setGoal(null));
-    try { await bot.pathfinder.goto(goal); return { position: this.snapshot().position }; } finally { cleanup(); }
+    const destination = { x: Number(x), y: Number(y), z: Number(z) }; const acceptedRange = Math.max(1, Number(range)); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const goal = new goals.GoalNear(destination.x, destination.y, destination.z, acceptedRange);
+    const cleanupAbort = this.#abort(signal, () => bot.pathfinder.setGoal(null)); const guard = navigationGuard(bot, destination, acceptedRange, 10_000);
+    try { await Promise.race([bot.pathfinder.goto(goal), guard.promise]); const position = this.snapshot().position; if (!position || distance3(position, destination) > acceptedRange + 1) throw new ValidationError(`Navigation ended outside target range: target ${destination.x},${destination.y},${destination.z}, actual ${formatPosition(position)}`); return { position }; }
+    catch (error) { bot.pathfinder.setGoal(null); throw error; } finally { guard.stop(); cleanupAbort(); }
   }
   async followPlayer({ username, range = 2 }, { signal } = {}) {
     const bot = this.#ready('follow-player'); const actualName = Object.keys(bot.players ?? {}).find(name => name.toLowerCase() === String(username).toLowerCase()); const entity = bot.players?.[actualName]?.entity;
@@ -292,6 +293,8 @@ function bestItem(bot, predicate) { return bot.inventory.items().filter(predicat
 function equipmentRank(name) { return ['wooden', 'golden', 'stone', 'iron', 'diamond', 'netherite'].findIndex(material => name.startsWith(`${material}_`)) + 1; }
 async function equipBestWeapon(bot) { const weapon = bestItem(bot, item => item.name.endsWith('_sword') || item.name.endsWith('_axe')); if (weapon) await bot.equip(weapon, 'hand'); }
 function distance3(left, right) { return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z); }
+function navigationGuard(bot, destination, range, stagnationMs) { let bestDistance = distance3(bot.entity.position, destination); let progressedAt = Date.now(); let stopped = false; let rejectGuard; const promise = new Promise((_resolve, reject) => { rejectGuard = reject; }); const onMove = () => { const current = distance3(bot.entity.position, destination); if (bestDistance - current >= 0.5) { bestDistance = current; progressedAt = Date.now(); } }; const onReset = reason => { if (['place_error', 'no_scaffolding_blocks'].includes(reason)) rejectGuard(new ValidationError(`Navigation route requires forbidden or failed block placement (${reason})`)); }; const onPath = result => { if (result.path?.some(node => node.toPlace?.some(block => !block.useOne))) rejectGuard(new ValidationError('Navigation route requires scaffolding, but automatic block placement is disabled')); }; const timer = setInterval(() => { if (distance3(bot.entity.position, destination) <= range + 1) return; if (Date.now() - progressedAt >= stagnationMs) rejectGuard(new ValidationError(`Navigation stalled for ${stagnationMs}ms at ${formatPosition(bot.entity.position)}`)); }, 1000); timer.unref?.(); bot.on('move', onMove); bot.on('path_reset', onReset); bot.on('path_update', onPath); return { promise, stop: () => { if (stopped) return; stopped = true; clearInterval(timer); bot.off('move', onMove); bot.off('path_reset', onReset); bot.off('path_update', onPath); } }; }
+function formatPosition(position) { return position ? `${Number(position.x).toFixed(1)},${Number(position.y).toFixed(1)},${Number(position.z).toFixed(1)}` : 'unknown'; }
 function uniqueDiscoveries(discoveries) { const seen = new Set(); return discoveries.filter(discovery => { const key = `${discovery.marker}:${discovery.position.x}:${discovery.position.y}:${discovery.position.z}`; if (seen.has(key)) return false; seen.add(key); return true; }); }
 function isStorageBlock(name) { return STORAGE_BLOCKS.has(name) || /_shulker_box$/.test(String(name)); }
 function storageSnapshot(container, position) { const inventory = summarizeItems(container.containerItems()); return { kind: String(container.type ?? 'storage'), position: { x: Number(position.x), y: Number(position.y), z: Number(position.z) }, inventory, capacitySlots: Number(container.inventoryStart ?? container.slots?.length ?? 0), occupiedSlots: container.containerItems().length }; }

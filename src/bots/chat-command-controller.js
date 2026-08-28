@@ -33,7 +33,7 @@ export class ChatCommandController {
       if (command === 'inventory') { const items = runtime.adapter.snapshot().inventorySummary; return this.#reply(runtime, items.length ? items.map(item => `${item.name}:${item.count}`).join(', ').slice(0, 200) : 'inventory empty'); }
       if (command === 'sethome') { const result = await runtime.adapter.setHome({ name: args[0] ?? 'home' }); return this.#reply(runtime, `home ${result.name} saved`); }
       if (command === 'home') { await runtime.adapter.goHome({ name: args[0] ?? 'home' }); return this.#reply(runtime, 'going home'); }
-      if (command === 'stop') { await runtime.adapter.stopActions(); for (const task of this.goals.allTasks().filter(task => task.assignedBot === runtime.bot.id && task.status === 'RUNNING')) this.executor.cancel(task.id, `Stopped by ${username}`); return this.#reply(runtime, 'actions stopped'); }
+      if (command === 'stop') { await runtime.adapter.stopActions(); for (const task of this.goals.allTasks().filter(task => task.assignedBot === runtime.bot.id && ['ASSIGNED', 'RUNNING'].includes(task.status))) this.executor.cancel(task.id, `Stopped by ${username}`); return this.#reply(runtime, 'running and queued actions stopped'); }
       let step;
       if (command === 'come') step = { type: 'come', input: { username }, requiredCapabilities: ['minecraft.come'], timeout: 120_000 };
       else if (command === 'follow') step = { type: 'follow-player', input: { username: args[0] ?? username }, requiredCapabilities: ['minecraft.follow-player'], timeout: 120_000 };

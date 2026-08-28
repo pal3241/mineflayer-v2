@@ -68,6 +68,7 @@ test('API exposes health and versioned bot DTOs', async () => {
     const logSettings = await fetch(`http://127.0.0.1:${port}/api/v1/settings/log`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"level":"debug"}' }); assert.equal((await logSettings.json()).data.level, 'debug');
     const autonomySettings = await fetch(`http://127.0.0.1:${port}/api/v1/settings/autonomy`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"enabled":false,"intervalMs":5000,"maxActionsPerHour":5}' }); assert.equal((await autonomySettings.json()).data.intervalMs, 5000);
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/settings/logs?limit=20`)).status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/tasks/queue`)).status, 200); const reset = await fetch(`http://127.0.0.1:${port}/api/v1/settings/reset`, { method: 'POST' }); const resetPayload = await reset.json(); assert.equal(reset.status, 200); assert.equal(resetPayload.data.llm.provider, 'none'); assert.equal(resetPayload.data.log.level, 'silent'); assert.equal(resetPayload.data.autonomy.intervalMs, 60000); assert.ok(resetPayload.data.preserved.includes('bot profiles'));
   } finally { await app.stop(); }
 });
 

@@ -41,3 +41,10 @@ test('failed verified task is retried, checkpointed and fails its goal', async (
   const result = await app.goals.run(goal.id);
   assert.equal(result.status, 'FAILED'); assert.equal(attempts, 2); assert.equal((await app.checkpoints.list()).length, 1);
 });
+
+test('task executor queues work sequentially for the same bot', async () => {
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' } }); let active = 0; let maximumActive = 0; const order = [];
+  app.bots.create({ id: 'worker', capabilities: ['work'] }); app.capabilities.register({ name: 'work', execute: async input => { active++; maximumActive = Math.max(maximumActive, active); order.push(`start:${input.name}`); await new Promise(resolve => setTimeout(resolve, 25)); order.push(`end:${input.name}`); active--; return input.name; } });
+  const first = app.goals.create({ description: 'First queued task', constraints: { preferredBot: 'worker' }, steps: [{ type: 'work', input: { name: 'first' }, requiredCapabilities: ['work'] }] }); const second = app.goals.create({ description: 'Second queued task', constraints: { preferredBot: 'worker' }, steps: [{ type: 'work', input: { name: 'second' }, requiredCapabilities: ['work'] }] }); const firstRun = app.goals.run(first.id); const secondRun = app.goals.run(second.id); await new Promise(resolve => setImmediate(resolve)); assert.equal(app.executor.status().queuedTasks, 1);
+  const results = await Promise.all([firstRun, secondRun]); assert.deepEqual(results.map(result => result.status), ['COMPLETED', 'COMPLETED']); assert.equal(maximumActive, 1); assert.deepEqual(order, ['start:first', 'end:first', 'start:second', 'end:second']); assert.equal(app.executor.status().queuedTasks, 0);
+});

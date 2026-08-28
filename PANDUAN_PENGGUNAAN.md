@@ -629,6 +629,16 @@ Tab **Settings** pada dashboard dapat mengubah provider/model/endpoint LLM, meng
 
 Tombol **Edit & inventory** pada setiap kartu bot membuka detail inventory dan editor display name, username Minecraft, server, port, authentication, protocol version, command alias, kelompok/class, dan auto-connect. Pengaturan koneksi hanya dapat diganti ketika bot offline; hal ini mencegah profil tersimpan berbeda dari koneksi yang sedang aktif.
 
+Tombol **Reset runtime settings** mengembalikan konfigurasi LLM, OpenRouter key runtime, level log, dan autonomy ke nilai saat aplikasi pertama dijalankan. Reset ini tidak menghapus profil bot, admin, world/semantic memory, database, saved log, atau API token.
+
+## Task queue dan laporan pekerjaan
+
+Setiap bot memiliki antrean terpisah. Task dan command coordinator baru menunggu sampai pekerjaan bot tersebut selesai sehingga pathfinding yang aktif tidak diganti mendadak. Bot lain tetap dapat bekerja paralel. Dashboard menampilkan jumlah task menunggu dan bot yang sedang aktif. Command `stop` tetap bersifat eksplisit dan membatalkan pekerjaan berjalan beserta antreannya.
+
+Saat pekerjaan dimulai bot mengirim pesan `task baru`, lalu mengirim `task selesai`, `task gagal`, atau `task dibatalkan` sesuai hasil sebenarnya. Lifecycle yang sama juga tersimpan sebagai structured event dan log.
+
+Movement tidak lagi menggunakan dirt, cobblestone, atau item lain sebagai scaffolding otomatis. Tower 1x1, parkour, dan free-motion dinonaktifkan. Jika route membutuhkan penempatan blok atau tidak menghasilkan progres selama 10 detik, task gagal dengan error yang jelas agar antrean dapat melanjutkan task berikutnya.
+
 Log terstruktur juga disimpan ke `MINEHIVE_LOG_DIRECTORY` atau `data/logs`. Setiap proses membuat satu file JSONL dan sistem hanya mempertahankan tiga file sesi terbaru; file yang lebih lama dihapus otomatis. Dashboard mengambil seluruh status berkala melalui satu endpoint snapshot agar polling tidak menghabiskan API rate limit.
 
 Backup SQLite dapat dibuat dengan `node src/cli.js backup nama-backup.sqlite` atau `POST /api/v1/database/backup`. Untuk Docker gunakan `docker compose up -d --build`; data disimpan dalam volume `minehive-data`.

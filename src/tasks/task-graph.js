@@ -20,5 +20,6 @@ export class TaskGraph {
   ready() { this.refresh(); return [...this.tasks.values()].filter(task => task.status === TaskStatus.READY).sort((a, b) => b.priority - a.priority || a.createdAt.localeCompare(b.createdAt)); }
   complete() { return [...this.tasks.values()].every(task => task.status === TaskStatus.COMPLETED); }
   failed() { return [...this.tasks.values()].some(task => [TaskStatus.FAILED, TaskStatus.BLOCKED].includes(task.status)); }
+  cancelled() { return [...this.tasks.values()].some(task => task.status === TaskStatus.CANCELLED); }
   list() { return [...this.tasks.values()]; }
 }

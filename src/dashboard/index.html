@@ -43,6 +43,7 @@
         <article><span>ML outcomes</span><strong id="statMl">0</strong><small>Coordination evidence</small></article>
         <article><span>Process memory</span><strong id="statProcess">—</strong><small id="statProcessHeap">Runtime diagnostics</small></article>
         <article><span>Logistics</span><strong id="statLogistics">0</strong><small id="statLogisticsDetail">Storage backbone</small></article>
+        <article><span>Task queue</span><strong id="statQueue">0</strong><small id="statQueueDetail">Sequential per bot</small></article>
       </div>
       <div class="split">
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">FLEET</p><h2>Bot status</h2></div><button class="button secondary goto" data-target="bots">Manage bots</button></div><div id="overviewBots" class="bot-list"></div></section>
@@ -151,6 +152,11 @@
           <form id="logSettingsForm" class="inline-form settings-log-controls"><select id="logLevel"><option value="debug">Debug</option><option value="info">Info</option><option value="warn">Warn</option><option value="error">Error</option><option value="silent">Silent</option></select><button class="button secondary" type="submit">Set log level</button></form>
           <div id="savedLogFiles" class="saved-log-files"><span class="hint">Loading saved logs…</span></div>
           <pre id="runtimeLogs">No runtime logs loaded.</pre>
+        </section>
+        <section class="panel full">
+          <div class="panel-title"><div><p class="eyebrow">RUNTIME RESET</p><h2>Reset settings</h2></div></div>
+          <p class="hint">Mengembalikan LLM, OpenRouter key runtime, level log, dan autonomy ke konfigurasi startup. Profil bot, admin, memory, database, dan API token tidak dihapus.</p>
+          <button id="resetSettings" class="button danger" type="button">Reset runtime settings</button>
         </section>
       </div>
     </section>

@@ -27,3 +27,4 @@ export { RotatingLogStore } from './observability/rotating-log-store.js';
 export { createDiscoveryService } from './world/discovery-service.js';
 export { createStructureObserver } from './world/structure-observer.js';
 export { createLogisticsService } from './logistics/logistics-service.js';
+export { createTaskReporter } from './tasks/task-reporter.js';

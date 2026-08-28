@@ -44,7 +44,7 @@ test('authorized chat command creates and completes a real capability goal', asy
   await new Promise(resolve => setImmediate(resolve)); assert.equal(app.goals.list().length, 0);
   adapter.emit('chat', 'Alice', '!worker collect oak_log 2');
   await waitFor(() => app.goals.list()[0]?.status === 'COMPLETED');
-  assert.deepEqual(adapter.collected, [{ block: 'oak_log', count: 2 }]); assert.ok(adapter.messages.some(message => message.includes('coordinator completed')));
+  assert.deepEqual(adapter.collected, [{ block: 'oak_log', count: 2 }]); assert.ok(adapter.messages.some(message => message.includes('coordinator completed'))); assert.ok(adapter.messages.some(message => message.includes('task baru: collect'))); assert.ok(adapter.messages.some(message => message.includes('task selesai: collect')));
   adapter.emit('chat', 'Alice', '!worker follow Bob'); await waitFor(() => adapter.following === 'Bob'); adapter.emit('chat', 'Alice', '!worker come'); await waitFor(() => adapter.cameTo === 'Alice'); adapter.emit('chat', 'Alice', '!worker berapa 1+1'); await waitFor(() => adapter.messages.some(message => message.includes('1 + 1 = 2'))); assert.equal(adapter.following, 'Bob'); assert.equal(adapter.cameTo, 'Alice'); await app.stop();
 });
 
@@ -91,10 +91,22 @@ test('Mineflayer survey detects supported markers and removes duplicate position
   assert.equal(result.maxDistance, 128); assert.deepEqual(result.discoveries.map(discovery => discovery.type), ['village', 'stronghold']); assert.deepEqual(result.discoveries[0].position, { x: 8, y: 65, z: 4 }); await adapter.disconnect();
 });
 
+test('movement policy disables scaffolding, towers, and risky shortcuts', async () => {
+  class Movements { constructor() { this.allow1by1towers = true; this.allowParkour = true; this.allowFreeMotion = true; this.scafoldingBlocks = [1, 2]; this.placeCost = 1; this.maxDropDown = 4; } }
+  class MovementClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.pathfinder = { setMovements: movements => { this.movements = movements; }, setGoal() {} }; } clearControlStates() {} quit() { this.emit('end'); } }
+  const client = new MovementClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { Movements }; client.emit('spawn'); await new Promise(resolve => setImmediate(resolve)); assert.equal(client.movements.allow1by1towers, false); assert.equal(client.movements.allowParkour, false); assert.deepEqual(client.movements.scafoldingBlocks, []); assert.equal(client.movements.placeCost, Number.POSITIVE_INFINITY); assert.equal(client.movements.maxDropDown, 3); await adapter.disconnect();
+});
+
+test('navigation rejects a path that requires automatic block placement', async () => {
+  class GoalNear { constructor(x, y, z, range) { Object.assign(this, { x, y, z, range }); } }
+  class ScaffoldClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.pathfinder = { goto: async () => { queueMicrotask(() => this.emit('path_update', { path: [{ toPlace: [{ x: 0, y: 63, z: 0 }] }] })); return new Promise(() => {}); }, setGoal() {} }; } clearControlStates() {} quit() { this.emit('end'); } }
+  const client = new ScaffoldClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear } }; client.emit('spawn'); await assert.rejects(adapter.navigate({ x: 0, y: 70, z: 0 }), /requires scaffolding/); await adapter.disconnect();
+});
+
 test('Mineflayer storage adapter verifies chest deposits and withdrawals', async () => {
   const { Vec3 } = await import('vec3'); class GoalNear { constructor(x, y, z, range) { Object.assign(this, { x, y, z, range }); } }
   class StorageClient extends EventEmitter {
-    constructor() { super(); this.entity = { position: new Vec3(0, 64, 0) }; this.game = { dimension: 'overworld' }; this.botItems = [{ name: 'stone', type: 1, count: 8 }]; this.chestItems = [{ name: 'stone', type: 1, count: 10 }]; this.inventory = { items: () => this.botItems.filter(item => item.count > 0) }; this.registry = { itemsByName: { stone: { id: 1 } } }; this.pathfinder = { goto: async () => {}, setGoal() {} }; this.storageBlock = { name: 'chest', position: new Vec3(3, 64, 0) }; }
+    constructor() { super(); this.entity = { position: new Vec3(0, 64, 0) }; this.game = { dimension: 'overworld' }; this.botItems = [{ name: 'stone', type: 1, count: 8 }]; this.chestItems = [{ name: 'stone', type: 1, count: 10 }]; this.inventory = { items: () => this.botItems.filter(item => item.count > 0) }; this.registry = { itemsByName: { stone: { id: 1 } } }; this.pathfinder = { goto: async goal => { this.entity.position = new Vec3(goal.x, goal.y, goal.z); }, setGoal() {} }; this.storageBlock = { name: 'chest', position: new Vec3(3, 64, 0) }; }
     findBlock() { return this.storageBlock; } blockAt() { return this.storageBlock; }
     async openContainer() { return { type: 'minecraft:chest', inventoryStart: 27, slots: new Array(63), containerItems: () => this.chestItems.filter(item => item.count > 0), deposit: async (_type, _metadata, count) => { this.botItems[0].count -= count; this.chestItems[0].count += count; }, withdraw: async (_type, _metadata, count) => { this.chestItems[0].count -= count; this.botItems[0].count += count; }, close() {} }; }
     clearControlStates() {} quit() { this.emit('end'); }
@@ -105,7 +117,7 @@ test('Mineflayer storage adapter verifies chest deposits and withdrawals', async
 
 test('come is one-shot navigation while follow keeps a dynamic player goal', async () => {
   class GoalNear { constructor(x, y, z, range) { Object.assign(this, { kind: 'near', x, y, z, range }); } } class GoalFollow { constructor(entity, range) { Object.assign(this, { kind: 'follow', entity, range }); } }
-  class MoveClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.players = { Steve: { entity: { position: { x: 10, y: 64, z: 5 } } } }; this.pathfinder = { goto: async goal => { this.gotoGoal = goal; }, setGoal: (goal, dynamic) => { this.followGoal = goal; this.dynamic = dynamic; } }; } clearControlStates() {} quit() { this.emit('end'); } }
+  class MoveClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.players = { Steve: { entity: { position: { x: 10, y: 64, z: 5 } } } }; this.pathfinder = { goto: async goal => { this.gotoGoal = goal; this.entity.position = { x: goal.x, y: goal.y, z: goal.z }; }, setGoal: (goal, dynamic) => { this.followGoal = goal; this.dynamic = dynamic; } }; } clearControlStates() {} quit() { this.emit('end'); } }
   const client = new MoveClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear, GoalFollow } }; client.emit('spawn'); await adapter.comeToPlayer({ username: 'Steve' }); assert.equal(client.gotoGoal.kind, 'near'); await adapter.followPlayer({ username: 'Steve' }); assert.equal(client.followGoal.kind, 'follow'); assert.equal(client.dynamic, true); await adapter.disconnect();
 });
 

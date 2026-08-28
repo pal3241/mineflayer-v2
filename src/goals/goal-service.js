@@ -26,7 +26,7 @@ export class GoalService {
     const goal = this.get(id); const graph = this.graph(id);
     if ([GoalStatus.COMPLETED, GoalStatus.CANCELLED].includes(goal.status)) return goal.toDTO();
     goal.update(GoalStatus.ACTIVE); await this.events.publish('goal.started', goal.toDTO(), { source: 'goal-service', correlationId: id });
-    while (!graph.complete() && !graph.failed()) {
+    while (!graph.complete() && !graph.failed() && !graph.cancelled()) {
       const ready = graph.ready();
       if (!ready.length) break;
       const assigned = ready.map(task => ({ task, assignment: this.scheduler.assign(task, goal.constraints.preferredBot) }));
@@ -39,14 +39,16 @@ export class GoalService {
       const completed = graph.list().filter(task => task.status === TaskStatus.COMPLETED).length;
       goal.update(GoalStatus.ACTIVE, Math.round(completed / graph.list().length * 100));
     }
+    if (goal.status === GoalStatus.CANCELLED) return goal.toDTO();
     if (graph.complete()) { goal.update(GoalStatus.COMPLETED, 100); this.metrics.increment('goals.completed'); await this.events.publish('goal.completed', goal.toDTO(), { source: 'goal-service', correlationId: id }); }
     else if (graph.failed()) { goal.update(GoalStatus.FAILED); this.metrics.increment('goals.failed'); await this.events.publish('goal.failed', goal.toDTO(), { source: 'goal-service', correlationId: id }); }
+    else if (graph.cancelled()) { goal.update(GoalStatus.CANCELLED); await this.events.publish('goal.cancelled', goal.toDTO(), { source: 'goal-service', correlationId: id }); }
     return goal.toDTO();
   }
   async cancel(id, reason = 'Goal cancelled') {
     const goal = this.get(id); const graph = this.graph(id);
     for (const task of graph.list()) {
-      if (task.status === TaskStatus.RUNNING) this.executor.cancel(task.id, reason);
+      if ([TaskStatus.ASSIGNED, TaskStatus.RUNNING].includes(task.status)) this.executor.cancel(task.id, reason);
       else if (![TaskStatus.COMPLETED, TaskStatus.FAILED].includes(task.status)) task.update(TaskStatus.CANCELLED, { error: { code: 'CANCELLED', message: reason } });
     }
     goal.update(GoalStatus.CANCELLED); await this.events.publish('goal.cancelled', goal.toDTO(), { source: 'goal-service', correlationId: id }); return goal.toDTO();

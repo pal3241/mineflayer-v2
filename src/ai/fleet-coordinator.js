@@ -9,8 +9,10 @@ const SWORDS = ['wooden_sword', 'golden_sword', 'stone_sword', 'iron_sword', 'di
 export class FleetCoordinator {
   #recent = new Map();
   #busy = new Map();
+  #operationTails = new Map();
+  #operationWaiting = new Map();
   constructor({ gateway, bots, goals, memory, semanticMemory, discovery, logistics, ml, hive, events, logger }) { this.gateway = gateway; this.bots = bots; this.goals = goals; this.memory = memory; this.semanticMemory = semanticMemory; this.discovery = discovery; this.logistics = logistics; this.ml = ml; this.hive = hive; this.events = events; this.logger = logger; }
-  status() { return { llm: this.gateway.status(), bots: this.bots.list().length, coordination: 'semantic-ml-hivemind-resource-planning' }; }
+  status() { return { llm: this.gateway.status(), bots: this.bots.list().length, coordination: 'semantic-ml-hivemind-resource-planning', queuedOperations: [...this.#operationWaiting.values()].reduce((sum, count) => sum + count, 0), queues: Object.fromEntries(this.#operationWaiting) }; }
   fleetView() {
     const bots = this.bots.list();
     return bots.map(bot => ({ id: bot.id, alias: bot.metadata.commandAlias ?? bot.name, class: bot.metadata.className ?? 'worker', status: bot.status,
@@ -28,13 +30,14 @@ export class FleetCoordinator {
     this.#reserve(targets.map(bot => bot.id));
     const started = performance.now(); try {
       await this.events.publish('coordinator.requested', { actor, text, intent, targets: targets.map(bot => bot.id) }, { source: 'fleet-coordinator' });
-      const results = await Promise.allSettled(targets.map((bot, index) => this.#execute(bot.id, { ...intent, count: counts[index] })));
+      const results = await Promise.allSettled(targets.map((bot, index) => this.#enqueueBot(bot.id, { ...intent, count: counts[index] })));
       const response = { intent, results: results.map((result, index) => ({ botId: targets[index].id, status: result.status === 'fulfilled' ? 'COMPLETED' : 'FAILED', result: result.value, error: result.reason?.message })) };
       const durationMs = performance.now() - started; await Promise.all(response.results.map(result => this.ml.recordOutcome({ botId: result.botId, intent: intent.intent, success: result.status === 'COMPLETED', durationMs, features: botFeatures(this.bots.get(result.botId).snapshot(), intent.intent, selected.length), source: 'coordinator' })));
       await Promise.all(response.results.map(result => { const runtime = this.bots.get(result.botId); const server = serverIdentity(runtime.options); return this.semanticMemory.remember({ type: 'EPISODIC', content: `${intent.intent} oleh ${result.botId}: ${result.status}${result.error ? ` - ${result.error}` : ''}`, visibility: 'HIVE', worldKey: `${server.host}:${server.port}`, dimension: runtime.adapter.snapshot().dimension, source: 'fleet-coordinator', sourceBotId: result.botId, confidence: result.status === 'COMPLETED' ? 0.9 : 0.7, importance: result.status === 'COMPLETED' ? 0.5 : 0.8, tags: [intent.intent, result.status.toLowerCase()], metadata: { actor } }); }));
       await this.events.publish('coordinator.completed', response, { source: 'fleet-coordinator' }); return response;
     } finally { this.#release(targets.map(bot => bot.id)); }
   }
+  #enqueueBot(botId, intent) { const previous = this.#operationTails.get(botId) ?? Promise.resolve(); this.#operationWaiting.set(botId, (this.#operationWaiting.get(botId) ?? 0) + 1); const operation = previous.then(async () => { this.#operationWaiting.set(botId, this.#operationWaiting.get(botId) - 1); if (!this.#operationWaiting.get(botId)) this.#operationWaiting.delete(botId); await this.events.publish('coordinator.bot.started', { botId, intent: intent.intent }, { source: 'fleet-coordinator' }); try { const result = await this.#execute(botId, intent); await this.events.publish('coordinator.bot.completed', { botId, intent: intent.intent }, { source: 'fleet-coordinator' }); return result; } catch (error) { await this.events.publish('coordinator.bot.failed', { botId, intent: intent.intent, error: error.message }, { source: 'fleet-coordinator' }); throw error; } }); const tail = operation.then(() => undefined, () => undefined); this.#operationTails.set(botId, tail); void tail.then(() => { if (this.#operationTails.get(botId) === tail) this.#operationTails.delete(botId); }); return operation; }
   #select(selector = 'auto') {
     const available = this.bots.list().filter(bot => AVAILABLE_STATES.has(bot.status));
     if (selector === 'global') return available;
@@ -67,7 +70,7 @@ export class FleetCoordinator {
     if (intent.intent === 'craft') { const preparation = await this.#prepareCraft(botId, intent.item, intent.count, new Set()); return { preparation, crafted: await adapter.craftItem({ item: intent.item, count: intent.count }) }; }
     if (intent.intent === 'collect') {
       const preparation = await this.#ensureToolForBlock(botId, intent.block, new Set());
-      const goal = this.goals.create({ description: `Coordinator collect ${intent.count} ${intent.block}`, priority: 70, constraints: { preferredBot: botId }, steps: [{ type: 'collect', input: { block: intent.block, count: intent.count }, requiredCapabilities: ['minecraft.collection'], timeout: 300_000, retries: 1 }] });
+      const goal = this.goals.create({ description: `Coordinator collect ${intent.count} ${intent.block}`, priority: 70, constraints: { preferredBot: botId }, steps: [{ type: 'collect', input: { block: intent.block, count: intent.count }, requiredCapabilities: ['minecraft.collection'], timeout: 300_000, retries: 1, reportLifecycle: false }] });
       return { preparation, goal: await this.goals.run(goal.id) };
     }
     throw new ValidationError(`Unsupported coordinator intent '${intent.intent}'`);
