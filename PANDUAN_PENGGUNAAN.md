@@ -226,6 +226,30 @@ sand
 
 Semua command `collect` otomatis melewati koordinator, termasuk command tanpa kata `ai`. MineHive mencari block dalam radius yang diizinkan, memeriksa persyaratan alat dari registry Minecraft, mendatangi block, menambangnya, lalu mengambil hasilnya.
 
+### Survei area dan shared memory
+
+```text
+!bot1 survey 64
+!scout jelajah 32
+```
+
+Survei memeriksa chunk yang sudah termuat di sekitar bot tanpa menggerakkan bot secara liar. Marker village, stronghold, ancient city, trial chamber, dan resource berharga yang ditemukan disimpan otomatis ke world memory server/dimension tersebut sekaligus semantic memory HiveMind. Hasil survei dapat dipakai oleh bot lain melalui command natural-language atau pencarian memory.
+
+Bot juga menjalankan structure observer otomatis setelah spawn dan setelah berpindah cukup jauh. Village, stronghold, ancient city, dan trial chamber dipromosikan menjadi long-term Hive memory dengan posisi, confidence, sumber bot, waktu observasi, serta marker pembuktiannya. Resource berharga disimpan sebagai semantic memory. Pengamatan berulang memperbarui record yang sama, bukan membuat lokasi duplikat tanpa batas.
+
+### Chest dan logistics backbone
+
+Dekatkan bot ke chest, trapped chest, barrel, atau shulker box lalu daftarkan storage:
+
+```text
+!bot1 register_chest gudang 16
+!bot1 store stone 64 gudang
+!bot1 retrieve stone 32 gudang
+!bot1 stock
+```
+
+Nama storage persisten per server dan dimension. Sebelum mengambil item, MineHive membaca ulang isi storage, membuat reservasi stok, dan mengunci chest melalui HiveMind agar dua bot tidak memakai stok yang sama. Deposit dan withdrawal baru dianggap berhasil jika perubahan jumlah pada inventory bot dan storage sama persis. Setiap transfer tersimpan sebagai audit record. Tab **Logistics** menampilkan storage, stok tersedia, stok yang sedang direservasi, dan transfer terverifikasi.
+
 ### Menyimpan dan kembali ke home
 
 ```text
@@ -599,14 +623,21 @@ MINEHIVE_DATABASE_FILE=./data/minehive.sqlite
 MINEHIVE_AUTONOMY_ENABLED=false
 ```
 
-Autonomy sengaja nonaktif secara default. Tambahkan objective aman melalui `POST /api/v1/autonomy/objectives`, aktifkan melalui `POST /api/v1/autonomy/enabled`, lalu monitor `/health`, `/api/v1/hivemind/status`, `/api/v1/ml/status`, dan `/api/v1/autonomy/status`. Aksi autonomy dibatasi pada `collect`, `farm`, `reforest`, `deforest`, `guard`, dan `status` serta tetap melewati consensus dan safety coordinator.
+Autonomy sengaja nonaktif secara default. Tambahkan objective aman melalui `POST /api/v1/autonomy/objectives`, aktifkan melalui `POST /api/v1/autonomy/enabled`, lalu monitor `/health`, `/api/v1/hivemind/status`, `/api/v1/ml/status`, dan `/api/v1/autonomy/status`. Aksi autonomy dibatasi pada `collect`, `survey`, `farm`, `reforest`, `deforest`, `guard`, dan `status` serta tetap melewati consensus dan safety coordinator.
+
+Tab **Settings** pada dashboard dapat mengubah provider/model/endpoint LLM, mengganti hingga tiga OpenRouter key, memilih level log, membaca log runtime yang sudah disensor, serta mengatur autonomy dan objective. Perubahan ini berlaku sampai proses direstart; gunakan `.env` untuk konfigurasi permanen. Nilai OpenRouter key tidak pernah dikirim kembali ke browser.
+
+Tombol **Edit & inventory** pada setiap kartu bot membuka detail inventory dan editor display name, username Minecraft, server, port, authentication, protocol version, command alias, kelompok/class, dan auto-connect. Pengaturan koneksi hanya dapat diganti ketika bot offline; hal ini mencegah profil tersimpan berbeda dari koneksi yang sedang aktif.
+
+Log terstruktur juga disimpan ke `MINEHIVE_LOG_DIRECTORY` atau `data/logs`. Setiap proses membuat satu file JSONL dan sistem hanya mempertahankan tiga file sesi terbaru; file yang lebih lama dihapus otomatis. Dashboard mengambil seluruh status berkala melalui satu endpoint snapshot agar polling tidak menghabiskan API rate limit.
 
 Backup SQLite dapat dibuat dengan `node src/cli.js backup nama-backup.sqlite` atau `POST /api/v1/database/backup`. Untuk Docker gunakan `docker compose up -d --build`; data disimpan dalam volume `minehive-data`.
 
 ## 12. Batasan versi ini
 
 - Pengujian otomatis menggunakan fake Minecraft client; koneksi nyata tergantung server, jaringan, akun, dan versi protokol.
-- Koordinator mendukung intent aman `collect`, `craft`, `follow`, `come`, `move`, `set_home`, `home`, `farm`, `deforest`, `reforest`, `combat`, `remember`, `place`, `status`, dan `converse`.
+- Koordinator mendukung intent aman `collect`, `craft`, `follow`, `come`, `move`, `set_home`, `home`, `survey`, `register_storage`, `store`, `retrieve`, `stock`, `farm`, `deforest`, `reforest`, `combat`, `remember`, `place`, `status`, dan `converse`.
+- ML contextual-beta v2 menggabungkan evidence bot sendiri dan fleet berdasarkan intent, class, health, food, kapasitas inventory, ketersediaan alat, recency, durasi, serta kemiripan feature. Prediction hanya menentukan ranking/decision support dan tidak melewati safety rules.
 - Semantic memory memakai embedding hash lokal deterministik. Model embedding neural eksternal dan consolidation LLM terjadwal belum tersedia.
 - Farming mendukung wheat, carrots, potatoes, dan beetroot. Combat memakai mob allowlist dan hanya bekerja pada entity yang sedang termuat oleh client.
 - Pertukaran item membutuhkan kedua bot berada pada server dan dimension yang sama serta cukup dekat untuk saling mendatangi.

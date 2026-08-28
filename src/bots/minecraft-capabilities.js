@@ -1,5 +1,5 @@
 export const MINECRAFT_CAPABILITIES = Object.freeze([
-  'minecraft.navigation', 'minecraft.smart-movement', 'minecraft.follow-player', 'minecraft.come', 'minecraft.set-home', 'minecraft.home', 'minecraft.crafting', 'minecraft.craft-planning', 'minecraft.smelting', 'minecraft.block-analysis', 'minecraft.resource-analysis', 'minecraft.collection', 'minecraft.farming', 'minecraft.deforestation', 'minecraft.reforestation', 'minecraft.combat', 'minecraft.drop-item', 'minecraft.pickup-item', 'minecraft.chat', 'minecraft.observation', 'minecraft.inventory', 'minecraft.stop'
+  'minecraft.navigation', 'minecraft.smart-movement', 'minecraft.follow-player', 'minecraft.come', 'minecraft.set-home', 'minecraft.home', 'minecraft.crafting', 'minecraft.craft-planning', 'minecraft.smelting', 'minecraft.block-analysis', 'minecraft.resource-analysis', 'minecraft.survey', 'minecraft.storage-discovery', 'minecraft.storage-inspection', 'minecraft.storage-deposit', 'minecraft.storage-withdraw', 'minecraft.collection', 'minecraft.farming', 'minecraft.deforestation', 'minecraft.reforestation', 'minecraft.combat', 'minecraft.drop-item', 'minecraft.pickup-item', 'minecraft.chat', 'minecraft.observation', 'minecraft.inventory', 'minecraft.stop'
 ]);
 
 export function registerMinecraftCapabilities(registry, botManager) {
@@ -15,6 +15,11 @@ export function registerMinecraftCapabilities(registry, botManager) {
   registry.register({ name: 'minecraft.smelting', execute: (input, context) => adapter(context).smeltItem(input, context) });
   registry.register({ name: 'minecraft.block-analysis', execute: (input, context) => adapter(context).analyzeBlock(input) });
   registry.register({ name: 'minecraft.resource-analysis', execute: (input, context) => adapter(context).findSourceBlocks(input) });
+  registry.register({ name: 'minecraft.survey', execute: (input, context) => adapter(context).survey(input) });
+  registry.register({ name: 'minecraft.storage-discovery', execute: (input, context) => adapter(context).findNearestStorage(input) });
+  registry.register({ name: 'minecraft.storage-inspection', execute: (input, context) => adapter(context).inspectStorage(input) });
+  registry.register({ name: 'minecraft.storage-deposit', execute: (input, context) => adapter(context).depositStorage(input) });
+  registry.register({ name: 'minecraft.storage-withdraw', execute: (input, context) => adapter(context).withdrawStorage(input) });
   registry.register({ name: 'minecraft.drop-item', execute: (input, context) => adapter(context).dropItem(input) });
   registry.register({ name: 'minecraft.pickup-item', execute: (input, context) => adapter(context).pickupItem(input, context) });
   registry.register({ name: 'minecraft.collection', execute: (input, context) => adapter(context).collect(input, context) });

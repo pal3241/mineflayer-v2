@@ -14,25 +14,29 @@ export function createSemanticMemory({ repository, events, embeddingProvider, ma
   if (!repository || typeof repository.list !== 'function') throw new ValidationError('Semantic memory repository is required');
   if (!embeddingProvider || typeof embeddingProvider.embed !== 'function') throw new ValidationError('Semantic memory embedding provider is required');
   if (!Number.isInteger(maxRecords) || maxRecords < 100) throw new ValidationError('Semantic memory maxRecords must be at least 100');
+  let cachePromise = null; let mutationQueue = Promise.resolve();
+  const loadRecords = () => { cachePromise ??= repository.list(); return cachePromise; };
+  const mutate = operation => { const result = mutationQueue.then(operation); mutationQueue = result.then(() => undefined, () => undefined); return result; };
 
-  const remember = async input => {
-    const value = normalizeMemory(input); const vector = embeddingProvider.embed(value.content); const records = await repository.list();
+  const remember = input => mutate(async () => {
+    const value = normalizeMemory(input); const vector = embeddingProvider.embed(value.content); let records = await loadRecords();
     const duplicate = records.find(record => sameScope(record, value) && record.type === value.type && cosine(record.embedding?.vector, vector) >= 0.97);
     const now = new Date().toISOString();
     const record = duplicate
       ? await repository.update(duplicate.id, { ...value, id: duplicate.id, confidence: Math.max(duplicate.confidence, value.confidence), importance: Math.max(duplicate.importance, value.importance), embedding: embeddingMetadata(embeddingProvider, vector, now), createdAt: duplicate.createdAt, updatedAt: now, version: duplicate.version + 1 })
       : await repository.create({ ...value, id: randomUUID(), embedding: embeddingMetadata(embeddingProvider, vector, now), createdAt: now, updatedAt: now, version: 1 });
-    await prune(repository, maxRecords); await events?.publish('memory.semantic.remembered', publicMemory(record), { source: 'semantic-memory' }); return publicMemory(record);
-  };
+    records = duplicate ? records.map(item => item.id === record.id ? record : item) : [record, ...records]; cachePromise = Promise.resolve(await prune(repository, records, maxRecords)); await events?.publish('memory.semantic.remembered', publicMemory(record), { source: 'semantic-memory' }); return publicMemory(record);
+  });
 
   const search = async query => {
     const text = String(query.text ?? '').trim(); const queryVector = text ? embeddingProvider.embed(text) : null; const now = Date.now(); const limit = boundedInteger(query.limit, 1, 50, 10);
-    return (await repository.list()).filter(record => matchesScope(record, query) && (!query.type || record.type === String(query.type).toUpperCase()) && (!query.visibility || record.visibility === String(query.visibility).toUpperCase()))
+    return (await loadRecords()).filter(record => matchesScope(record, query) && (!query.type || record.type === String(query.type).toUpperCase()) && (!query.visibility || record.visibility === String(query.visibility).toUpperCase()))
       .map(record => ({ record, score: scoreMemory(record, queryVector, now) })).sort((left, right) => right.score - left.score || right.record.updatedAt.localeCompare(left.record.updatedAt)).slice(0, limit).map(({ record, score }) => ({ ...publicMemory(record), relevance: Math.round(score * 10000) / 10000 }));
   };
 
-  const status = async () => { const records = await repository.list(); return { status: 'HEALTHY', count: records.length, maxRecords, embedding: { model: embeddingProvider.model, version: embeddingProvider.version, dimensions: embeddingProvider.dimensions }, byType: Object.fromEntries([...TYPES].map(type => [type, records.filter(record => record.type === type).length])) }; };
-  return Object.freeze({ remember, search, forget: id => repository.delete(id), status });
+  const status = async () => { const records = await loadRecords(); return { status: 'HEALTHY', count: records.length, maxRecords, embedding: { model: embeddingProvider.model, version: embeddingProvider.version, dimensions: embeddingProvider.dimensions }, byType: Object.fromEntries([...TYPES].map(type => [type, records.filter(record => record.type === type).length])) }; };
+  const forget = id => mutate(async () => { const removed = await repository.delete(id); if (removed) cachePromise = Promise.resolve((await loadRecords()).filter(record => record.id !== id)); return removed; });
+  return Object.freeze({ remember, search, forget, status });
 }
 
 function normalizeMemory(input) {
@@ -49,6 +53,6 @@ function sameScope(left, right) { return left.worldKey === right.worldKey && lef
 function matchesScope(record, query) { return (!query.worldKey || record.worldKey === query.worldKey) && (!query.dimension || record.dimension === query.dimension) && (!query.sourceBotId || record.sourceBotId === query.sourceBotId || record.visibility !== 'PRIVATE'); }
 function embeddingMetadata(provider, vector, generatedAt) { return { model: provider.model, version: provider.version, dimensions: provider.dimensions, generatedAt, vector }; }
 function publicMemory(record) { const { embedding, ...value } = record; return { ...value, embedding: { model: embedding.model, version: embedding.version, dimensions: embedding.dimensions, generatedAt: embedding.generatedAt } }; }
-async function prune(repository, maxRecords) { const records = await repository.list(); if (records.length <= maxRecords) return; const removable = records.filter(record => record.importance < 0.9 && record.type !== 'LONG_TERM').sort((left, right) => left.importance - right.importance || left.updatedAt.localeCompare(right.updatedAt)); for (const record of removable.slice(0, records.length - maxRecords)) await repository.delete(record.id); }
+async function prune(repository, records, maxRecords) { if (records.length <= maxRecords) return records; const removable = records.filter(record => record.importance < 0.9 && record.type !== 'LONG_TERM').sort((left, right) => left.importance - right.importance || left.updatedAt.localeCompare(right.updatedAt)).slice(0, records.length - maxRecords); for (const record of removable) await repository.delete(record.id); const removed = new Set(removable.map(record => record.id)); return records.filter(record => !removed.has(record.id)); }
 function boundedNumber(value, minimum, maximum, fallback) { const number = Number(value ?? fallback); if (!Number.isFinite(number)) throw new ValidationError('Memory numeric field must be finite'); return Math.max(minimum, Math.min(maximum, number)); }
 function boundedInteger(value, minimum, maximum, fallback) { const number = Number.parseInt(value ?? fallback, 10); if (!Number.isInteger(number)) throw new ValidationError('Memory limit must be an integer'); return Math.max(minimum, Math.min(maximum, number)); }

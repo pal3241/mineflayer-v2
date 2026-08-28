@@ -23,3 +23,7 @@ export { createHashEmbeddingProvider, createSemanticMemory } from './memory/sema
 export { createAdaptiveModel } from './ml/adaptive-model.js';
 export { createHiveService } from './hivemind/hive-service.js';
 export { createAutonomyService } from './autonomy/autonomy-service.js';
+export { RotatingLogStore } from './observability/rotating-log-store.js';
+export { createDiscoveryService } from './world/discovery-service.js';
+export { createStructureObserver } from './world/structure-observer.js';
+export { createLogisticsService } from './logistics/logistics-service.js';

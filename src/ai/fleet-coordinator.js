@@ -9,7 +9,7 @@ const SWORDS = ['wooden_sword', 'golden_sword', 'stone_sword', 'iron_sword', 'di
 export class FleetCoordinator {
   #recent = new Map();
   #busy = new Map();
-  constructor({ gateway, bots, goals, memory, semanticMemory, ml, hive, events, logger }) { this.gateway = gateway; this.bots = bots; this.goals = goals; this.memory = memory; this.semanticMemory = semanticMemory; this.ml = ml; this.hive = hive; this.events = events; this.logger = logger; }
+  constructor({ gateway, bots, goals, memory, semanticMemory, discovery, logistics, ml, hive, events, logger }) { this.gateway = gateway; this.bots = bots; this.goals = goals; this.memory = memory; this.semanticMemory = semanticMemory; this.discovery = discovery; this.logistics = logistics; this.ml = ml; this.hive = hive; this.events = events; this.logger = logger; }
   status() { return { llm: this.gateway.status(), bots: this.bots.list().length, coordination: 'semantic-ml-hivemind-resource-planning' }; }
   fleetView() {
     const bots = this.bots.list();
@@ -24,13 +24,13 @@ export class FleetCoordinator {
     this.hive.syncMembers(this.bots.list()); const memoryTargets = this.#select(selector ?? 'auto'); const targetRuntime = memoryTargets.length ? this.bots.get(memoryTargets[0].id) : null; const rawMemories = targetRuntime ? await this.memory?.forBot(targetRuntime, { limit: 12 }) : []; const identity = targetRuntime ? serverIdentity(targetRuntime.options) : null; const semantic = targetRuntime ? await this.semanticMemory.search({ text, worldKey: `${identity.host}:${identity.port}`, dimension: targetRuntime.adapter.snapshot().dimension, sourceBotId: targetRuntime.id, limit: 8 }) : []; const memories = [...rawMemories.map(memory => ({ kind: 'world', type: memory.type, name: memory.name, position: memory.position, confidence: memory.confidence, updatedAt: memory.updatedAt })), ...semantic.map(memory => ({ kind: 'semantic', type: memory.type, content: memory.content, confidence: memory.confidence, relevance: memory.relevance, source: memory.source }))];
     const intent = await this.gateway.interpret(text, { selector, fleet: this.fleetView(), memories, conversationId: `${actor}:${selector ?? 'auto'}` });
     const selected = await rankByPrediction(this.#select(intent.selector), intent.intent, this.ml); if (!selected.length) throw new ConflictError(`No available bots match '${intent.selector}'`);
-    const targets = ['collect', 'craft'].includes(intent.intent) ? selected.slice(0, Math.min(selected.length, intent.count)) : selected; const counts = distribute(intent.count, targets.length);
+    const singleton = ['register_storage', 'retrieve', 'stock'].includes(intent.intent); const distributed = ['collect', 'craft', 'store', 'farm', 'deforest', 'reforest'].includes(intent.intent); const targets = singleton ? selected.slice(0, 1) : distributed ? selected.slice(0, Math.min(selected.length, intent.count)) : selected; const counts = distribute(intent.count, targets.length);
     this.#reserve(targets.map(bot => bot.id));
     const started = performance.now(); try {
       await this.events.publish('coordinator.requested', { actor, text, intent, targets: targets.map(bot => bot.id) }, { source: 'fleet-coordinator' });
       const results = await Promise.allSettled(targets.map((bot, index) => this.#execute(bot.id, { ...intent, count: counts[index] })));
       const response = { intent, results: results.map((result, index) => ({ botId: targets[index].id, status: result.status === 'fulfilled' ? 'COMPLETED' : 'FAILED', result: result.value, error: result.reason?.message })) };
-      const durationMs = performance.now() - started; await Promise.all(response.results.map(result => this.ml.recordOutcome({ botId: result.botId, intent: intent.intent, success: result.status === 'COMPLETED', durationMs, features: { selector: intent.selector, fleetSize: selected.length }, source: 'coordinator' })));
+      const durationMs = performance.now() - started; await Promise.all(response.results.map(result => this.ml.recordOutcome({ botId: result.botId, intent: intent.intent, success: result.status === 'COMPLETED', durationMs, features: botFeatures(this.bots.get(result.botId).snapshot(), intent.intent, selected.length), source: 'coordinator' })));
       await Promise.all(response.results.map(result => { const runtime = this.bots.get(result.botId); const server = serverIdentity(runtime.options); return this.semanticMemory.remember({ type: 'EPISODIC', content: `${intent.intent} oleh ${result.botId}: ${result.status}${result.error ? ` - ${result.error}` : ''}`, visibility: 'HIVE', worldKey: `${server.host}:${server.port}`, dimension: runtime.adapter.snapshot().dimension, source: 'fleet-coordinator', sourceBotId: result.botId, confidence: result.status === 'COMPLETED' ? 0.9 : 0.7, importance: result.status === 'COMPLETED' ? 0.5 : 0.8, tags: [intent.intent, result.status.toLowerCase()], metadata: { actor } }); }));
       await this.events.publish('coordinator.completed', response, { source: 'fleet-coordinator' }); return response;
     } finally { this.#release(targets.map(bot => bot.id)); }
@@ -51,6 +51,13 @@ export class FleetCoordinator {
     if (intent.intent === 'move') return adapter.smartMove({ x: intent.x, y: intent.y, z: intent.z });
     if (intent.intent === 'set_home') return adapter.setHome({ name: intent.home });
     if (intent.intent === 'home') return adapter.goHome({ name: intent.home });
+    if (intent.intent === 'survey') {
+      const survey = await adapter.survey({ maxDistance: intent.radius }); return this.discovery.record({ runtime, survey, reason: 'command' });
+    }
+    if (intent.intent === 'register_storage') return this.logistics.registerNearest({ runtime, name: intent.name, maxDistance: intent.radius });
+    if (intent.intent === 'store') return this.logistics.store({ runtime, storageName: intent.name, item: intent.item, count: intent.count });
+    if (intent.intent === 'retrieve') return this.logistics.retrieve({ runtime, storageName: intent.name, item: intent.item, count: intent.count });
+    if (intent.intent === 'stock') { const server = serverIdentity(runtime.options); return { storages: await this.logistics.stock({ worldKey: `${server.host}:${server.port}`, dimension: adapter.snapshot().dimension }) }; }
     if (intent.intent === 'remember') { const snapshot = adapter.snapshot(); return this.memory.remember({ ...runtime.options, dimension: snapshot.dimension, position: snapshot.position, name: intent.name, type: intent.type, sourceBotId: botId }); }
     if (intent.intent === 'place') { const places = await this.memory.forBot(runtime, { name: intent.name, limit: 1 }); if (!places.length) throw new ConflictError(`Shared memory '${intent.name}' was not found in this world`); return { memory: places[0], movement: await adapter.smartMove({ ...places[0].position, range: 2 }) }; }
     if (intent.intent === 'farm') { const requirements = typeof adapter.farmRequirements === 'function' ? await adapter.farmRequirements({ crop: intent.crop, count: intent.count }) : { needsHoe: true, needsSeed: false }; const equipment = requirements.needsHoe ? await this.#ensureEquipment(botId, HOES) : null; const seed = requirements.needsSeed ? await this.#acquireItem(botId, requirements.seed, 1, new Set()) : null; return { requirements, equipment, seed, farming: await adapter.farm({ crop: intent.crop, count: intent.count }) }; }
@@ -141,4 +148,6 @@ function toolTier(name) { const material = Object.keys(TOOL_TIER).find(value => 
 function serverIdentity(options = {}) { return { host: options.host ?? 'localhost', port: Number(options.port ?? 25565) }; }
 function sameServer(left = {}, right = {}) { const a = serverIdentity(left); const b = serverIdentity(right); return String(a.host).toLowerCase() === String(b.host).toLowerCase() && a.port === b.port; }
 function distribute(total, slots) { const base = Math.floor(total / slots); const remainder = total % slots; return Array.from({ length: slots }, (_, index) => base + (index < remainder ? 1 : 0)); }
-async function rankByPrediction(bots, intent, ml) { const candidates = await Promise.all(bots.map(async (bot, index) => ({ bot, index, prediction: await ml.predict({ botId: bot.id, intent }) }))); return candidates.sort((left, right) => right.prediction.prediction - left.prediction.prediction || left.index - right.index).map(candidate => candidate.bot); }
+async function rankByPrediction(bots, intent, ml) { const candidates = await Promise.all(bots.map(async (bot, index) => ({ bot, index, prediction: await ml.predict({ botId: bot.id, intent, features: botFeatures(bot, intent, bots.length) }) }))); return candidates.sort((left, right) => right.prediction.prediction - left.prediction.prediction || left.index - right.index).map(candidate => candidate.bot); }
+function botFeatures(bot, intent, fleetSize) { const inventory = bot.runtime?.inventorySummary ?? []; return { intent, className: String(bot.metadata?.className ?? 'worker'), healthBand: band(bot.runtime?.health, 5), foodBand: band(bot.runtime?.food, 5), inventoryStacks: inventory.length, hasTool: inventory.some(item => /_(pickaxe|axe|hoe|sword)$/.test(item.name)), fleetSize }; }
+function band(value, size) { const number = Number(value); return Number.isFinite(number) ? Math.floor(number / size) * size : -1; }

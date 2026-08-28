@@ -6,6 +6,7 @@
   <title>MineHive Control Center</title>
   <link rel="stylesheet" href="/dashboard.css">
   <link rel="stylesheet" href="/camera.css">
+  <link rel="stylesheet" href="/settings.css">
 </head>
 <body>
   <aside class="sidebar">
@@ -15,7 +16,9 @@
       <button class="nav" data-view="bots">◆ <span>Bots & Join</span></button>
       <button class="nav" data-view="cameras">◉ <span>Live Cameras</span></button>
       <button class="nav" data-view="commands">⌁ <span>Command Center</span></button>
+      <button class="nav" data-view="logistics">▦ <span>Logistics</span></button>
       <button class="nav" data-view="admins">♙ <span>Admins</span></button>
+      <button class="nav" data-view="settings">⚙ <span>Settings</span></button>
     </nav>
     <div class="connection"><i id="connectionDot"></i><div><b id="connectionText">Connecting</b><small id="lastUpdate">—</small></div></div>
   </aside>
@@ -35,6 +38,11 @@
         <article><span>Active goals</span><strong id="statGoals">0</strong><small>Running workloads</small></article>
         <article><span>System health</span><strong id="statHealth" class="health-text">—</strong><small>Core and fleet</small></article>
         <article><span>Coordinator</span><strong id="statAi" class="health-text">—</strong><small id="statAiModel">Deterministic fallback</small></article>
+        <article><span>Semantic memory</span><strong id="statMemory">0</strong><small>Shared knowledge records</small></article>
+        <article><span>Hive members</span><strong id="statHive">0</strong><small>Active fleet members</small></article>
+        <article><span>ML outcomes</span><strong id="statMl">0</strong><small>Coordination evidence</small></article>
+        <article><span>Process memory</span><strong id="statProcess">—</strong><small id="statProcessHeap">Runtime diagnostics</small></article>
+        <article><span>Logistics</span><strong id="statLogistics">0</strong><small id="statLogisticsDetail">Storage backbone</small></article>
       </div>
       <div class="split">
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">FLEET</p><h2>Bot status</h2></div><button class="button secondary goto" data-target="bots">Manage bots</button></div><div id="overviewBots" class="bot-list"></div></section>
@@ -80,11 +88,20 @@
             <button class="button primary" type="submit">Execute command</button>
           </form>
           <div class="quick-commands">
-            <button data-command="status">status</button><button data-command="goto 100 64 100">goto x y z</button><button data-command="collect oak_log 16">collect</button><button data-command="come Player">come</button><button data-command="follow Player">follow</button><button data-command="farm wheat 16">farm</button><button data-command="tebang pohon 1">deforest</button><button data-command="reboisasi 8">reforest</button><button data-command="guard 16">guard</button><button data-command="combat">combat</button><button data-command="meat">meat</button><button data-command="sethome home">set home</button><button data-command="home home">home</button><button data-command="craft wooden_sword 1">craft</button><button data-command="inventory">inventory</button><button data-command="stop">stop</button>
+            <button data-command="status">status</button><button data-command="survey 64">survey</button><button data-command="register_chest gudang 16">register chest</button><button data-command="store stone 64 gudang">store</button><button data-command="retrieve stone 32 gudang">retrieve</button><button data-command="stock">stock</button><button data-command="goto 100 64 100">goto x y z</button><button data-command="collect oak_log 16">collect</button><button data-command="come Player">come</button><button data-command="follow Player">follow</button><button data-command="farm wheat 16">farm</button><button data-command="tebang pohon 1">deforest</button><button data-command="reboisasi 8">reforest</button><button data-command="guard 16">guard</button><button data-command="combat">combat</button><button data-command="meat">meat</button><button data-command="sethome home">set home</button><button data-command="home home">home</button><button data-command="craft wooden_sword 1">craft</button><button data-command="inventory">inventory</button><button data-command="stop">stop</button>
           </div>
           <form id="aiForm" class="command-form ai-form"><label>Natural language / chat<input id="aiInput" placeholder="tebang pohon, jaga village, atau berapa 1+1"></label><button class="button secondary" type="submit">Kirim ke coordinator</button></form>
         </section>
         <section class="panel terminal-panel"><div class="panel-title"><div><p class="eyebrow">OUTPUT</p><h2>Command log</h2></div><button id="clearLog" class="icon-button">Clear</button></div><pre id="commandLog">MineHive command center ready.</pre></section>
+      </div>
+    </section>
+
+    <section id="logistics" class="view">
+      <div class="panel-title"><div><p class="eyebrow">RESOURCE NETWORK</p><h2>Storage & logistics</h2></div><button id="refreshLogistics" class="button secondary">Refresh logistics</button></div>
+      <div class="settings-grid">
+        <section class="panel"><div class="panel-title"><div><p class="eyebrow">WAREHOUSES</p><h2>Registered storage</h2></div></div><div id="logisticsStorages" class="timeline"></div></section>
+        <section class="panel"><div class="panel-title"><div><p class="eyebrow">RESERVATIONS</p><h2>Stock commitments</h2></div></div><div id="logisticsReservations" class="timeline"></div></section>
+        <section class="panel full"><div class="panel-title"><div><p class="eyebrow">AUDIT</p><h2>Verified transfers</h2></div></div><div id="logisticsTransfers" class="timeline"></div></section>
       </div>
     </section>
 
@@ -94,7 +111,68 @@
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">AUTHORIZED USERS</p><h2>Chat administrators</h2></div></div><div id="adminList" class="admin-list"></div></section>
       </div>
     </section>
+
+    <section id="settings" class="view">
+      <div class="settings-grid">
+        <section class="panel">
+          <div class="panel-title"><div><p class="eyebrow">AI GATEWAY</p><h2>LLM & OpenRouter</h2></div><span id="llmSettingStatus" class="badge">—</span></div>
+          <form id="llmSettingsForm" class="form-grid">
+            <label>Provider<select id="llmProvider"><option value="none">Disabled</option><option value="auto">Auto</option><option value="openrouter">OpenRouter</option><option value="local">Local OpenAI-compatible</option></select></label>
+            <label>Model<input id="llmModel" placeholder="openrouter/auto"></label>
+            <label class="full">Endpoint<input id="llmEndpoint" placeholder="https://openrouter.ai/api/v1"></label>
+            <label>OpenRouter key 1<input id="openRouterKey1" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
+            <label>OpenRouter key 2<input id="openRouterKey2" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
+            <label>OpenRouter key 3<input id="openRouterKey3" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
+            <label>Local endpoint<input id="localLlmEndpoint" placeholder="http://127.0.0.1:11434/v1"></label>
+            <label>Local model<input id="localLlmModel" placeholder="qwen2.5"></label>
+            <button class="button primary full" type="submit">Apply LLM settings</button>
+          </form>
+          <p id="keyStatus" class="hint">API key tidak pernah ditampilkan kembali. Kolom kosong mempertahankan key runtime saat ini.</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title"><div><p class="eyebrow">AUTONOMOUS LOOP</p><h2>Autonomy settings</h2></div><span id="autonomySettingStatus" class="badge">—</span></div>
+          <form id="autonomySettingsForm" class="form-grid">
+            <label class="check"><input id="autonomyEnabled" type="checkbox"><span>Aktifkan autonomy</span></label>
+            <label>Interval (ms)<input id="autonomyInterval" type="number" min="5000" step="1000" required></label>
+            <label>Max actions / hour<input id="autonomyBudget" type="number" min="1" max="1000" required></label>
+            <button class="button primary full" type="submit">Apply autonomy settings</button>
+          </form>
+          <form id="autonomyObjectiveForm" class="command-form settings-objective">
+            <label>Objective aman<input id="autonomyObjective" required placeholder="farm wheat 16"></label>
+            <label>Selector<input id="autonomySelector" required value="auto" placeholder="auto, bot:bot1, class:miner"></label>
+            <button class="button secondary" type="submit">Add objective</button>
+          </form>
+          <div id="autonomyObjectives" class="timeline"></div>
+        </section>
+
+        <section class="panel full settings-log-panel">
+          <div class="panel-title"><div><p class="eyebrow">OBSERVABILITY</p><h2>Runtime logs</h2></div><button id="refreshRuntimeLogs" class="icon-button">Refresh</button></div>
+          <form id="logSettingsForm" class="inline-form settings-log-controls"><select id="logLevel"><option value="debug">Debug</option><option value="info">Info</option><option value="warn">Warn</option><option value="error">Error</option><option value="silent">Silent</option></select><button class="button secondary" type="submit">Set log level</button></form>
+          <div id="savedLogFiles" class="saved-log-files"><span class="hint">Loading saved logs…</span></div>
+          <pre id="runtimeLogs">No runtime logs loaded.</pre>
+        </section>
+      </div>
+    </section>
   </main>
+  <dialog id="botEditor" class="bot-editor">
+    <form id="botEditorForm" class="form-grid">
+      <input id="editBotId" type="hidden">
+      <div class="full panel-title"><div><p class="eyebrow">BOT DETAIL</p><h2 id="editBotTitle">Edit bot</h2></div><button id="closeBotEditor" class="icon-button" type="button">Close</button></div>
+      <label>Display name<input id="editBotName" required></label>
+      <label>Minecraft username<input id="editBotUsername" required></label>
+      <label>Server host<input id="editBotHost" required></label>
+      <label>Server port<input id="editBotPort" type="number" min="1" max="65535" required></label>
+      <label>Authentication<select id="editBotAuth"><option value="offline">Offline</option><option value="microsoft">Microsoft</option></select></label>
+      <label>Protocol version<input id="editBotVersion" placeholder="Auto detect"></label>
+      <label>Command alias<input id="editBotAlias" required></label>
+      <label>Bot class / kelompok<input id="editBotClass" required></label>
+      <label class="check"><input id="editBotAutoConnect" type="checkbox"><span>Connect automatically</span></label>
+      <section class="full inventory-detail"><h3>Inventory saat ini</h3><div id="editBotInventory" class="inventory-grid"></div></section>
+      <p id="editBotHint" class="hint full"></p>
+      <button class="button primary full" type="submit">Save bot configuration</button>
+    </form>
+  </dialog>
   <script type="module" src="/dashboard.js"></script>
 </body>
 </html>

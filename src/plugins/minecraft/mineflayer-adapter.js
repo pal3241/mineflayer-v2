@@ -6,6 +6,18 @@ const CROP_ITEMS = Object.freeze({ wheat: 'wheat_seeds', carrots: 'carrot', pota
 const CROP_AGE = Object.freeze({ wheat: 7, carrots: 7, potatoes: 7, beetroot: 3 });
 const HOSTILE_MOBS = new Set(['zombie', 'skeleton', 'creeper', 'spider', 'cave_spider', 'drowned', 'husk', 'stray', 'witch', 'pillager', 'vindicator', 'evoker', 'ravager', 'phantom', 'slime', 'magma_cube', 'guardian', 'elder_guardian', 'blaze', 'ghast', 'hoglin', 'zoglin', 'piglin_brute', 'silverfish', 'endermite', 'shulker', 'wither_skeleton']);
 const MEAT_MOBS = new Set(['cow', 'sheep', 'pig', 'chicken', 'rabbit', 'mooshroom']);
+const STORAGE_BLOCKS = new Set(['chest', 'trapped_chest', 'barrel', 'shulker_box']);
+const SURVEY_MARKERS = Object.freeze([
+  { block: 'bell', type: 'village', confidence: 0.95 },
+  { block: 'end_portal_frame', type: 'stronghold', confidence: 0.99 },
+  { block: 'reinforced_deepslate', type: 'ancient_city', confidence: 0.99 },
+  { block: 'trial_spawner', type: 'trial_chamber', confidence: 0.98 },
+  { block: 'diamond_ore', type: 'resource', confidence: 0.95 },
+  { block: 'deepslate_diamond_ore', type: 'resource', confidence: 0.95 },
+  { block: 'ancient_debris', type: 'resource', confidence: 0.98 },
+  { block: 'emerald_ore', type: 'resource', confidence: 0.9 },
+  { block: 'deepslate_emerald_ore', type: 'resource', confidence: 0.9 }
+]);
 
 export class MineflayerAdapter extends EventEmitter {
   constructor({ factory, plugins = true, autoEat = {} } = {}) { super(); this.factory = factory; this.plugins = plugins; this.autoEatConfig = { enabled: true, minHunger: 15, ...autoEat }; this.client = null; this.status = 'DISCONNECTED'; this.pluginStatus = {}; this.homes = new Map(); this.combatState = { mode: 'OFF', status: 'IDLE' }; }
@@ -81,6 +93,27 @@ export class MineflayerAdapter extends EventEmitter {
     const bot = this.#ready('resource-analysis'); const definition = bot.registry?.itemsByName?.[item]; if (!definition) return [];
     return (bot.registry.blocksArray ?? Object.values(bot.registry.blocksByName ?? {})).filter(block => block?.diggable !== false && block.drops?.includes(definition.id)).sort((left, right) => Number(right.name === item) - Number(left.name === item)).map(block => block.name);
   }
+  async survey({ maxDistance }) {
+    const bot = this.#ready('survey'); const radius = Math.max(8, Math.min(128, Number(maxDistance)));
+    if (!Number.isFinite(radius)) throw new ValidationError('Survey distance must be numeric');
+    const discoveries = SURVEY_MARKERS.flatMap(marker => {
+      const definition = bot.registry?.blocksByName?.[marker.block]; if (!definition) return [];
+      return bot.findBlocks({ matching: definition.id, maxDistance: radius, count: 8 }).map(position => ({ type: marker.type, name: marker.block, marker: marker.block, confidence: marker.confidence, position: { x: position.x, y: position.y, z: position.z } }));
+    });
+    return { maxDistance: radius, scannedAt: new Date().toISOString(), discoveries: uniqueDiscoveries(discoveries).slice(0, 32) };
+  }
+  async findNearestStorage({ maxDistance }) {
+    const bot = this.#ready('storage-discovery'); const radius = Math.max(2, Math.min(64, Number(maxDistance))); if (!Number.isFinite(radius)) throw new ValidationError('Storage search distance must be numeric'); const block = bot.findBlock({ matching: candidate => isStorageBlock(candidate?.name), maxDistance: radius }); if (!block) throw new ValidationError(`No chest or barrel found within ${radius} blocks`); return this.inspectStorage({ position: block.position });
+  }
+  async inspectStorage({ position }) { return this.#withStorage(position, 'storage-inspection', async container => storageSnapshot(container, position)); }
+  async depositStorage({ position, item, count }) {
+    const bot = this.#ready('storage-deposit'); const definition = bot.registry?.itemsByName?.[item]; const amount = Math.max(1, Math.min(2304, Number(count))); if (!definition || !Number.isInteger(amount)) throw new ValidationError(`Invalid deposit item or count for '${item}'`); const beforeBot = inventoryCount(bot, item); if (beforeBot < amount) throw new ValidationError(`Bot only has ${beforeBot} '${item}', cannot deposit ${amount}`);
+    return this.#withStorage(position, 'storage-deposit', async container => { const beforeStorage = containerCount(container, item); await container.deposit(definition.id, null, amount); const afterBot = inventoryCount(bot, item); const storage = storageSnapshot(container, position); const afterStorage = itemCount(storage.inventory, item); if (beforeBot - afterBot !== amount || afterStorage - beforeStorage !== amount) throw new ValidationError(`Deposit verification failed for ${amount} '${item}': bot ${beforeBot}->${afterBot}, storage ${beforeStorage}->${afterStorage}`); return { item, transferred: amount, storage, verification: { botBefore: beforeBot, botAfter: afterBot, storageBefore: beforeStorage, storageAfter: afterStorage } }; });
+  }
+  async withdrawStorage({ position, item, count }) {
+    const bot = this.#ready('storage-withdraw'); const definition = bot.registry?.itemsByName?.[item]; const amount = Math.max(1, Math.min(2304, Number(count))); if (!definition || !Number.isInteger(amount)) throw new ValidationError(`Invalid withdrawal item or count for '${item}'`);
+    return this.#withStorage(position, 'storage-withdraw', async container => { const beforeBot = inventoryCount(bot, item); const beforeStorage = containerCount(container, item); if (beforeStorage < amount) throw new ValidationError(`Storage only has ${beforeStorage} '${item}', cannot withdraw ${amount}`); await container.withdraw(definition.id, null, amount); const afterBot = inventoryCount(bot, item); const storage = storageSnapshot(container, position); const afterStorage = itemCount(storage.inventory, item); if (afterBot - beforeBot !== amount || beforeStorage - afterStorage !== amount) throw new ValidationError(`Withdrawal verification failed for ${amount} '${item}': bot ${beforeBot}->${afterBot}, storage ${beforeStorage}->${afterStorage}`); return { item, transferred: amount, storage, verification: { botBefore: beforeBot, botAfter: afterBot, storageBefore: beforeStorage, storageAfter: afterStorage } }; });
+  }
   async smeltRequirements({ item, count = 1 }) {
     const bot = this.#ready('smelting-plan'); const input = SMELTING_RECIPES[item]; if (!input) return null; const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1));
     return { item, count: amount, input: { name: input, count: amount }, fuel: { name: 'coal', count: Math.ceil(amount / 8) }, furnace: Boolean(bot.findBlock({ matching: bot.registry.blocksByName?.furnace?.id, maxDistance: 6 })) };
@@ -108,6 +141,7 @@ export class MineflayerAdapter extends EventEmitter {
     const cleanup = this.#abort(signal, () => { void bot.collectBlock.cancelTask(); });
     try { await bot.collectBlock.collect(blocks); return { block, requested: amount, collectedTargets: blocks.length, inventory: this.snapshot().inventorySummary }; } finally { cleanup(); }
   }
+  async #withStorage(position, capability, operation) { const bot = this.#ready(capability); const { Vec3 } = await import('vec3'); const target = new Vec3(Number(position.x), Number(position.y), Number(position.z)); await this.smartMove({ x: target.x, y: target.y, z: target.z, range: 2 }); const block = bot.blockAt(target); if (!block || !isStorageBlock(block.name)) throw new ValidationError(`Storage block was not found at ${target.x},${target.y},${target.z}`); const container = await bot.openContainer(block); try { return await operation(container); } finally { container.close(); } }
   async farm({ crop = 'wheat', count = 16, maxDistance = 32 } = {}, { signal } = {}) {
     const bot = this.#ready('farming'); const seedName = CROP_ITEMS[crop]; const age = CROP_AGE[crop]; if (!seedName || !bot.registry.blocksByName?.[crop]) throw new ValidationError(`Unsupported crop '${crop}'`); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1)); let harvested = 0; let planted = 0;
     const mature = bot.findBlocks({ matching: block => block.name === crop && Number(block.getProperties?.().age ?? -1) >= age, maxDistance, count: amount }).map(position => bot.blockAt(position)).filter(Boolean);
@@ -258,6 +292,12 @@ function bestItem(bot, predicate) { return bot.inventory.items().filter(predicat
 function equipmentRank(name) { return ['wooden', 'golden', 'stone', 'iron', 'diamond', 'netherite'].findIndex(material => name.startsWith(`${material}_`)) + 1; }
 async function equipBestWeapon(bot) { const weapon = bestItem(bot, item => item.name.endsWith('_sword') || item.name.endsWith('_axe')); if (weapon) await bot.equip(weapon, 'hand'); }
 function distance3(left, right) { return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z); }
+function uniqueDiscoveries(discoveries) { const seen = new Set(); return discoveries.filter(discovery => { const key = `${discovery.marker}:${discovery.position.x}:${discovery.position.y}:${discovery.position.z}`; if (seen.has(key)) return false; seen.add(key); return true; }); }
+function isStorageBlock(name) { return STORAGE_BLOCKS.has(name) || /_shulker_box$/.test(String(name)); }
+function storageSnapshot(container, position) { const inventory = summarizeItems(container.containerItems()); return { kind: String(container.type ?? 'storage'), position: { x: Number(position.x), y: Number(position.y), z: Number(position.z) }, inventory, capacitySlots: Number(container.inventoryStart ?? container.slots?.length ?? 0), occupiedSlots: container.containerItems().length }; }
+function containerCount(container, name) { return itemCount(summarizeItems(container.containerItems()), name); }
+function itemCount(inventory, name) { return inventory.filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0); }
+function summarizeItems(items) { const totals = new Map(); for (const item of items) totals.set(item.name, (totals.get(item.name) ?? 0) + item.count); return [...totals].map(([name, count]) => ({ name, count })).sort((left, right) => left.name.localeCompare(right.name)); }
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 async function waitForViewer(port, timeoutMs = 5000) {

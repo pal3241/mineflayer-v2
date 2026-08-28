@@ -14,11 +14,10 @@ export class BotProfileManager {
   }
   async remove(id) { await this.bots.remove(id); await this.repository.delete(id); return true; }
   async update(id, input) {
-    const runtime = this.bots.get(id); const current = await this.repository.find(id);
-    const commandAlias = String(input.commandAlias ?? current.metadata?.commandAlias ?? runtime.bot.name).trim(); const className = String(input.className ?? current.metadata?.className ?? 'worker').trim();
-    if (!/^[A-Za-z0-9_-]{2,32}$/.test(commandAlias) || !/^[A-Za-z0-9_-]{2,32}$/.test(className)) throw new ValidationError('Command alias and class must be 2-32 letters, numbers, hyphens, or underscores');
-    if (this.bots.list().some(bot => bot.id !== id && String(bot.metadata.commandAlias ?? bot.name).toLowerCase() === commandAlias.toLowerCase())) throw new ConflictError(`Bot command alias '${commandAlias}' already exists`);
-    runtime.bot.metadata = { ...runtime.bot.metadata, commandAlias, className }; await this.repository.update(id, { metadata: runtime.bot.metadata }); return runtime.snapshot();
+    const runtime = this.bots.get(id); const current = await this.repository.find(id); const profile = normalize({ ...current, ...input, id, metadata: { ...(current.metadata ?? {}), ...(input.metadata ?? {}) }, commandAlias: input.commandAlias ?? current.metadata?.commandAlias, className: input.className ?? current.metadata?.className, capabilities: current.capabilities });
+    if (this.bots.list().some(bot => bot.id !== id && String(bot.metadata.commandAlias ?? bot.name).toLowerCase() === profile.metadata.commandAlias.toLowerCase())) throw new ConflictError(`Bot command alias '${profile.metadata.commandAlias}' already exists`);
+    const connectionChanged = ['username', 'host', 'port', 'auth', 'version'].some(field => String(current[field] ?? '') !== String(profile[field] ?? '')); if (connectionChanged && !['REGISTERED', 'OFFLINE', 'FAILED'].includes(runtime.snapshot().status)) throw new ConflictError(`Disconnect bot '${id}' before changing username, server, authentication, or version`);
+    runtime.bot.name = profile.name; runtime.bot.metadata = profile.metadata; runtime.options = profile; await this.repository.update(id, profile); return runtime.snapshot();
   }
   async list() { return this.repository.list(); }
 }

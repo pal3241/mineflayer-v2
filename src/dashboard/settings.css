@@ -1,0 +1,60 @@
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.settings-objective {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-log-controls {
+  max-width: 420px;
+  margin-bottom: 14px;
+}
+
+.saved-log-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.settings-log-panel pre {
+  height: 340px;
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+  background: #070d0a;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: #a9e5ba;
+  font: 12px/1.65 "Cascadia Code", monospace;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1050px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}
+
+.bot-editor {
+  width: min(760px, calc(100vw - 30px));
+  max-height: 90vh;
+  overflow: auto;
+  background: #111b16;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.bot-editor::backdrop { background: #000b; backdrop-filter: blur(5px); }
+.inventory-detail { border-top: 1px solid var(--line); padding-top: 14px; }
+.inventory-detail h3 { margin: 0 0 10px; }
+.inventory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 7px; }
+.inventory-item { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #0c1511; }
+.inventory-preview { color: var(--muted); font-size: 11px; margin: 9px 0; }
+.inventory-preview b { color: var(--text); }

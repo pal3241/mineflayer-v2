@@ -7,7 +7,7 @@ export function loadConfig(env = process.env) {
   const profile = env.MINEHIVE_PROFILE ?? 'development';
   const config = {
     profile,
-    log: { level: env.MINEHIVE_LOG_LEVEL ?? 'info' },
+    log: { level: env.MINEHIVE_LOG_LEVEL ?? 'info', directory: env.MINEHIVE_LOG_DIRECTORY, maxFiles: 3 },
     api: { host: env.MINEHIVE_API_HOST ?? '127.0.0.1', port: integer(env.MINEHIVE_API_PORT, 3000), token: env.MINEHIVE_API_TOKEN || null, rateLimitPerMinute: integer(env.MINEHIVE_API_RATE_LIMIT_PER_MINUTE, 120) },
     dataPath: env.MINEHIVE_DATA_PATH ?? './data',
     database: { driver: env.MINEHIVE_DATABASE_DRIVER ?? (profile === 'production' ? 'sqlite' : 'json'), file: env.MINEHIVE_DATABASE_FILE ?? './data/minehive.sqlite' },

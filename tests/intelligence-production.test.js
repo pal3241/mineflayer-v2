@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { access, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { EventBus, MemoryRepository, SqliteDatabase, createAdaptiveModel, createApplication, createHashEmbeddingProvider, createHiveService, createSemanticMemory } from '../src/index.js';
+import { EventBus, MemoryRepository, RotatingLogStore, SqliteDatabase, createAdaptiveModel, createApplication, createHashEmbeddingProvider, createHiveService, createSemanticMemory } from '../src/index.js';
 
 test('SQLite production repository migrates, persists, and creates a verified backup', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'minehive-sqlite-')); const database = new SqliteDatabase({ file: join(directory, 'minehive.sqlite') });
@@ -17,6 +17,12 @@ test('production profile starts with secured SQLite health and shuts down cleanl
   const directory = await mkdtemp(join(tmpdir(), 'minehive-production-')); const app = createApplication({ env: { MINEHIVE_PROFILE: 'production', MINEHIVE_API_TOKEN: 'production-test-token', MINEHIVE_DATABASE_DRIVER: 'sqlite', MINEHIVE_DATABASE_FILE: join(directory, 'minehive.sqlite'), MINEHIVE_DATA_PATH: directory, MINEHIVE_LOG_LEVEL: 'silent' } });
   try { await app.initialize(); const health = await app.health.check(); assert.equal(health.checks.database.status, 'HEALTHY'); assert.equal(health.checks.database.schemaVersion, 1); }
   finally { await app.stop(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('saved logs retain only the three newest sessions without blocking writes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'minehive-logs-'));
+  try { const stores = []; for (let index = 0; index < 4; index++) { const store = new RotatingLogStore({ directory, maxFiles: 3 }); store.write({ level: 'info', event: 'test' }); await store.flush(); stores.push(store); } const files = stores.at(-1).list(); assert.equal(files.length, 3); assert.equal(files.some(file => file.name === stores.at(-1).name), true); assert.equal(stores.at(-1).read(stores.at(-1).name, 10)[0].event, 'test'); }
+  finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test('semantic memory ranks relevant knowledge and preserves provenance', async () => {

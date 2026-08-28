@@ -60,6 +60,12 @@ test('class and global selectors route commands to the intended bots', async () 
   await waitFor(() => adapters.get('miner-1').collected.length === 2 && adapters.get('builder-1').collected.length === 1);
 });
 
+test('bot profile editor updates identity and protects live connection settings', async () => {
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: () => new OperationalAdapter() } }); const bot = await app.botProfiles.create({ username: 'Worker', name: 'Worker', host: 'localhost', port: 25565, commandAlias: 'worker', className: 'miner' }); await app.bots.start(bot.id); await app.bots.get(bot.id).transitionQueue;
+  const edited = await app.botProfiles.update(bot.id, { name: 'Logistics Worker', commandAlias: 'courier', className: 'logistics', autoConnect: true }); assert.equal(edited.name, 'Logistics Worker'); assert.equal(edited.metadata.commandAlias, 'courier'); await assert.rejects(app.botProfiles.update(bot.id, { host: 'other-server' }), /Disconnect bot/);
+  await app.bots.stop(bot.id); const moved = await app.botProfiles.update(bot.id, { host: 'other-server', port: 25566 }); assert.equal(app.bots.get(bot.id).options.host, 'other-server'); assert.equal((await app.botProfiles.list())[0].port, 25566); assert.equal(moved.status, 'OFFLINE'); await app.stop();
+});
+
 test('Mineflayer adapter normalizes client chat, snapshot and shutdown', async () => {
   class Client extends EventEmitter {
     constructor() { super(); this.username = 'Bot'; this.health = 20; this.food = 19; this.game = { dimension: 'overworld' }; this.entity = { position: { x: 1, y: 2, z: 3 } }; this.inventory = { items: () => [{ name: 'dirt', count: 4 }] }; this.sent = []; }
@@ -72,6 +78,29 @@ test('Mineflayer adapter normalizes client chat, snapshot and shutdown', async (
   assert.equal((await adapter.setHome({ name: 'base' })).name, 'base');
   assert.deepEqual(adapter.snapshot().position, { x: 1, y: 2, z: 3 }); assert.deepEqual(client.sent, ['hello']);
   await adapter.disconnect('done'); assert.equal(client.cleared, true); assert.equal(client.reason, 'done'); assert.equal(adapter.status, 'DISCONNECTED');
+});
+
+test('Mineflayer survey detects supported markers and removes duplicate positions', async () => {
+  const { Vec3 } = await import('vec3');
+  class SurveyClient extends EventEmitter {
+    constructor() { super(); this.entity = { position: new Vec3(0, 64, 0) }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.registry = { blocksByName: { bell: { id: 1 }, end_portal_frame: { id: 2 }, diamond_ore: { id: 3 } } }; }
+    findBlocks({ matching }) { if (matching === 1) return [new Vec3(8, 65, 4), new Vec3(8, 65, 4)]; if (matching === 2) return [new Vec3(-12, 30, 9)]; return []; }
+    clearControlStates() {} quit() { this.emit('end'); }
+  }
+  const client = new SurveyClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn'); const result = await adapter.survey({ maxDistance: 256 });
+  assert.equal(result.maxDistance, 128); assert.deepEqual(result.discoveries.map(discovery => discovery.type), ['village', 'stronghold']); assert.deepEqual(result.discoveries[0].position, { x: 8, y: 65, z: 4 }); await adapter.disconnect();
+});
+
+test('Mineflayer storage adapter verifies chest deposits and withdrawals', async () => {
+  const { Vec3 } = await import('vec3'); class GoalNear { constructor(x, y, z, range) { Object.assign(this, { x, y, z, range }); } }
+  class StorageClient extends EventEmitter {
+    constructor() { super(); this.entity = { position: new Vec3(0, 64, 0) }; this.game = { dimension: 'overworld' }; this.botItems = [{ name: 'stone', type: 1, count: 8 }]; this.chestItems = [{ name: 'stone', type: 1, count: 10 }]; this.inventory = { items: () => this.botItems.filter(item => item.count > 0) }; this.registry = { itemsByName: { stone: { id: 1 } } }; this.pathfinder = { goto: async () => {}, setGoal() {} }; this.storageBlock = { name: 'chest', position: new Vec3(3, 64, 0) }; }
+    findBlock() { return this.storageBlock; } blockAt() { return this.storageBlock; }
+    async openContainer() { return { type: 'minecraft:chest', inventoryStart: 27, slots: new Array(63), containerItems: () => this.chestItems.filter(item => item.count > 0), deposit: async (_type, _metadata, count) => { this.botItems[0].count -= count; this.chestItems[0].count += count; }, withdraw: async (_type, _metadata, count) => { this.chestItems[0].count -= count; this.botItems[0].count += count; }, close() {} }; }
+    clearControlStates() {} quit() { this.emit('end'); }
+  }
+  const client = new StorageClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear } }; client.emit('spawn'); const found = await adapter.findNearestStorage({ maxDistance: 16 }); assert.equal(found.inventory[0].count, 10);
+  const deposited = await adapter.depositStorage({ position: found.position, item: 'stone', count: 5 }); assert.equal(deposited.verification.storageAfter, 15); const withdrawn = await adapter.withdrawStorage({ position: found.position, item: 'stone', count: 4 }); assert.equal(withdrawn.verification.botAfter, 7); await adapter.disconnect();
 });
 
 test('come is one-shot navigation while follow keeps a dynamic player goal', async () => {

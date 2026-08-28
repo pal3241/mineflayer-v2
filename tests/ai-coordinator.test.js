@@ -6,7 +6,7 @@ import { LlmGateway, OpenAICompatibleProvider } from '../src/ai/llm-gateway.js';
 import { EventEmitter } from 'node:events';
 
 class FleetAdapter extends EventEmitter {
-  constructor(items = [], { position = { x: 1, y: 64, z: 1 }, requireMaterials = false } = {}) { super(); this.status = 'READY'; this.items = items.map(value => typeof value === 'string' ? { name: value, count: 1 } : { ...value }); this.collected = []; this.position = position; this.requireMaterials = requireMaterials; }
+  constructor(items = [], { position = { x: 1, y: 64, z: 1 }, requireMaterials = false } = {}) { super(); this.status = 'READY'; this.items = items.map(value => typeof value === 'string' ? { name: value, count: 1 } : { ...value }); this.storageItems = []; this.collected = []; this.position = position; this.requireMaterials = requireMaterials; }
   async connect() { this.emit('login'); this.emit('spawn'); }
   async disconnect() { this.emit('end'); }
   async smartMove(input) { this.movedTo = input; }
@@ -15,6 +15,13 @@ class FleetAdapter extends EventEmitter {
   async analyzeBlock({ block }) { const requiredTools = /stone|ore|obsidian/.test(block) ? ['wooden_pickaxe', 'stone_pickaxe', 'iron_pickaxe', 'diamond_pickaxe'] : []; return { block, diggable: true, handMineable: !requiredTools.length, requiredTools }; }
   async craftRequirements({ item, count }) { return { item, count, missing: this.requireMaterials && item.endsWith('_pickaxe') && this.count('oak_log') < 3 ? [{ name: 'oak_log', count: 3 - this.count('oak_log') }] : [], steps: [{ item, crafts: count }] }; }
   async findSourceBlocks({ item }) { return item === 'oak_log' ? ['oak_log'] : []; }
+  async survey({ maxDistance }) { this.surveyed = maxDistance; return { maxDistance, scannedAt: new Date().toISOString(), discoveries: [{ type: 'village', name: 'bell', marker: 'bell', confidence: 0.95, position: { x: 24, y: 70, z: -12 } }] }; }
+  async findNearestStorage() { return this.storageObservation(); }
+  async inspectStorage() { return this.storageObservation(); }
+  async depositStorage({ item, count }) { const source = this.items.find(entry => entry.name === item); const beforeBot = this.count(item); const beforeStorage = this.storageCount(item); source.count -= count; const stored = this.storageItems.find(entry => entry.name === item); if (stored) stored.count += count; else this.storageItems.push({ name: item, count }); return { item, transferred: count, storage: this.storageObservation(), verification: { botBefore: beforeBot, botAfter: this.count(item), storageBefore: beforeStorage, storageAfter: this.storageCount(item) } }; }
+  async withdrawStorage({ item, count }) { const source = this.storageItems.find(entry => entry.name === item); const beforeBot = this.count(item); const beforeStorage = this.storageCount(item); source.count -= count; const carried = this.items.find(entry => entry.name === item); if (carried) carried.count += count; else this.items.push({ name: item, count }); return { item, transferred: count, storage: this.storageObservation(), verification: { botBefore: beforeBot, botAfter: this.count(item), storageBefore: beforeStorage, storageAfter: this.storageCount(item) } }; }
+  storageObservation() { return { kind: 'chest', position: { x: 3, y: 64, z: 1 }, inventory: this.storageItems.filter(item => item.count > 0), capacitySlots: 27, occupiedSlots: this.storageItems.filter(item => item.count > 0).length }; }
+  storageCount(name) { return this.storageItems.filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0); }
   async craftItem({ item }) { if (this.requireMaterials && item.endsWith('_pickaxe') && this.count('oak_log') < 3) throw new Error('missing wood'); this.items.push({ name: item, count: 1 }); }
   async collect(input) { this.collected.push(input); if (input.block === 'oak_log') this.items.push({ name: 'oak_log', count: input.count }); return { collectedTargets: input.count }; }
   async farm(input) { this.farmed = input; return input; }
@@ -116,5 +123,18 @@ test('natural-language coordinator prepares hoe, axe, and sword for world action
 });
 
 test('deterministic companion translates natural commands and answers simple arithmetic', async () => {
-  const gateway = new LlmGateway({ provider: 'auto' }, { warn() {} }); assert.equal((await gateway.interpret('tebang pohon')).intent, 'deforest'); assert.equal((await gateway.interpret('berapa 1+1')).reply, '1 + 1 = 2'); assert.equal((await gateway.interpret('follow Steve')).intent, 'follow'); assert.equal((await gateway.interpret('come Steve')).intent, 'come'); assert.equal((await gateway.interpret('craft wooden sword')).item, 'wooden_sword');
+  const gateway = new LlmGateway({ provider: 'auto' }, { warn() {} }); assert.equal((await gateway.interpret('tebang pohon')).intent, 'deforest'); assert.equal((await gateway.interpret('berapa 1+1')).reply, '1 + 1 = 2'); assert.equal((await gateway.interpret('follow Steve')).intent, 'follow'); assert.equal((await gateway.interpret('come Steve')).intent, 'come'); assert.equal((await gateway.interpret('craft wooden sword')).item, 'wooden_sword'); const survey = await gateway.interpret('jelajah 32'); assert.equal(survey.intent, 'survey'); assert.equal(survey.radius, 32); const storage = await gateway.interpret('simpan cobbled_deepslate 32 gudang'); assert.equal(storage.intent, 'store'); assert.equal(storage.item, 'cobbled_deepslate'); assert.equal(storage.name, 'gudang');
+});
+
+test('survey persists discoveries to world and semantic shared memory', async () => {
+  let adapter; const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: () => (adapter = new FleetAdapter()) } });
+  app.bots.create({ id: 'scout', name: 'Scout', metadata: { commandAlias: 'scout', className: 'scout' } }); await app.bots.start('scout'); await app.bots.get('scout').transitionQueue; app.coordinator.gateway.provider = null;
+  const result = await app.coordinator.coordinate({ text: 'survey 48', selector: 'bot:scout', actor: 'test' }); assert.equal(result.results[0].status, 'COMPLETED'); assert.equal(adapter.surveyed, 48); assert.equal(result.results[0].result.memories[0].type, 'village');
+  const world = await app.worldMemory.forBot(app.bots.get('scout'), { type: 'village' }); assert.equal(world[0].name, 'village-bell-24--12'); assert.deepEqual(world[0].position, { x: 24, y: 70, z: -12 });
+  const semantic = await app.semanticMemory.search({ text: 'village bell', worldKey: 'localhost:25565', dimension: 'overworld', limit: 5 }); assert.ok(semantic.some(memory => memory.source === 'survey' && memory.tags.includes('bell'))); await app.stop();
+});
+
+test('coordinator registers storage and completes verified logistics transfers', async () => {
+  let adapter; const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: () => (adapter = new FleetAdapter([{ name: 'stone', count: 12 }])) } }); app.bots.create({ id: 'courier', metadata: { commandAlias: 'courier', className: 'logistics' } }); await app.bots.start('courier'); await app.bots.get('courier').transitionQueue; app.coordinator.gateway.provider = null;
+  assert.equal((await app.coordinator.coordinate({ text: 'register_chest gudang 16', selector: 'bot:courier' })).results[0].status, 'COMPLETED'); assert.equal((await app.coordinator.coordinate({ text: 'store stone 8 gudang', selector: 'bot:courier' })).results[0].status, 'COMPLETED'); assert.equal(adapter.storageCount('stone'), 8); assert.equal((await app.coordinator.coordinate({ text: 'retrieve stone 3 gudang', selector: 'bot:courier' })).results[0].status, 'COMPLETED'); assert.equal(adapter.storageCount('stone'), 5); assert.equal((await app.logistics.status()).transfers, 2); await app.stop();
 });

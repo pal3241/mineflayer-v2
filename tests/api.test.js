@@ -15,10 +15,12 @@ test('API exposes health and versioned bot DTOs', async () => {
     assert.equal(dashboard.status, 200); assert.match(await dashboard.text(), /MineHive Control Center/);
     assert.match(await (await fetch(`http://127.0.0.1:${port}/dashboard.css`)).text(), /camera-wall/);
     assert.match(await (await fetch(`http://127.0.0.1:${port}/camera.css`)).text(), /camera-loading/);
+    assert.match(await (await fetch(`http://127.0.0.1:${port}/settings.css`)).text(), /settings-grid/);
     assert.match(await (await fetch(`http://127.0.0.1:${port}/dashboard.js`)).text(), /executeCommand/);
     const health = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(health.status, 200);
     assert.equal((await health.json()).status, 'HEALTHY');
+    const dashboardSnapshot = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/snapshot`); const snapshotPayload = await dashboardSnapshot.json(); assert.equal(dashboardSnapshot.status, 200); assert.equal(snapshotPayload.data.health.status, 'HEALTHY'); assert.deepEqual(snapshotPayload.data.bots, []); assert.ok(Number(dashboardSnapshot.headers.get('x-ratelimit-remaining')) < 120); assert.ok(snapshotPayload.data.diagnostics.rssMb > 0); assert.ok(snapshotPayload.data.diagnostics.heapUsedMb > 0);
 
     const created = await fetch(`http://127.0.0.1:${port}/api/v1/bots`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'api-bot', username: 'ApiBot' })
@@ -30,6 +32,8 @@ test('API exposes health and versioned bot DTOs', async () => {
     assert.equal((await list.json()).data.length, 1);
     const updatedBot = await fetch(`http://127.0.0.1:${port}/api/v1/bots/api-bot`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"className":"miner","commandAlias":"api"}' });
     assert.equal((await updatedBot.json()).data.metadata.className, 'miner');
+    const connectionUpdate = await fetch(`http://127.0.0.1:${port}/api/v1/bots/api-bot`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"name":"Edited Bot","username":"EditedUser","host":"mc.example.test","port":25566,"auth":"offline","className":"logistics","commandAlias":"edited","autoConnect":true}' }); const connectionPayload = await connectionUpdate.json(); assert.equal(connectionUpdate.status, 200); assert.equal(connectionPayload.data.name, 'Edited Bot');
+    const editedSnapshot = await (await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/snapshot`)).json(); const editedProfile = editedSnapshot.data.bots.find(bot => bot.id === 'api-bot').profile; assert.equal(editedProfile.host, 'mc.example.test'); assert.equal(editedProfile.port, 25566); assert.equal(editedProfile.metadata.className, 'logistics');
 
     app.bots.get('api-bot').bot.capabilities.add('observe');
     app.capabilities.register({ name: 'observe', execute: async () => ({ observed: true }) });
@@ -58,6 +62,12 @@ test('API exposes health and versioned bot DTOs', async () => {
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/ml/status`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/hivemind/status`)).status, 200);
     const objective = await fetch(`http://127.0.0.1:${port}/api/v1/autonomy/objectives`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"text":"collect stone 1","selector":"bot:api"}' }); assert.equal(objective.status, 201); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/autonomy/status`)).status, 200);
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/database/status`)).status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/logistics/status`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/logistics/storages`)).status, 200);
+    const llmSettings = await fetch(`http://127.0.0.1:${port}/api/v1/settings/llm`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"provider":"openrouter","endpoint":"https://openrouter.ai/api/v1","model":"openrouter/auto","apiKeys":["secret-runtime-key"]}' }); const llmPayload = await llmSettings.json(); assert.equal(llmSettings.status, 200); assert.equal(llmPayload.data.status.keyCount, 1); assert.doesNotMatch(JSON.stringify(llmPayload), /secret-runtime-key/);
+    const settings = await (await fetch(`http://127.0.0.1:${port}/api/v1/settings`)).json(); assert.equal(settings.data.llm.configuredKeys[0], true); assert.doesNotMatch(JSON.stringify(settings), /secret-runtime-key/);
+    const logSettings = await fetch(`http://127.0.0.1:${port}/api/v1/settings/log`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"level":"debug"}' }); assert.equal((await logSettings.json()).data.level, 'debug');
+    const autonomySettings = await fetch(`http://127.0.0.1:${port}/api/v1/settings/autonomy`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"enabled":false,"intervalMs":5000,"maxActionsPerHour":5}' }); assert.equal((await autonomySettings.json()).data.intervalMs, 5000);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/settings/logs?limit=20`)).status, 200);
   } finally { await app.stop(); }
 });
 
