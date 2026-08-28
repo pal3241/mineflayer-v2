@@ -2,10 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { ValidationError } from '../core/errors.js';
 
 export class WorldMemoryService {
-  constructor({ repository, events, logger }) { this.repository = repository; this.events = events; this.logger = logger; }
+  constructor({ repository, events, logger }) { this.repository = repository; this.events = events; this.logger = logger; this.rememberQueues = new Map(); }
   async remember(input) {
-    const value = normalize(input); const existing = (await this.repository.list()).find(item => item.worldKey === value.worldKey && item.dimension === value.dimension && item.type === value.type && item.name.toLowerCase() === value.name.toLowerCase());
-    const record = existing ? await this.repository.update(existing.id, { ...value, id: existing.id, createdAt: existing.createdAt, updatedAt: new Date().toISOString(), version: (existing.version ?? 1) + 1 }) : await this.repository.create({ ...value, id: randomUUID(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), version: 1 });
+    const value = normalize(input); const key = `${value.worldKey}|${value.dimension}|${value.type}|${value.name.toLowerCase()}`; const previous = this.rememberQueues.get(key) ?? Promise.resolve(); const operation = previous.then(async () => { const existing = (await this.repository.list()).find(item => item.worldKey === value.worldKey && item.dimension === value.dimension && item.type === value.type && item.name.toLowerCase() === value.name.toLowerCase()); const now = new Date().toISOString(); return existing ? this.repository.update(existing.id, { ...value, id: existing.id, createdAt: existing.createdAt, updatedAt: now, version: (existing.version ?? 1) + 1 }) : this.repository.create({ ...value, id: randomUUID(), createdAt: now, updatedAt: now, version: 1 }); }); const queued = operation.finally(() => { if (this.rememberQueues.get(key) === queued) this.rememberQueues.delete(key); }); this.rememberQueues.set(key, queued); const record = await queued;
     await this.events?.publish('memory.world.remembered', record, { source: 'world-memory' }); return record;
   }
   async search(query = {}) {

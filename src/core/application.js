@@ -92,8 +92,12 @@ export class Application {
     await this.initialize(); if (this.state === 'RUNNING') return;
     await this.modules.run('start', this.context()); await this.plugins.run('start', this.context());
     if (api) await this.api.start(); this.state = 'RUNNING'; this.startedAt = Date.now(); await this.memoryLifecycle.tick(); this.memoryLifecycle.start(); this.autonomy.start();
-    for (const profile of this.restoredProfiles.filter(item => item.autoConnect)) await this.bots.start(profile.id).catch(error => this.logger.error('bot.autostart.failed', { botId: profile.id, error: error.message }));
-    if (this.config.bot.autoConnect && !this.bots.list().length) { const bot = await this.botProfiles.create({ name: this.config.bot.username, ...this.config.bot, autoConnect: true }); await this.bots.start(bot.id); }
+    try {
+      for (const profile of this.restoredProfiles.filter(item => item.autoConnect)) await this.bots.start(profile.id).catch(error => this.logger.error('bot.autostart.failed', { botId: profile.id, error: error.message }));
+      if (this.config.bot.autoConnect && !this.bots.list().length) { const bot = await this.botProfiles.create({ name: this.config.bot.username, ...this.config.bot, autoConnect: true }); await this.bots.start(bot.id); }
+    } catch (error) {
+      this.autonomy.stop(); this.memoryLifecycle.stop(); await this.api.stop(); this.startedAt = null; this.state = 'READY'; throw error;
+    }
     this.hive.syncMembers(this.bots.list()); await this.events.publish('application.started', this.status(), { source: 'application' }); this.logger.info('application.started', this.status());
   }
   async stop() {
@@ -109,7 +113,7 @@ export class Application {
   }
   async stopCamera(botId) { const result = await this.bots.get(botId).adapter.stopViewer(); this.cameraPorts.delete(botId); return { ...result, botId }; }
   resetRuntimeSettings() { const defaults = this.runtimeDefaults.llm; const keys = [...new Set([...(defaults.apiKeys ?? []), defaults.apiKey].filter(Boolean))]; const llm = this.llm.configure({ provider: defaults.provider ?? 'none', endpoint: defaults.endpoint ?? '', model: defaults.model ?? '', localEndpoint: defaults.localEndpoint ?? '', localModel: defaults.localModel ?? '', ...(keys.length ? { apiKeys: keys } : { clearKeys: true }) }); const log = this.logger.setLevel(this.runtimeDefaults.logLevel); const autonomy = this.autonomy.configure({ enabled: this.runtimeDefaults.autonomy.enabled, intervalMs: this.runtimeDefaults.autonomy.intervalMs, maxActionsPerHour: this.runtimeDefaults.autonomy.maxActionsPerHour }); this.logger.info('settings.runtime.reset', { provider: llm.provider, logLevel: log.level, autonomy: autonomy.status }); return { llm, log, autonomy, preserved: ['bot profiles', 'admins', 'memory', 'database', 'API token'] }; }
-  status() { return { name: 'MineHive', version: '0.6.0', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), autonomy: this.autonomy.status() }; }
+  status() { return { name: 'MineHive', version: '0.7.0', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), autonomy: this.autonomy.status() }; }
 }
 
 function portAvailable(port) {
