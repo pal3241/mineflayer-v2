@@ -17,3 +17,13 @@ test('bot runtimes are isolated and use adapter boundaries', async () => {
   assert.equal(app.bots.get('a').snapshot().status, 'READY'); assert.equal(app.bots.get('b').snapshot().status, 'REGISTERED');
   await app.stop(); assert.equal(app.state, 'STOPPED');
 });
+
+test('bot runtime enters failed state when adapter connection fails', async () => {
+  class FailingAdapter extends EventEmitter { async connect() { throw new Error('connection refused'); } async disconnect() {} snapshot() { return { connection: 'DISCONNECTED', position: null, inventorySummary: [] }; } }
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: () => new FailingAdapter() } }); app.bots.create({ id: 'broken', username: 'Broken' }); await assert.rejects(app.bots.start('broken'), /connection refused/); assert.equal(app.bots.get('broken').snapshot().status, 'FAILED'); await app.stop();
+});
+
+test('bot runtime enters failed state when adapter disconnect fails', async () => {
+  class FailingDisconnectAdapter extends EventEmitter { async connect() { this.emit('login'); this.emit('spawn'); } async disconnect() { throw new Error('disconnect refused'); } snapshot() { return { connection: 'READY', position: null, inventorySummary: [] }; } }
+  const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: () => new FailingDisconnectAdapter() } }); app.bots.create({ id: 'broken-stop', username: 'BrokenStop' }); await app.bots.start('broken-stop'); await app.bots.get('broken-stop').transitionQueue; await assert.rejects(app.bots.stop('broken-stop'), /disconnect refused/); assert.equal(app.bots.get('broken-stop').snapshot().status, 'FAILED');
+});

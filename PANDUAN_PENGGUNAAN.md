@@ -296,6 +296,12 @@ Memory lokasi dipisahkan berdasarkan `host:port` dan dimension, sehingga lokasi 
 
 Bot kedua dapat memakai lokasi yang disimpan bot pertama selama berada di server dan dimension yang sama. Record menyimpan sumber bot, confidence, importance, timestamp, dan version, kemudian dipersistenkan ke `data/world-memory.json`.
 
+### Short-term dan long-term memory
+
+Hasil pekerjaan coordinator disimpan lebih dahulu sebagai `SHORT_TERM`. Setiap recall yang relevan menambah `accessCount`. Konsolidasi otomatis berjalan sesuai `MINEHIVE_MEMORY_CONSOLIDATION_INTERVAL_MS`; memory dipromosikan menjadi `LONG_TERM` jika importance mencapai batas atau sudah dipakai berulang kali. Memory sementara yang kedaluwarsa atau melewati kapasitas dilupakan secara terkontrol, sedangkan long-term memory tidak ikut kebijakan TTL.
+
+Policy dapat diatur melalui `MINEHIVE_SHORT_MEMORY_MAX_RECORDS`, `MINEHIVE_SHORT_MEMORY_TTL_MS`, `MINEHIVE_MEMORY_PROMOTION_ACCESSES`, dan `MINEHIVE_MEMORY_PROMOTION_IMPORTANCE`. Gunakan endpoint `/api/v1/memory/short-term`, `/api/v1/memory/long-term`, `/api/v1/memory/recall`, dan `/api/v1/memory/consolidate` untuk inspeksi atau operasi manual. Semua record tetap menyimpan provenance, visibility, world, dimension, confidence, importance, access count, dan metadata embedding.
+
 ### Farming dan kehutanan
 
 ```text
@@ -635,6 +641,8 @@ Tombol **Reset runtime settings** mengembalikan konfigurasi LLM, OpenRouter key 
 
 Setiap bot memiliki antrean terpisah. Task dan command coordinator baru menunggu sampai pekerjaan bot tersebut selesai sehingga pathfinding yang aktif tidak diganti mendadak. Bot lain tetap dapat bekerja paralel. Dashboard menampilkan jumlah task menunggu dan bot yang sedang aktif. Command `stop` tetap bersifat eksplisit dan membatalkan pekerjaan berjalan beserta antreannya.
 
+Batas antrean dapat diatur melalui `MINEHIVE_MAX_QUEUE_PER_BOT` (default `100`). Ketika batas tercapai, task baru ditolak dengan error yang jelas dan health check task queue berubah menjadi `DEGRADED` mulai dari saturasi 80%. Dashboard memakai polling tunggal dengan exponential backoff agar tab lambat atau rate limit tidak membuat request bertumpuk.
+
 Saat pekerjaan dimulai bot mengirim pesan `task baru`, lalu mengirim `task selesai`, `task gagal`, atau `task dibatalkan` sesuai hasil sebenarnya. Lifecycle yang sama juga tersimpan sebagai structured event dan log.
 
 Movement tidak lagi menggunakan dirt, cobblestone, atau item lain sebagai scaffolding otomatis. Tower 1x1, parkour, dan free-motion dinonaktifkan. Jika route membutuhkan penempatan blok atau tidak menghasilkan progres selama 10 detik, task gagal dengan error yang jelas agar antrean dapat melanjutkan task berikutnya.
@@ -648,7 +656,7 @@ Backup SQLite dapat dibuat dengan `node src/cli.js backup nama-backup.sqlite` at
 - Pengujian otomatis menggunakan fake Minecraft client; koneksi nyata tergantung server, jaringan, akun, dan versi protokol.
 - Koordinator mendukung intent aman `collect`, `craft`, `follow`, `come`, `move`, `set_home`, `home`, `survey`, `register_storage`, `store`, `retrieve`, `stock`, `farm`, `deforest`, `reforest`, `combat`, `remember`, `place`, `status`, dan `converse`.
 - ML contextual-beta v2 menggabungkan evidence bot sendiri dan fleet berdasarkan intent, class, health, food, kapasitas inventory, ketersediaan alat, recency, durasi, serta kemiripan feature. Prediction hanya menentukan ranking/decision support dan tidak melewati safety rules.
-- Semantic memory memakai embedding hash lokal deterministik. Model embedding neural eksternal dan consolidation LLM terjadwal belum tersedia.
+- Semantic memory memakai embedding hash lokal deterministik. Konsolidasi short-term ke long-term sudah terjadwal dan deterministik; model embedding neural eksternal serta peringkasan berbasis LLM belum tersedia.
 - Farming mendukung wheat, carrots, potatoes, dan beetroot. Combat memakai mob allowlist dan hanya bekerja pada entity yang sedang termuat oleh client.
 - Pertukaran item membutuhkan kedua bot berada pada server dan dimension yang sama serta cukup dekat untuk saling mendatangi.
 - Goal/task runtime belum direkonstruksi otomatis setelah process restart; SQLite saat ini mempersist memory, ML, HiveMind, autonomy, admin, dan profil bot.

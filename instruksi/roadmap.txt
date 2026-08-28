@@ -1,0 +1,1622 @@
+MINEHIVE DEVELOPMENT PLAN
+ROADMAP 0.7.x -> 0.8.x -> 0.9.x
+================================
+
+Project:
+pal3241/mineflayer-v2
+
+Tujuan dokumen:
+Dokumen ini menjadi acuan kerja offline untuk melanjutkan pengembangan MineHive berdasarkan diskusi perencanaan versi, logistik, territory, shared memory, dashboard, testing, dan failsafe.
+
+============================================================
+1. STRATEGI VERSIONING
+============================================================
+
+MineHive masih berada pada fase pre-1.0, sehingga pola versi yang digunakan:
+
+0.X.0
+= milestone besar / subsystem utama baru
+
+0.X.Y
+= bug fix, optimisasi, reliability improvement, dashboard improvement,
+  atau small feature yang masih berada di milestone yang sama
+
+Roadmap sementara:
+
+0.6.0
+- Intelligence Foundation
+- Semantic Memory
+- ML
+- HiveMind
+- SQLite
+- Safe Autonomy
+
+0.7.0
+- Logistics Foundation
+- Stabilization
+- Bug fixing
+- Optimization
+- Testing
+- Dashboard experimentation
+
+0.7.1
+- Advanced Logistics Upgrade
+
+0.7.2+
+- Dapat digunakan untuk bug fix atau small update tambahan jika diperlukan
+
+0.8.0
+- Autonomous Territory System
+
+0.8.x
+- Territory, exploration, defense, failsafe, dan integration improvements
+
+0.9.0 (candidate)
+- Unified Hive Shared Memory
+- Full short-term / long-term shared memory
+- Dapat berubah jika muncul subsystem besar lain sebelum memory
+
+1.0.0
+- Target stable autonomous MineHive
+
+Catatan:
+Roadmap tidak harus kaku.
+Jika fitur besar baru dibutuhkan di tengah pengembangan, nomor versi dapat disisipkan.
+
+Contoh:
+0.8.0 Territory
+0.9.0 Defense
+0.10.0 Shared Memory
+1.0.0 Stable
+
+============================================================
+2. FOKUS UTAMA 0.7.0
+============================================================
+
+0.7.0 tidak perlu buru-buru mengejar fitur besar berikutnya.
+
+Target utama:
+Membuat sistem logistik yang sudah ada menjadi stabil, teruji, mudah di-debug,
+dan cukup kuat untuk menjadi fondasi fitur autonomous berikutnya.
+
+Empat fokus:
+
+1. Stability
+2. Optimization
+3. Testing
+4. Dashboard Experimentation
+
+============================================================
+3. LOGISTICS FOUNDATION YANG SUDAH ADA
+============================================================
+
+Sistem logistik yang sudah dibuat memiliki konsep utama:
+
+- storage registry
+- storage discovery
+- inventory synchronization
+- resource reservation
+- anti double-spending
+- reservation expiration
+- deposit item
+- withdraw item
+- transfer verification
+- storage locking melalui HiveMind
+- storage/world/dimension scope
+- transfer records
+- logistics status monitoring
+
+Arsitektur ini harus dipertahankan dan diperkuat.
+
+Target utama:
+Tidak boleh ada kondisi:
+
+- item hilang
+- item terduplikasi
+- stock negatif
+- reservation menggantung
+- lock tidak pernah dilepas
+- dua bot mengambil stock yang sama
+- storage state salah
+- task macet permanen
+- unhandled promise rejection
+
+============================================================
+4. BUG / EDGE CASE YANG HARUS DITEST
+============================================================
+
+Tambahkan pengujian terhadap:
+
+- bot disconnect ketika membawa item
+- bot mati ketika membawa item
+- bot disconnect ketika storage sedang terkunci
+- chest dihancurkan
+- chest berubah menjadi tidak valid
+- chest penuh
+- item tidak ditemukan
+- inventory player/bot penuh
+- inventory storage berubah karena player
+- dua courier memakai chest yang sama
+- dua bot mencoba reserve item yang sama
+- reservation expired saat courier sedang bergerak
+- pathfinding gagal
+- storage tidak bisa dijangkau
+- bot stuck
+- HiveMind unavailable
+- database unavailable
+- repository operation gagal
+- task dibatalkan saat transfer
+- transfer hanya berhasil sebagian
+- destination penuh
+- source berubah sejak reservation dibuat
+- bot reconnect setelah transfer gagal
+
+============================================================
+5. STRUKTUR TESTING YANG DISARANKAN
+============================================================
+
+tests/logistics/
+├── reservation.test.js
+├── storage.test.js
+├── transfer.test.js
+├── concurrency.test.js
+├── expiration.test.js
+├── disconnect.test.js
+├── death-recovery.test.js
+├── locking.test.js
+├── pathfinding-failure.test.js
+├── partial-transfer.test.js
+├── repository-failure.test.js
+├── integration.test.js
+└── stress.test.js
+
+Stress test contoh:
+
+- 10 bots
+- 20 storages
+- 500 reservations
+- 1000 transfers
+
+Assertions penting:
+
+duplicateAllocation === 0
+negativeInventory === 0
+stuckLocks === 0
+unhandledErrors === 0
+lostItems === 0
+duplicatedItems === 0
+
+============================================================
+6. OPTIMIZATION 0.7.0
+============================================================
+
+Optimasi awal difokuskan pada:
+
+- nearest storage lookup
+- reservation lookup
+- inventory aggregation
+- repository access
+- event frequency
+- dashboard polling
+- repeated inventory scan
+- lock duration
+- transfer verification
+- unnecessary world scans
+- duplicated snapshot calls
+
+Pemilihan storage dapat mulai ditingkatkan dari:
+
+nearestStorage
+
+menjadi:
+
+storageScore =
+    distance
+  + utilization
+  + reservationLoad
+  + routeAvailability
+  + accessCost
+
+Tetapi jangan membuat sistem terlalu kompleks dulu.
+
+============================================================
+7. DASHBOARD EXPERIMENTATION
+============================================================
+
+Dashboard sebaiknya bukan hanya UI cantik.
+
+Dashboard harus menjadi:
+
+- control center
+- observability system
+- debugging tool
+- monitoring tool
+
+Target awal Logistics Dashboard:
+
+MineHive
+------------------------------------------------
+System Health
+Bots Online
+Logistics Status
+
+Total Items
+Active Storages
+Active Reservations
+Transfers
+
+Warehouse utilization:
+
+Main Storage      82%
+Mining Storage    55%
+Food Storage      31%
+
+Active Transfer:
+
+courier-1
+iron
+Mining -> Main
+64
+IN_TRANSIT
+
+============================================================
+8. TRANSFER STATE VISUALIZATION
+============================================================
+
+Dashboard harus dapat menunjukkan lifecycle transfer:
+
+CREATED
+  ↓
+RESERVED
+  ↓
+LOCK_ACQUIRED
+  ↓
+WITHDRAWING
+  ↓
+IN_TRANSIT
+  ↓
+DEPOSITING
+  ↓
+VERIFYING
+  ↓
+COMPLETED
+
+Contoh failure:
+
+IN_TRANSIT
+  ↓
+PATHFINDER_FAILED
+
+atau:
+
+DEPOSITING
+  ↓
+DESTINATION_FULL
+
+atau:
+
+WITHDRAWING
+  ↓
+SOURCE_CHANGED
+
+Tujuan:
+Bug dapat dilihat langsung tanpa harus membaca console log panjang.
+
+============================================================
+9. LOGISTICS EVENT TIMELINE
+============================================================
+
+Contoh event timeline dashboard:
+
+15:21:03 storage.main synced
+15:21:05 iron x128 reserved by bot-2
+15:21:06 courier-1 assigned
+15:21:09 warehouse lock acquired
+15:21:11 iron x128 withdrawn
+15:21:34 courier arrived
+15:21:35 iron x128 deposited
+15:21:36 transfer verified
+
+Event yang disarankan:
+
+logistics.storage.registered
+logistics.storage.synced
+logistics.storage.full
+
+logistics.stock.low
+logistics.stock.critical
+
+logistics.reservation.created
+logistics.reservation.expired
+logistics.reservation.released
+
+logistics.transfer.created
+logistics.transfer.started
+logistics.transfer.in_transit
+logistics.transfer.completed
+logistics.transfer.failed
+
+logistics.lock.acquired
+logistics.lock.released
+logistics.lock.timeout
+
+logistics.route.failed
+logistics.route.recovered
+
+logistics.rebalance.requested
+logistics.rebalance.completed
+
+============================================================
+10. DASHBOARD MODE
+============================================================
+
+Disarankan memiliki dua mode.
+
+OPERATOR MODE
+-------------
+
+Menampilkan:
+
+- bots
+- health
+- current tasks
+- resources
+- warehouses
+- transfers
+- camera
+- commands
+- alerts
+
+DEVELOPER MODE
+--------------
+
+Menampilkan:
+
+- Event Bus
+- Task Graph
+- HiveMind locks
+- Reservations
+- Memory
+- LLM requests
+- API latency
+- errors
+- plugin health
+- repository health
+- failed tasks
+- recovery queue
+
+Contoh HiveMind Lock panel:
+
+storage:2f83...
+Owner: logistics:courier-2:UUID
+TTL: 74s
+STATUS: LOCKED
+
+storage:a128...
+STATUS: FREE
+
+============================================================
+11. NETWORK VIEW EXPERIMENT
+============================================================
+
+Dashboard dapat mencoba logistics network visualization:
+
+                 [Iron Mine]
+                      |
+                      v
+              [Mining Storage]
+                   72%
+                      |
+                 courier-1
+                      |
+                      v
+               [Main Storage]
+                  55%
+                /      \
+               v        v
+         [Workshop]   [Smelter]
+
+Di versi Territory nanti tampilan ini dapat berkembang menjadi:
+
+World Map
++
+Territory
++
+Warehouses
++
+Routes
++
+Bots
++
+Danger Zones
++
+Resource Zones
+
+============================================================
+12. 0.7.1 - ADVANCED LOGISTICS UPGRADE
+============================================================
+
+Setelah 0.7.0 stabil, masuk ke 0.7.1.
+
+Target utama:
+
+1. Warehouse Registry improvement
+2. Storage Policies
+3. Global Resource Ledger
+4. Stronger Reservation System
+5. Courier Job Queue
+6. Multi-storage Transport Planner
+7. Route Scoring
+8. Automatic Stock Rebalancing
+9. Demand / Supply Forecasting
+10. LLM Logistics Advisor
+11. Automatic Warehouse Placement
+12. Failsafe / deterministic fallback
+13. Dashboard Logistics Network
+
+============================================================
+13. STORAGE ROLE / POLICY
+============================================================
+
+Storage jangan hanya dianggap chest.
+
+Storage dapat memiliki role:
+
+GENERAL
+RESOURCE
+FOOD
+TOOLS
+BUILDING
+COMBAT
+BUFFER
+PRODUCTION_INPUT
+PRODUCTION_OUTPUT
+
+Contoh:
+
+{
+  name: "iron-processing",
+  type: "PRODUCTION",
+
+  accepts: [
+    "raw_iron",
+    "iron_ingot",
+    "coal"
+  ],
+
+  reserve: {
+    coal: 64,
+    iron_ingot: 128
+  },
+
+  maxUtilization: 0.85
+}
+
+Dengan policy ini:
+
+raw_iron
+-> smelter warehouse
+
+food
+-> food warehouse
+
+weapon
+-> defense warehouse
+
+============================================================
+14. AUTOMATIC REBALANCING
+============================================================
+
+Contoh:
+
+Warehouse A
+iron = 900
+
+Warehouse B
+iron = 20
+
+Jika B dekat workshop dan kebutuhan iron tinggi:
+
+courier-1
+A
+ -> 256 iron ->
+B
+
+Rebalancing dilakukan berdasarkan:
+
+- current stock
+- reserved stock
+- consumption rate
+- warehouse role
+- distance
+- courier availability
+- safety
+- route quality
+
+============================================================
+15. RESOURCE FORECASTING
+============================================================
+
+Sistem mencatat:
+
+wood consumption/hour
+iron consumption/hour
+food consumption/hour
+coal consumption/hour
+
+Contoh:
+
+iron stock = 320
+consumption = 80/hour
+
+estimated remaining:
+4 hours
+
+Maka Logistics Planner dapat membuat demand:
+
+REQUEST:
++500 iron
+
+Sebelum resource benar-benar habis.
+
+============================================================
+16. LLM SEBAGAI STRATEGIC PLANNER
+============================================================
+
+Prinsip penting:
+
+LLM TIDAK boleh langsung mengendalikan Mineflayer.
+
+Arsitektur:
+
+LLM Strategic Planner
+        ↓
+Proposal
+        ↓
+Deterministic Evaluator
+        ↓
+Safety Validator
+        ↓
+Resource Validator
+        ↓
+HiveMind Consensus
+        ↓
+Task Planner
+        ↓
+Bot Executor
+
+LLM bertugas:
+
+- reasoning
+- planning
+- prioritization
+- recommendation
+- strategic decision proposal
+
+Sistem deterministik bertugas:
+
+- validation
+- safety
+- scoring
+- execution
+- verification
+
+============================================================
+17. LLM WAREHOUSE PLACEMENT
+============================================================
+
+LLM dapat memutuskan:
+
+"Kita membutuhkan warehouse baru di sektor timur."
+
+Tetapi LLM tidak langsung memberikan koordinat final.
+
+Flow:
+
+World State
+   ↓
+LLM
+   ↓
+Warehouse Placement Proposal
+   ↓
+Candidate Generator
+   ↓
+Placement Evaluator
+   ↓
+Safety Validator
+   ↓
+HiveMind
+   ↓
+Build Task
+
+Data yang digunakan:
+
+- production nodes
+- consumption nodes
+- resource deposits
+- existing warehouses
+- routes
+- terrain
+- danger
+- courier traffic
+- storage utilization
+- expansion direction
+
+Contoh scoring:
+
+score =
+    0.25 * proximityToProduction
+  + 0.20 * proximityToConsumers
+  + 0.15 * routeQuality
+  + 0.15 * safety
+  + 0.10 * terrainSuitability
+  + 0.10 * networkCoverage
+  + 0.05 * expansionPotential
+
+LLM:
+menentukan kebutuhan strategis.
+
+Algorithm:
+menentukan kandidat lokasi terbaik.
+
+HiveMind:
+mengkoordinasikan keputusan.
+
+Mineflayer:
+mengeksekusi.
+
+============================================================
+18. FAILSAFE LLM
+============================================================
+
+LLM tidak boleh dipercaya sebagai single source of truth.
+
+Contoh proposal LLM:
+
+expand territory 2000 blocks
+
+Tetapi kondisi:
+
+bots = 2
+food = 20 bread
+guards = 0
+
+Validator:
+
+REJECTED
+
+reason:
+insufficient_food
+insufficient_defense
+expansion_too_large
+
+Contoh warehouse:
+
+LLM:
+build warehouse 4000 blocks from base
+
+Validator:
+
+REJECTED
+reason:
+transport_cost_too_high
+
+============================================================
+19. CONFIDENCE THRESHOLD
+============================================================
+
+Proposal LLM dapat memiliki confidence:
+
+{
+  "decision": "CREATE_WAREHOUSE",
+  "region": "north-east",
+  "confidence": 0.83
+}
+
+Policy contoh:
+
+confidence >= 0.80
+-> autonomous execution allowed
+
+0.60 - 0.79
+-> additional HiveMind evaluation
+
+< 0.60
+-> deterministic fallback
+
+High-impact actions:
+
+- abandon base
+- destroy warehouse
+- move colony
+- large territory expansion
+- remove critical infrastructure
+
+dapat membutuhkan:
+
+HUMAN APPROVAL
+
+============================================================
+20. AUTONOMY LEVEL
+============================================================
+
+AUTONOMY 0
+Manual
+
+AUTONOMY 1
+Suggestion only
+
+AUTONOMY 2
+Routine actions
+
+AUTONOMY 3
+Logistics autonomy
+
+AUTONOMY 4
+Territory autonomy
+
+AUTONOMY 5
+Colony autonomy
+
+Contoh Level 3:
+
+ALLOWED:
+- rebalance warehouse
+- assign courier
+- request resources
+- create buffer storage
+- choose storage
+
+NOT ALLOWED:
+- expand colony
+- abandon base
+- destroy infrastructure
+
+============================================================
+21. 0.8.0 - AUTONOMOUS TERRITORY SYSTEM
+============================================================
+
+Nama kandidat:
+
+MineHive v0.8.0
+Autonomous Territory & Expansion
+
+Target:
+
+MineHive mulai memahami SPACE.
+
+Territory tidak harus berupa radius lingkaran.
+
+Gunakan kumpulan region:
+
+Territory
+├── Base Zone
+├── Safe Zone
+├── Resource Zone
+├── Industrial Zone
+├── Danger Zone
+├── Frontier
+├── Logistics Route
+└── Outpost Zone
+
+Contoh region:
+
+{
+  id: "region-12",
+  worldKey: "localhost:25565",
+  dimension: "overworld",
+
+  center: {
+    x: 120,
+    y: 64,
+    z: -80
+  },
+
+  radius: 64,
+  type: "RESOURCE",
+  biome: "plains",
+
+  resources: [
+    "iron_ore",
+    "coal_ore"
+  ],
+
+  dangerLevel: 0.25,
+  explored: true,
+  lastSeen: "..."
+}
+
+============================================================
+22. LLM TERRITORY EXPANSION
+============================================================
+
+LLM dapat menentukan:
+
+- kapan territory perlu diperluas
+- arah expansion
+- besar expansion
+- resource tujuan
+- prioritas expansion
+- apakah outpost diperlukan
+- apakah warehouse baru diperlukan
+- apakah expansion harus ditunda
+- wilayah mana yang sebaiknya dihindari
+
+Input contoh:
+
+Current territory radius: 350
+
+Resources:
+wood: surplus
+stone: surplus
+iron: low
+food: stable
+
+Warehouses:
+main: 82% full
+north: 47% full
+
+Known resources:
+iron deposit north-east
+village east
+forest west
+
+Danger:
+north: medium
+east: low
+south: high
+
+Bots:
+miners: 3
+scouts: 2
+guards: 2
+couriers: 2
+
+LLM proposal:
+
+{
+  "action": "EXPAND_TERRITORY",
+  "direction": "north-east",
+  "radiusIncrease": 180,
+  "reason": "Iron supply is below reserve target.",
+  "priority": "HIGH"
+}
+
+Validator mengecek:
+
+- resource tersedia?
+- food cukup?
+- bot cukup?
+- guard cukup?
+- route tersedia?
+- danger acceptable?
+- warehouse capacity?
+- expansion cost acceptable?
+
+Jika lolos:
+
+APPROVED
+
+============================================================
+23. TERRITORY BUKAN LINGKARAN BESAR
+============================================================
+
+Gunakan region yang dapat berkembang tidak simetris.
+
+Contoh:
+
+         Mine
+          ███
+           |
+           |
+Base █████████
+
+Jika selatan berbahaya:
+
+- jangan expand ke selatan
+- buat koridor utara/timur
+- buat resource zone dekat deposit
+- buat outpost pada jalur logistik
+
+Dengan begitu territory mengikuti kebutuhan ekonomi dan keamanan.
+
+============================================================
+24. TERRITORY + LOGISTICS INTEGRATION
+============================================================
+
+Saat Territory aktif, logistics tidak cukup memilih:
+
+nearest storage
+
+Tetapi:
+
+best storage
+
+Pertimbangan:
+
+distance
+danger
+route reliability
+traffic
+storage utilization
+available capacity
+reservation pressure
+
+Contoh:
+
+Warehouse A
+distance = 100
+danger = HIGH
+
+Warehouse B
+distance = 150
+danger = LOW
+
+Bot memilih B jika total cost lebih rendah.
+
+Risk-aware logistics:
+
+routeCost =
+    distanceCost
+  + dangerCost
+  + congestionCost
+  + failureProbability
+  + storageCost
+
+============================================================
+25. EXPLORATION SYSTEM
+============================================================
+
+Flow:
+
+Exploration Manager
+        ↓
+Exploration Planner
+        ↓
+Scout Assignment
+        ↓
+Survey
+        ↓
+Discovery Service
+        ↓
+World Memory
+        ↓
+Territory Map
+
+Discovery:
+
+- village
+- structure
+- cave
+- biome
+- resource
+- danger
+- route
+- outpost candidate
+
+============================================================
+26. DEFENSE SYSTEM
+============================================================
+
+Threat level:
+
+NONE
+LOW
+MEDIUM
+HIGH
+CRITICAL
+
+Threat scoring mempertimbangkan:
+
+- entity type
+- distance
+- bot health
+- armor
+- weapon
+- number of enemies
+- time
+- nearby friendly bots
+- distance from base
+- escape route
+- current mission importance
+
+Flow:
+
+Threat Detector
+      ↓
+Threat Classifier
+      ↓
+Defense Planner
+      ↓
+HiveMind
+      ↓
+Response
+
+Response:
+
+- ignore
+- observe
+- avoid
+- retreat
+- defend
+- intercept
+- request backup
+- evacuate
+
+============================================================
+27. EMERGENCY / FAILSAFE SYSTEM
+============================================================
+
+Emergency dapat override task normal.
+
+Normal:
+
+Goal
+ ↓
+Planner
+ ↓
+Task
+ ↓
+Bot
+
+Emergency:
+
+Task Running
+    ↓
+EMERGENCY
+    ↓
+Interrupt
+    ↓
+Emergency Policy
+    ↓
+Stabilize
+    ↓
+Recover
+    ↓
+Resume
+
+Emergency:
+
+- bot death
+- critical food
+- base attack
+- resource crisis
+- plugin failure
+- communication loss
+- database failure
+- HiveMind failure
+- infrastructure damage
+- mass disconnect
+
+============================================================
+28. DEGRADED MODE
+============================================================
+
+Jika OpenRouter / LLM down:
+
+LLM
+FAILED
+
+Tetapi:
+
+HiveMind
+OK
+
+State Machine
+OK
+
+Behavior Tree
+OK
+
+Pathfinder
+OK
+
+Logistics
+OK
+
+Combat
+OK
+
+Bot tetap dapat menjalankan deterministic policy.
+
+System mode:
+
+NORMAL
+DEGRADED
+EMERGENCY
+RECOVERY
+SHUTDOWN
+
+============================================================
+29. RESILIENCE
+============================================================
+
+Implementasikan:
+
+- bounded retries
+- exponential backoff
+- timeout
+- circuit breaker
+- dead-letter queue
+- recovery queue
+- idempotent command handling
+- safe cancellation
+- retry budget
+- dependency health check
+
+Contoh:
+
+attempt 1
+1000 ms
+
+attempt 2
+2000 ms
+
+attempt 3
+4000 ms
+
+attempt 4
+8000 ms
+
+FAILED
+↓
+Recovery Queue
+
+Tidak boleh retry tanpa batas.
+
+============================================================
+30. SNAPSHOT / RECOVERY
+============================================================
+
+Snapshot:
+
+MineHiveSnapshot
+├── bots
+├── goals
+├── tasks
+├── memory
+├── logistics
+├── reservations
+├── territory
+├── discoveries
+├── threats
+└── hivemind
+
+Restart:
+
+load snapshot
+   ↓
+validate
+   ↓
+reconnect bots
+   ↓
+rebuild HiveMind
+   ↓
+verify state
+   ↓
+resume safe tasks
+
+Task berisiko harus diverifikasi sebelum resume:
+
+- combat
+- deposit
+- withdraw
+- destructive actions
+- construction
+- territory mutation
+
+============================================================
+31. 0.9.0 - UNIFIED HIVE SHARED MEMORY
+============================================================
+
+Candidate name:
+
+MineHive v0.9.0
+Unified Hive Memory & Knowledge System
+
+Target:
+
+MineHive mulai memahami EXPERIENCE.
+
+Memory architecture:
+
+HiveMemory
+├── Working Memory
+├── Short-Term Memory
+├── Episodic Memory
+├── Semantic Memory
+├── World Memory
+├── Long-Term Memory
+└── Strategic Knowledge
+
+============================================================
+32. WORKING MEMORY
+============================================================
+
+Sangat sementara.
+
+Contoh:
+
+bot sedang mining iron
+target = 64
+collected = 31
+pickaxe durability = 42%
+destination = warehouse-east
+
+Sebagian besar dibuang saat task selesai.
+
+============================================================
+33. SHORT-TERM SHARED MEMORY
+============================================================
+
+Untuk informasi sementara:
+
+- nearby threat
+- temporary route blocked
+- courier carrying item
+- bot requesting help
+- recently changed chest inventory
+
+Contoh:
+
+{
+  type: "THREAT",
+  ttl: 30000
+}
+
+Jika tidak dikonfirmasi ulang:
+expired.
+
+============================================================
+34. EPISODIC MEMORY
+============================================================
+
+Menyimpan kejadian.
+
+Contoh:
+
+Episode:
+
+bot = miner-2
+action = collect diamond
+location = 523, -45, -283
+result = death
+cause = lava
+
+lesson:
+area risky below Y=-45
+
+Informasi ini dapat mempengaruhi planning berikutnya.
+
+============================================================
+35. SEMANTIC MEMORY
+============================================================
+
+Menyimpan fakta:
+
+- village berada di timur
+- oak_log dapat dibuat menjadi plank
+- iron mine berada 600 block dari base
+- warehouse-east menyimpan building materials
+
+============================================================
+36. LONG-TERM STRATEGIC MEMORY
+============================================================
+
+Menyimpan pola:
+
+Dalam 20 expedition:
+
+North-East
+- iron tinggi
+- danger rendah
+- route stabil
+
+South
+- resource sedikit
+- danger tinggi
+
+LLM menerima strategic context ini saat membuat planning baru.
+
+============================================================
+37. MEMORY CONSOLIDATION
+============================================================
+
+Jangan menyimpan semua observation selamanya.
+
+Contoh:
+
+10:01 found iron
+10:03 found iron
+10:07 found iron
+10:12 found iron
+10:15 found iron
+
+Dikonsolidasi menjadi:
+
+Large iron deposit exists around:
+x = 500..560
+z = -250..-320
+
+confidence = 0.96
+
+============================================================
+38. MEMORY PROMOTION
+============================================================
+
+Memory dapat bergerak:
+
+Working
+  ↓
+Short-Term
+  ↓
+Episodic
+  ↓
+Semantic
+  ↓
+Long-Term
+
+Contoh:
+
+Bot melihat lava
+-> Short-Term
+
+Bot mati di sana
+-> Episodic
+
+Beberapa bot mengalami hal sama
+-> Semantic
+
+Terbukti berkali-kali
+-> Long-Term
+
+============================================================
+39. SHARED MEMORY VISIBILITY
+============================================================
+
+Gunakan visibility:
+
+PRIVATE
+TEAM
+HIVE
+SYSTEM
+
+Contoh:
+
+courier internal task
+-> PRIVATE
+
+combat squad target
+-> TEAM
+
+village location
+-> HIVE
+
+critical system information
+-> SYSTEM
+
+============================================================
+40. MEMORY CONFLICT RESOLUTION
+============================================================
+
+Contoh:
+
+Bot A:
+chest has 64 iron
+
+Bot B:
+chest has 31 iron
+
+Resolve berdasarkan:
+
+- timestamp
+- confidence
+- direct observation
+- source reliability
+- number of confirmations
+- observation freshness
+
+Data lebih baru dan lebih terpercaya menang.
+
+============================================================
+41. MEMORY + LLM
+============================================================
+
+Jangan kirim seluruh database ke LLM.
+
+Gunakan:
+
+Goal
+ ↓
+Memory Retriever
+ ↓
+Relevant Context
+ ↓
+LLM Planner
+
+Contoh user:
+
+"cari diamond"
+
+Retriever memberikan:
+
+- known caves
+- previous deaths
+- lava zones
+- known diamond locations
+- nearest storage
+- miner performance
+- available equipment
+
+LLM kemudian membuat strategy.
+
+============================================================
+42. FILOSOFI ROADMAP
+============================================================
+
+0.7.x
+
+MineHive belajar:
+MENGGERAKKAN RESOURCE
+
+
+0.8.x
+
+MineHive belajar:
+MEMAHAMI DAN MENGELOLA SPACE
+
+
+0.9.x
+
+MineHive belajar:
+MENGINGAT EXPERIENCE
+
+
+1.0.0
+
+MineHive menggabungkan:
+
+- Logistics
+- Territory
+- Memory
+- HiveMind
+- LLM
+- ML
+- Fleet
+- Goals
+- Tasks
+- Behavior Tree
+- State Machine
+- Dashboard
+- Failsafe
+
+menjadi:
+
+AUTONOMOUS MINEHIVE
+
+============================================================
+43. PRIORITAS KERJA SEKARANG
+============================================================
+
+Jangan mulai 0.8.0 dulu.
+
+Prioritas:
+
+PHASE A
+0.7.0 STABILIZATION
+
+[ ] audit logistics-service
+[ ] audit storage locking
+[ ] audit reservation expiration
+[ ] audit transfer verification
+[ ] test concurrency
+[ ] test disconnect
+[ ] test death
+[ ] test pathfinding failure
+[ ] stress test
+[ ] improve structured logging
+[ ] dashboard logistics panel
+[ ] dashboard developer mode
+[ ] event timeline
+[ ] lock monitoring
+[ ] reservation monitoring
+
+
+PHASE B
+0.7.1 ADVANCED LOGISTICS
+
+[ ] warehouse role
+[ ] storage policy
+[ ] global resource ledger
+[ ] courier queue
+[ ] route planner
+[ ] route scoring
+[ ] automatic rebalancing
+[ ] stock forecasting
+[ ] LLM logistics advisor
+[ ] warehouse candidate scoring
+[ ] automatic warehouse placement
+[ ] deterministic validation
+[ ] logistics failsafe
+
+
+PHASE C
+0.8.0 TERRITORY
+
+[ ] territory map
+[ ] region model
+[ ] resource zone
+[ ] danger zone
+[ ] frontier
+[ ] exploration manager
+[ ] scout assignment
+[ ] LLM expansion proposal
+[ ] expansion validator
+[ ] territory logistics integration
+[ ] threat detector
+[ ] emergency system
+[ ] degraded mode
+[ ] resilience
+
+
+PHASE D
+0.9.0 SHARED MEMORY
+
+[ ] working memory
+[ ] short-term memory
+[ ] episodic memory
+[ ] semantic memory integration
+[ ] long-term memory
+[ ] strategic knowledge
+[ ] memory promotion
+[ ] memory consolidation
+[ ] conflict resolution
+[ ] TTL
+[ ] visibility
+[ ] memory retrieval
+[ ] LLM memory context
+
+============================================================
+44. PRINCIPLE YANG HARUS DIPERTAHANKAN
+============================================================
+
+1.
+Core tidak boleh bergantung langsung pada Mineflayer.
+
+2.
+LLM tidak boleh mengeksekusi Mineflayer secara langsung.
+
+3.
+LLM menghasilkan proposal.
+Validator memutuskan apakah aman.
+
+4.
+Semua critical action harus dapat diverifikasi.
+
+5.
+Sistem harus dapat masuk DEGRADED MODE, bukan langsung crash.
+
+6.
+Logistics harus transactional sebisa mungkin.
+
+7.
+Tidak boleh terjadi double-spending.
+
+8.
+HiveMind dipakai untuk coordination, locking, dan shared state.
+
+9.
+Memory digunakan sebagai knowledge source, bukan sebagai executor.
+
+10.
+Dashboard harus membantu observability dan debugging.
+
+11.
+Fitur autonomous harus memiliki deterministic fallback.
+
+12.
+High-impact action dapat membutuhkan human approval.
+
+============================================================
+END OF DOCUMENT
+============================================================

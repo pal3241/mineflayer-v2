@@ -5,16 +5,18 @@ const integer = (value, fallback) => value === undefined ? fallback : Number.par
 
 export function loadConfig(env = process.env) {
   const profile = env.MINEHIVE_PROFILE ?? 'development';
+  const memoryMaxRecords = integer(env.MINEHIVE_MEMORY_MAX_RECORDS, 10_000);
   const config = {
     profile,
     log: { level: env.MINEHIVE_LOG_LEVEL ?? 'info', directory: env.MINEHIVE_LOG_DIRECTORY, maxFiles: 3 },
     api: { host: env.MINEHIVE_API_HOST ?? '127.0.0.1', port: integer(env.MINEHIVE_API_PORT, 3000), token: env.MINEHIVE_API_TOKEN || null, rateLimitPerMinute: integer(env.MINEHIVE_API_RATE_LIMIT_PER_MINUTE, 120) },
     dataPath: env.MINEHIVE_DATA_PATH ?? './data',
     database: { driver: env.MINEHIVE_DATABASE_DRIVER ?? (profile === 'production' ? 'sqlite' : 'json'), file: env.MINEHIVE_DATABASE_FILE ?? './data/minehive.sqlite' },
-    semanticMemory: { maxRecords: integer(env.MINEHIVE_MEMORY_MAX_RECORDS, 10_000), dimensions: integer(env.MINEHIVE_EMBEDDING_DIMENSIONS, 256) },
+    semanticMemory: { maxRecords: memoryMaxRecords, dimensions: integer(env.MINEHIVE_EMBEDDING_DIMENSIONS, 256), shortTermMaxRecords: integer(env.MINEHIVE_SHORT_MEMORY_MAX_RECORDS, Math.min(1000, memoryMaxRecords)), shortTermTtlMs: integer(env.MINEHIVE_SHORT_MEMORY_TTL_MS, 86_400_000), promotionAccesses: integer(env.MINEHIVE_MEMORY_PROMOTION_ACCESSES, 3), promotionImportance: Number(env.MINEHIVE_MEMORY_PROMOTION_IMPORTANCE ?? 0.8), consolidationIntervalMs: integer(env.MINEHIVE_MEMORY_CONSOLIDATION_INTERVAL_MS, 60_000) },
     ml: { minimumSamples: integer(env.MINEHIVE_ML_MINIMUM_SAMPLES, 10) },
     hive: { heartbeatTimeoutMs: integer(env.MINEHIVE_HIVE_HEARTBEAT_TIMEOUT_MS, 30_000) },
     autonomy: { enabled: bool(env.MINEHIVE_AUTONOMY_ENABLED ?? false), intervalMs: integer(env.MINEHIVE_AUTONOMY_INTERVAL_MS, 60_000), maxActionsPerHour: integer(env.MINEHIVE_AUTONOMY_MAX_ACTIONS_PER_HOUR, 20) },
+    tasks: { maxQueuePerBot: integer(env.MINEHIVE_MAX_QUEUE_PER_BOT, 100) },
     bot: {
       host: env.MINEHIVE_HOST ?? 'localhost', port: integer(env.MINEHIVE_PORT, 25565),
       username: env.MINEHIVE_USERNAME ?? 'MineHiveBot', auth: env.MINEHIVE_AUTH ?? 'offline',
@@ -34,9 +36,11 @@ export function loadConfig(env = process.env) {
   if (config.viewer.basePort < 1 || config.viewer.basePort > 65000) throw new ValidationError('Invalid viewer base port');
   if (!['json', 'sqlite'].includes(config.database.driver)) throw new ValidationError('MINEHIVE_DATABASE_DRIVER must be json or sqlite');
   if (config.semanticMemory.maxRecords < 100 || config.semanticMemory.dimensions < 16) throw new ValidationError('Invalid semantic memory limits');
+  if (config.semanticMemory.shortTermMaxRecords < 1 || config.semanticMemory.shortTermMaxRecords > config.semanticMemory.maxRecords || config.semanticMemory.shortTermTtlMs < 1000 || config.semanticMemory.promotionAccesses < 1 || !Number.isFinite(config.semanticMemory.promotionImportance) || config.semanticMemory.promotionImportance < 0 || config.semanticMemory.promotionImportance > 1 || config.semanticMemory.consolidationIntervalMs < 5000) throw new ValidationError('Invalid short-term memory lifecycle policy');
   if (config.ml.minimumSamples < 2) throw new ValidationError('Invalid ML minimum sample count');
   if (config.hive.heartbeatTimeoutMs < 1000) throw new ValidationError('Invalid HiveMind heartbeat timeout');
   if (config.autonomy.intervalMs < 5000 || config.autonomy.maxActionsPerHour < 1) throw new ValidationError('Invalid autonomy limits');
+  if (!Number.isInteger(config.tasks.maxQueuePerBot) || config.tasks.maxQueuePerBot < 1 || config.tasks.maxQueuePerBot > 10_000) throw new ValidationError('Task queue limit must be between 1 and 10000 per bot');
   if (!['development', 'test', 'staging', 'production'].includes(config.profile)) throw new ValidationError('Invalid MINEHIVE_PROFILE');
   if (config.profile === 'production' && !config.api.token) throw new ValidationError('MINEHIVE_API_TOKEN is required in production');
   return Object.freeze(config);

@@ -50,3 +50,14 @@ test('production configuration requires API authentication', () => {
   assert.throws(() => loadConfig({ MINEHIVE_PROFILE: 'production' }), /MINEHIVE_API_TOKEN is required/);
   assert.equal(loadConfig({ MINEHIVE_PROFILE: 'production', MINEHIVE_API_TOKEN: 'secure-token' }).database.driver, 'sqlite');
 });
+
+test('configuration validates bounded per-bot task queues', () => {
+  assert.equal(loadConfig({ MINEHIVE_MAX_QUEUE_PER_BOT: '25' }).tasks.maxQueuePerBot, 25);
+  assert.throws(() => loadConfig({ MINEHIVE_MAX_QUEUE_PER_BOT: '0' }), /Task queue limit/);
+});
+
+test('configuration validates short and long memory lifecycle policy', () => {
+  const config = loadConfig({ MINEHIVE_SHORT_MEMORY_MAX_RECORDS: '250', MINEHIVE_SHORT_MEMORY_TTL_MS: '60000', MINEHIVE_MEMORY_PROMOTION_ACCESSES: '4', MINEHIVE_MEMORY_PROMOTION_IMPORTANCE: '0.75' }); assert.equal(config.semanticMemory.shortTermMaxRecords, 250); assert.equal(config.semanticMemory.promotionAccesses, 4); assert.equal(config.semanticMemory.promotionImportance, 0.75);
+  assert.equal(loadConfig({ MINEHIVE_MEMORY_MAX_RECORDS: '100' }).semanticMemory.shortTermMaxRecords, 100);
+  assert.throws(() => loadConfig({ MINEHIVE_SHORT_MEMORY_TTL_MS: '100' }), /short-term memory lifecycle/);
+});

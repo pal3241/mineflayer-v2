@@ -14,11 +14,13 @@ export class BotRuntime {
       PAUSED: { on: { RESUME: 'ACTIVE', STOP: 'STOPPING' } },
       DEGRADED: { on: { RECOVER: 'READY', RETRY: 'CONNECTING', FAIL: 'FAILED', STOP: 'STOPPING' } },
       FAILED: { on: { START: 'CONNECTING', STOP: 'OFFLINE' } },
-      STOPPING: { on: { STOPPED: 'OFFLINE' } }, OFFLINE: { on: { START: 'CONNECTING' } }
+      STOPPING: { on: { STOPPED: 'OFFLINE', FAIL: 'FAILED' } }, OFFLINE: { on: { START: 'CONNECTING' } }
     }});
     adapter.on('login', () => this.#enqueueTransition('CONNECTED'));
     adapter.on('spawn', () => { this.reconnectAttempts = 0; this.#enqueueTransition('READY'); });
     adapter.on('error', error => this.#fail(error));
+    adapter.on('pluginError', failure => this.#fail(new Error(`Plugin '${failure.plugin}' failed: ${failure.error.message}`, { cause: failure.error })));
+    adapter.on('combatError', error => this.#fail(error));
     adapter.on('kicked', reason => this.#fail(new Error(String(reason))));
     adapter.on('end', reason => { if (this.stopping && this.machine.can('STOPPED')) this.#enqueueTransition('STOPPED'); else void this.#disconnected(reason); });
   }
@@ -39,7 +41,7 @@ export class BotRuntime {
       catch (error) { await this.#fail(error); }
     }, delay);
   }
-  async start(options) { this.stopping = false; this.options = options; await this.machine.transition('START'); this.bot.status = this.machine.state; await this.adapter.connect(options); }
-  async stop() { this.stopping = true; clearTimeout(this.reconnectTimer); if (this.machine.can('STOP')) await this.machine.transition('STOP'); await this.adapter.disconnect(); if (this.machine.can('STOPPED')) await this.machine.transition('STOPPED'); this.bot.status = this.machine.state; }
+  async start(options) { this.stopping = false; this.options = options; await this.machine.transition('START'); this.bot.status = this.machine.state; try { await this.adapter.connect(options); } catch (error) { await this.#fail(error); throw error; } }
+  async stop() { this.stopping = true; clearTimeout(this.reconnectTimer); if (this.machine.can('STOP')) await this.machine.transition('STOP'); try { await this.adapter.disconnect(); } catch (error) { await this.#fail(error); throw error; } if (this.machine.can('STOPPED')) await this.machine.transition('STOPPED'); this.bot.status = this.machine.state; }
   snapshot() { return { ...this.bot.toDTO(), status: this.machine.state, runtime: this.adapter.snapshot() }; }
 }

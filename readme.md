@@ -1,6 +1,6 @@
 # MineHive
 
-MineHive adalah framework Mineflayer modular dan event-driven. Versi operasional **0.6.0** menyediakan semantic memory, ML outcome scoring, HiveMind consensus, SQLite production persistence, autonomy terbatas, dashboard multi-bot, live camera berbasis canvas, dan natural-language coordinator.
+MineHive adalah framework Mineflayer modular dan event-driven. Versi operasional **0.7.0** menambahkan fondasi logistik transaksional ke semantic memory, ML outcome scoring, HiveMind consensus, SQLite production persistence, autonomy terbatas, dashboard multi-bot, live camera berbasis canvas, dan natural-language coordinator.
 
 Panduan instalasi dan penggunaan lengkap tersedia di [`PANDUAN_PENGGUNAAN.md`](PANDUAN_PENGGUNAAN.md).
 
@@ -125,12 +125,19 @@ Nama block memakai registry Minecraft, misalnya `oak_log`, `stone`, atau `iron_o
 - `GET /api/v1/ml/status`
 - `GET /api/v1/ml/models`
 - `GET /api/v1/hivemind/status`
+- `GET /api/v1/hivemind/locks`
 - `GET|POST /api/v1/hivemind/state`
 - `POST /api/v1/hivemind/proposals`
 - `GET /api/v1/autonomy/status`
 - `GET|POST /api/v1/autonomy/objectives`
 - `POST /api/v1/autonomy/tick`
 - `GET /api/v1/database/status`
+- `GET /api/v1/logistics/status`
+- `GET /api/v1/logistics/storages`
+- `GET /api/v1/logistics/reservations`
+- `GET /api/v1/logistics/transfers`
+- `GET /api/v1/logistics/timeline`
+- `GET /api/v1/logistics/locks`
 - `POST /api/v1/database/backup`
 - `POST /api/v1/bots/:id/actions/chat`
 - `POST /api/v1/bots/:id/actions/observe`
@@ -156,5 +163,12 @@ Core tidak mengimpor Mineflayer. Hanya `src/plugins/minecraft/mineflayer-adapter
 | 0.4.0-0.4.1 | Safe AI, LLM key pool, crafting, movement, dan nearest-bot coordination | Implemented |
 | 0.5.0 | Shared world memory, natural chat, farming, forestry, dan combat states | Implemented |
 | 0.6.0 | Semantic memory, adaptive ML, HiveMind lanjutan, SQLite production, dan safe autonomy | Implemented |
+| 0.7.0 | Logistics Foundation: storage registry, reservation anti-double-spending, lifecycle transfer terverifikasi, lock, observability, stabilisasi, dan pengujian kegagalan | Implemented |
+
+## 0.7.0 — Logistics Foundation
+
+Fondasi logistik menjadikan penyimpanan dan perpindahan item sebagai transaksi yang dapat diaudit. Reservation aktif mencegah stok yang sama dialokasikan dua kali, transfer menyimpan lifecycle dari `CREATED` sampai `COMPLETED` atau `FAILED`, dan setiap kegagalan menyimpan kode serta alasan spesifik. Lock HiveMind melindungi chest dari transaksi paralel, sedangkan reservation kedaluwarsa dilepas otomatis atau ditandai `RECOVERY_REQUIRED` jika proses terputus saat berjalan.
+
+Dashboard dan API menampilkan stok tersedia, reservation, transfer, lock aktif, dan timeline lifecycle. Scope ini mengikuti fase `0.7.0` di `instruksi/roadmap.txt`; warehouse role, forecasting, route planner, dan rebalancing otomatis tetap menjadi target `0.7.1`.
 
 Dokumen di `instruksi/` tetap menjadi sumber persyaratan utama.

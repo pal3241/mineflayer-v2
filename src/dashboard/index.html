@@ -38,7 +38,7 @@
         <article><span>Active goals</span><strong id="statGoals">0</strong><small>Running workloads</small></article>
         <article><span>System health</span><strong id="statHealth" class="health-text">—</strong><small>Core and fleet</small></article>
         <article><span>Coordinator</span><strong id="statAi" class="health-text">—</strong><small id="statAiModel">Deterministic fallback</small></article>
-        <article><span>Semantic memory</span><strong id="statMemory">0</strong><small>Shared knowledge records</small></article>
+        <article><span>Semantic memory</span><strong id="statMemory">0</strong><small id="statMemoryDetail">Short 0 · Long 0</small></article>
         <article><span>Hive members</span><strong id="statHive">0</strong><small>Active fleet members</small></article>
         <article><span>ML outcomes</span><strong id="statMl">0</strong><small>Coordination evidence</small></article>
         <article><span>Process memory</span><strong id="statProcess">—</strong><small id="statProcessHeap">Runtime diagnostics</small></article>
@@ -99,10 +99,18 @@
 
     <section id="logistics" class="view">
       <div class="panel-title"><div><p class="eyebrow">RESOURCE NETWORK</p><h2>Storage & logistics</h2></div><button id="refreshLogistics" class="button secondary">Refresh logistics</button></div>
+      <div class="stats compact-stats">
+        <article class="stat-card"><span>ACTIVE</span><strong id="logisticsActive">0</strong><small>reservations</small></article>
+        <article class="stat-card"><span>IN FLIGHT</span><strong id="logisticsInFlight">0</strong><small>transfers</small></article>
+        <article class="stat-card"><span>RECOVERY</span><strong id="logisticsRecovery">0</strong><small>manual review</small></article>
+        <article class="stat-card"><span>LOCKS</span><strong id="logisticsLockCount">0</strong><small>storage locks</small></article>
+      </div>
       <div class="settings-grid">
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">WAREHOUSES</p><h2>Registered storage</h2></div></div><div id="logisticsStorages" class="timeline"></div></section>
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">RESERVATIONS</p><h2>Stock commitments</h2></div></div><div id="logisticsReservations" class="timeline"></div></section>
-        <section class="panel full"><div class="panel-title"><div><p class="eyebrow">AUDIT</p><h2>Verified transfers</h2></div></div><div id="logisticsTransfers" class="timeline"></div></section>
+        <section class="panel full"><div class="panel-title"><div><p class="eyebrow">AUDIT</p><h2>Transactional transfers</h2></div></div><div id="logisticsTransfers" class="timeline"></div></section>
+        <section class="panel"><div class="panel-title"><div><p class="eyebrow">DEVELOPER</p><h2>Lifecycle timeline</h2></div></div><div id="logisticsTimeline" class="timeline"></div></section>
+        <section class="panel"><div class="panel-title"><div><p class="eyebrow">HIVEMIND</p><h2>Active storage locks</h2></div></div><div id="logisticsLocks" class="timeline"></div></section>
       </div>
     </section>
 

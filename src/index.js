@@ -20,6 +20,7 @@ export { JsonRepository } from './persistence/json-repository.js';
 export { MemoryRepository } from './persistence/memory-repository.js';
 export { SqliteDatabase, SqliteRepository } from './database/sqlite-database.js';
 export { createHashEmbeddingProvider, createSemanticMemory } from './memory/semantic-memory.js';
+export { createMemoryLifecycle } from './memory/memory-lifecycle.js';
 export { createAdaptiveModel } from './ml/adaptive-model.js';
 export { createHiveService } from './hivemind/hive-service.js';
 export { createAutonomyService } from './autonomy/autonomy-service.js';

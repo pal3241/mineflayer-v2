@@ -59,10 +59,11 @@ test('API exposes health and versioned bot DTOs', async () => {
     const memories = await fetch(`http://127.0.0.1:${port}/api/v1/memory?host=localhost&port=25565&dimension=overworld`); assert.equal((await memories.json()).data[0].name, 'desa-test');
     const semantic = await fetch(`http://127.0.0.1:${port}/api/v1/memory/semantic`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"type":"SEMANTIC","content":"desa aman dekat sungai","visibility":"HIVE","worldKey":"localhost:25565","dimension":"overworld","source":"api-test"}' }); assert.equal(semantic.status, 201);
     assert.equal((await (await fetch(`http://127.0.0.1:${port}/api/v1/memory/semantic?q=desa+sungai`)).json()).data[0].source, 'api-test');
-    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/ml/status`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/hivemind/status`)).status, 200);
+    const shortMemory = await fetch(`http://127.0.0.1:${port}/api/v1/memory/short-term`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"content":"ingat gua sementara","importance":0.9}' }); assert.equal(shortMemory.status, 201); assert.equal((await shortMemory.json()).data.type, 'SHORT_TERM'); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/memory/long-term`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"content":"base utama selalu penting"}' })).status, 201); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/memory/consolidate`, { method: 'POST' })).status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/ml/status`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/hivemind/status`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/hivemind/locks`)).status, 200);
     const objective = await fetch(`http://127.0.0.1:${port}/api/v1/autonomy/objectives`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"text":"collect stone 1","selector":"bot:api"}' }); assert.equal(objective.status, 201); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/autonomy/status`)).status, 200);
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/database/status`)).status, 200);
-    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/logistics/status`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/logistics/storages`)).status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/logistics/status`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/logistics/storages`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/logistics/timeline`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/logistics/locks`)).status, 200);
     const llmSettings = await fetch(`http://127.0.0.1:${port}/api/v1/settings/llm`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"provider":"openrouter","endpoint":"https://openrouter.ai/api/v1","model":"openrouter/auto","apiKeys":["secret-runtime-key"]}' }); const llmPayload = await llmSettings.json(); assert.equal(llmSettings.status, 200); assert.equal(llmPayload.data.status.keyCount, 1); assert.doesNotMatch(JSON.stringify(llmPayload), /secret-runtime-key/);
     const settings = await (await fetch(`http://127.0.0.1:${port}/api/v1/settings`)).json(); assert.equal(settings.data.llm.configuredKeys[0], true); assert.doesNotMatch(JSON.stringify(settings), /secret-runtime-key/);
     const logSettings = await fetch(`http://127.0.0.1:${port}/api/v1/settings/log`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"level":"debug"}' }); assert.equal((await logSettings.json()).data.level, 'debug');
@@ -83,5 +84,16 @@ test('API bearer token protects control routes but not health', async () => {
     assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/system/status`)).status, 401);
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/system/status`, { headers: { authorization: 'Bearer secret' } })).status, 200);
+  } finally { await app.stop(); }
+});
+
+test('health and dashboard assets do not consume the API control rate limit', async () => {
+  const app = createApplication({ config: {
+    profile: 'test', log: { level: 'silent' }, dataPath: './data', database: { driver: 'json', file: './data/test.sqlite' }, semanticMemory: { maxRecords: 1000, dimensions: 64 }, ml: { minimumSamples: 2 }, hive: { heartbeatTimeoutMs: 30000 }, autonomy: { enabled: false, intervalMs: 60000, maxActionsPerHour: 10 }, tasks: { maxQueuePerBot: 10 },
+    api: { host: '127.0.0.1', port: 0, rateLimitPerMinute: 10 }, bot: { host: 'localhost', port: 25565, username: 'test', auth: 'offline', autoConnect: false }
+  }});
+  try {
+    await app.start(); const { port } = app.api.address(); for (let index = 0; index < 15; index++) assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200); assert.equal((await fetch(`http://127.0.0.1:${port}/dashboard.js`)).status, 200);
+    for (let index = 0; index < 10; index++) assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/system/status`)).status, 200); const limited = await fetch(`http://127.0.0.1:${port}/api/v1/system/status`); assert.equal(limited.status, 429); assert.ok(Number(limited.headers.get('retry-after')) >= 1);
   } finally { await app.stop(); }
 });

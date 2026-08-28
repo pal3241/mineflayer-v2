@@ -97,6 +97,17 @@ test('movement policy disables scaffolding, towers, and risky shortcuts', async 
   const client = new MovementClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { Movements }; client.emit('spawn'); await new Promise(resolve => setImmediate(resolve)); assert.equal(client.movements.allow1by1towers, false); assert.equal(client.movements.allowParkour, false); assert.deepEqual(client.movements.scafoldingBlocks, []); assert.equal(client.movements.placeCost, Number.POSITIVE_INFINITY); assert.equal(client.movements.maxDropDown, 3); await adapter.disconnect();
 });
 
+test('movement setup failures become observable plugin errors', async () => {
+  class BrokenMovements { constructor() { throw new Error('movement setup failed'); } }
+  class MovementClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.pathfinder = { setGoal() {} }; } clearControlStates() {} quit() { this.emit('end'); } }
+  const client = new MovementClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { Movements: BrokenMovements }; const failure = new Promise(resolve => adapter.once('pluginError', resolve)); client.emit('spawn'); const event = await failure; assert.equal(event.plugin, 'movement'); assert.match(event.error.message, /setup failed/); assert.equal(adapter.status, 'DEGRADED'); await adapter.disconnect();
+});
+
+test('movement commands reject non-numeric ranges before pathfinding', async () => {
+  class GoalNear { constructor() { throw new Error('goal must not be constructed'); } } class MovementClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.pathfinder = { setGoal() {}, goto() {} }; } clearControlStates() {} quit() { this.emit('end'); } }
+  const client = new MovementClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear } }; client.emit('spawn'); await assert.rejects(adapter.navigate({ x: 1, y: 64, z: 1, range: 'invalid' }), /range must be numeric/); await assert.rejects(adapter.survey({ maxDistance: Number.NaN }), /distance must be numeric/); await adapter.disconnect();
+});
+
 test('navigation rejects a path that requires automatic block placement', async () => {
   class GoalNear { constructor(x, y, z, range) { Object.assign(this, { x, y, z, range }); } }
   class ScaffoldClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.pathfinder = { goto: async () => { queueMicrotask(() => this.emit('path_update', { path: [{ toPlace: [{ x: 0, y: 63, z: 0 }] }] })); return new Promise(() => {}); }, setGoal() {} }; } clearControlStates() {} quit() { this.emit('end'); } }

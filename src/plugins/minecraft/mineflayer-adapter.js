@@ -29,7 +29,7 @@ export class MineflayerAdapter extends EventEmitter {
     this.client = factory(options);
     if (this.plugins) await this.#loadPlugins();
     for (const name of ['login', 'spawn', 'end', 'kicked', 'error', 'health', 'move', 'death', 'chat', 'whisper']) this.client.on(name, (...args) => this.emit(name, ...args));
-    this.client.once('spawn', async () => { this.status = 'READY'; await this.#configureMovement(); });
+    this.client.once('spawn', () => { this.status = 'READY'; void this.#configureMovement().catch(error => { this.status = 'DEGRADED'; this.emit('pluginError', { plugin: 'movement', error }); }); });
     this.client.once('end', () => { this.status = 'DISCONNECTED'; this.client = null; });
   }
 
@@ -60,7 +60,7 @@ export class MineflayerAdapter extends EventEmitter {
   async navigate({ x, y, z, range = 1 }, { signal } = {}) {
     const bot = this.#ready('navigation'); if (!bot.pathfinder) throw new ValidationError('Pathfinder plugin is unavailable');
     for (const value of [x, y, z]) if (!Number.isFinite(Number(value))) throw new ValidationError('Navigation requires numeric x, y, z');
-    const destination = { x: Number(x), y: Number(y), z: Number(z) }; const acceptedRange = Math.max(1, Number(range)); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const goal = new goals.GoalNear(destination.x, destination.y, destination.z, acceptedRange);
+    const destination = { x: Number(x), y: Number(y), z: Number(z) }; const acceptedRange = boundedDistance(range, 1, 64, 'Navigation range'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const goal = new goals.GoalNear(destination.x, destination.y, destination.z, acceptedRange);
     const cleanupAbort = this.#abort(signal, () => bot.pathfinder.setGoal(null)); const guard = navigationGuard(bot, destination, acceptedRange, 10_000);
     try { await Promise.race([bot.pathfinder.goto(goal), guard.promise]); const position = this.snapshot().position; if (!position || distance3(position, destination) > acceptedRange + 1) throw new ValidationError(`Navigation ended outside target range: target ${destination.x},${destination.y},${destination.z}, actual ${formatPosition(position)}`); return { position }; }
     catch (error) { bot.pathfinder.setGoal(null); throw error; } finally { guard.stop(); cleanupAbort(); }
@@ -69,7 +69,7 @@ export class MineflayerAdapter extends EventEmitter {
     const bot = this.#ready('follow-player'); const actualName = Object.keys(bot.players ?? {}).find(name => name.toLowerCase() === String(username).toLowerCase()); const entity = bot.players?.[actualName]?.entity;
     if (!entity) throw new ValidationError(`Player '${username}' is not visible`);
     if (!bot.pathfinder) throw new ValidationError('Pathfinder plugin is unavailable');
-    const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; bot.pathfinder.setGoal(new goals.GoalFollow(entity, Math.max(1, Number(range))), true);
+    const acceptedRange = boundedDistance(range, 1, 64, 'Follow range'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; bot.pathfinder.setGoal(new goals.GoalFollow(entity, acceptedRange), true);
     this.#abort(signal, () => bot.pathfinder.setGoal(null)); return { following: actualName, range };
   }
   async comeToPlayer({ username, range = 1 }, context = {}) { const bot = this.#ready('come'); const actualName = Object.keys(bot.players ?? {}).find(name => name.toLowerCase() === String(username).toLowerCase()); const entity = bot.players?.[actualName]?.entity; if (!entity) throw new ValidationError(`Player '${username}' is not visible`); return this.navigate({ x: entity.position.x, y: entity.position.y, z: entity.position.z, range }, context); }
@@ -95,7 +95,7 @@ export class MineflayerAdapter extends EventEmitter {
     return (bot.registry.blocksArray ?? Object.values(bot.registry.blocksByName ?? {})).filter(block => block?.diggable !== false && block.drops?.includes(definition.id)).sort((left, right) => Number(right.name === item) - Number(left.name === item)).map(block => block.name);
   }
   async survey({ maxDistance }) {
-    const bot = this.#ready('survey'); const radius = Math.max(8, Math.min(128, Number(maxDistance)));
+    const bot = this.#ready('survey'); const radius = boundedDistance(maxDistance, 8, 128, 'Survey distance');
     if (!Number.isFinite(radius)) throw new ValidationError('Survey distance must be numeric');
     const discoveries = SURVEY_MARKERS.flatMap(marker => {
       const definition = bot.registry?.blocksByName?.[marker.block]; if (!definition) return [];
@@ -137,7 +137,7 @@ export class MineflayerAdapter extends EventEmitter {
     const bot = this.#ready('collection'); if (!bot.collectBlock) throw new ValidationError('CollectBlock plugin is unavailable');
     const definition = bot.registry?.blocksByName?.[block]; if (!definition) throw new ValidationError(`Unknown block '${block}'`);
     const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1));
-    const positions = bot.findBlocks({ matching: definition.id, maxDistance: Math.max(1, Math.min(128, Number(maxDistance))), count: amount });
+    const radius = boundedDistance(maxDistance, 1, 128, 'Collection distance'); const positions = bot.findBlocks({ matching: definition.id, maxDistance: radius, count: amount });
     const blocks = positions.map(position => bot.blockAt(position)).filter(Boolean); if (!blocks.length) throw new ValidationError(`No '${block}' found within ${maxDistance} blocks`);
     const cleanup = this.#abort(signal, () => { void bot.collectBlock.cancelTask(); });
     try { await bot.collectBlock.collect(blocks); return { block, requested: amount, collectedTargets: blocks.length, inventory: this.snapshot().inventorySummary }; } finally { cleanup(); }
@@ -293,6 +293,7 @@ function bestItem(bot, predicate) { return bot.inventory.items().filter(predicat
 function equipmentRank(name) { return ['wooden', 'golden', 'stone', 'iron', 'diamond', 'netherite'].findIndex(material => name.startsWith(`${material}_`)) + 1; }
 async function equipBestWeapon(bot) { const weapon = bestItem(bot, item => item.name.endsWith('_sword') || item.name.endsWith('_axe')); if (weapon) await bot.equip(weapon, 'hand'); }
 function distance3(left, right) { return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z); }
+function boundedDistance(value, minimum, maximum, field) { const number = Number(value); if (!Number.isFinite(number)) throw new ValidationError(`${field} must be numeric`); return Math.max(minimum, Math.min(maximum, number)); }
 function navigationGuard(bot, destination, range, stagnationMs) { let bestDistance = distance3(bot.entity.position, destination); let progressedAt = Date.now(); let stopped = false; let rejectGuard; const promise = new Promise((_resolve, reject) => { rejectGuard = reject; }); const onMove = () => { const current = distance3(bot.entity.position, destination); if (bestDistance - current >= 0.5) { bestDistance = current; progressedAt = Date.now(); } }; const onReset = reason => { if (['place_error', 'no_scaffolding_blocks'].includes(reason)) rejectGuard(new ValidationError(`Navigation route requires forbidden or failed block placement (${reason})`)); }; const onPath = result => { if (result.path?.some(node => node.toPlace?.some(block => !block.useOne))) rejectGuard(new ValidationError('Navigation route requires scaffolding, but automatic block placement is disabled')); }; const timer = setInterval(() => { if (distance3(bot.entity.position, destination) <= range + 1) return; if (Date.now() - progressedAt >= stagnationMs) rejectGuard(new ValidationError(`Navigation stalled for ${stagnationMs}ms at ${formatPosition(bot.entity.position)}`)); }, 1000); timer.unref?.(); bot.on('move', onMove); bot.on('path_reset', onReset); bot.on('path_update', onPath); return { promise, stop: () => { if (stopped) return; stopped = true; clearInterval(timer); bot.off('move', onMove); bot.off('path_reset', onReset); bot.off('path_update', onPath); } }; }
 function formatPosition(position) { return position ? `${Number(position.x).toFixed(1)},${Number(position.y).toFixed(1)},${Number(position.z).toFixed(1)}` : 'unknown'; }
 function uniqueDiscoveries(discoveries) { const seen = new Set(); return discoveries.filter(discovery => { const key = `${discovery.marker}:${discovery.position.x}:${discovery.position.y}:${discovery.position.z}`; if (seen.has(key)) return false; seen.add(key); return true; }); }
