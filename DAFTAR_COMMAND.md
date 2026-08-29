@@ -368,7 +368,7 @@ Teks natural juga dapat ditulis langsung setelah selector tanpa kata `ai`:
 !bot1 halo, keadaanmu bagaimana?
 ```
 
-Dengan OpenRouter atau LLM lokal aktif, permintaan diterjemahkan ke intent aman. Tanpa LLM, parser lokal tetap mengenali command baku, beberapa kata Indonesia/Inggris, dan operasi aritmetika sederhana. Output LLM dibatasi maksimal 5 token dan tidak memiliki akses shell atau API key.
+Dengan OpenRouter atau NVIDIA NIM aktif, permintaan diterjemahkan ke intent aman. Tanpa LLM, parser lokal tetap mengenali command baku, beberapa kata Indonesia/Inggris, dan operasi aritmetika sederhana. Output LLM dibatasi maksimal 5 token dan tidak memiliki akses shell atau API key.
 
 ## 11. Command Console di dashboard
 
@@ -552,17 +552,18 @@ Contoh mengatur LLM:
 ```powershell
 $body = @{
   provider = 'openrouter'
-  endpoint = 'https://openrouter.ai/api/v1'
-  model = 'openrouter/auto'
-  localEndpoint = ''
-  localModel = ''
-  apiKeys = @('KEY_1', 'KEY_2', 'KEY_3')
+  openRouterEndpoint = 'https://openrouter.ai/api/v1'
+  openRouterModel = 'openrouter/auto'
+  openRouterApiKeys = @('OR_KEY_1', 'OR_KEY_2', 'OR_KEY_3')
+  nvidiaEndpoint = 'https://integrate.api.nvidia.com/v1'
+  nvidiaModel = 'meta/llama-3.1-8b-instruct'
+  nvidiaApiKeys = @('NV_KEY_1', 'NV_KEY_2', 'NV_KEY_3')
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method Patch -Uri "$baseUrl/api/v1/settings/llm" -Headers $headers -ContentType 'application/json' -Body $body
 ```
 
-Gunakan `{"clearKeys":true}` bersama field setting yang diwajibkan form untuk menghapus key runtime. API key tidak pernah dikirim kembali oleh endpoint settings.
+Gunakan `{"clearOpenRouterKeys":true}` atau `{"clearNvidiaKeys":true}` untuk menghapus pool key provider terkait. API key tidak pernah dikirim kembali oleh endpoint settings.
 
 #### Bot, admin, camera, dan memory bot
 
@@ -609,6 +610,7 @@ Gunakan `{"clearKeys":true}` bersama field setting yang diwajibkan form untuk me
 | `DELETE` | `/api/v1/memory/:id` | Menghapus world memory. |
 | `GET` | `/api/v1/memory/semantic` | Mencari semantic memory. |
 | `POST` | `/api/v1/memory/semantic` | Menambah semantic memory. |
+| `DELETE` | `/api/v1/memory/semantic/:id` | Menghapus satu semantic memory. |
 | `GET` | `/api/v1/memory/short-term` | Mencari short-term memory. |
 | `POST` | `/api/v1/memory/short-term` | Menambah short-term memory. |
 | `GET` | `/api/v1/memory/long-term` | Mencari long-term memory. |
@@ -691,5 +693,5 @@ Invoke-RestMethod -Uri "$baseUrl/api/v1/goals/$goalId" -Headers $headers
 - Command yang gagal akan mengirim pesan `failed: <penyebab>` dan mencatat error terstruktur pada log.
 - Jika API mengembalikan `401`, periksa bearer token.
 - Jika API mengembalikan `429`, tunggu nilai header `Retry-After`; dashboard menggunakan snapshot dan backoff agar tidak terus menambah request.
-- Maksimal tiga OpenRouter key dapat disimpan. Key berikutnya dipakai saat key aktif menerima status 401, 402, atau 429.
+- Maksimal tiga key dapat disimpan secara terpisah untuk OpenRouter dan NVIDIA NIM. Key berikutnya dipakai saat key aktif menerima status 401, 402, atau 429.
 - Untuk melihat penyebab task, buka tab **Logs** dan **Log files** di Settings, atau jalankan `npm run health`.

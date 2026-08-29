@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { MineHiveError, ValidationError } from '../core/errors.js';
+import { MineHiveError, NotFoundError, ValidationError } from '../core/errors.js';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
@@ -61,6 +61,7 @@ export class ApiServer {
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/dashboard') return send(200, { data: await memoryDashboard(this.application, url.searchParams) });
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/semantic') return send(200, { data: await this.application.semanticMemory.search({ text: url.searchParams.get('q') ?? '', worldKey: url.searchParams.get('worldKey') ?? undefined, dimension: url.searchParams.get('dimension') ?? undefined, type: url.searchParams.get('type') ?? undefined, limit: url.searchParams.get('limit') ?? 10 }) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/semantic') return send(201, { data: await this.application.semanticMemory.remember(await body(req)) });
+        if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3] === 'semantic' && parts[4] && parts.length === 5) return send(200, { data: await deleteMemory(this.application.semanticMemory, 'Semantic memory', decodeURIComponent(parts[4]), 'semantic') });
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/short-term') return send(200, { data: await this.application.semanticMemory.search({ text: url.searchParams.get('q') ?? '', worldKey: url.searchParams.get('worldKey') ?? undefined, dimension: url.searchParams.get('dimension') ?? undefined, type: 'SHORT_TERM', limit: url.searchParams.get('limit') ?? 10 }) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/short-term') return send(201, { data: await this.application.semanticMemory.rememberShortTerm(await body(req)) });
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/long-term') return send(200, { data: await this.application.semanticMemory.search({ text: url.searchParams.get('q') ?? '', worldKey: url.searchParams.get('worldKey') ?? undefined, dimension: url.searchParams.get('dimension') ?? undefined, type: 'LONG_TERM', limit: url.searchParams.get('limit') ?? 10 }) });
@@ -93,7 +94,7 @@ export class ApiServer {
         if (req.method === 'POST' && url.pathname === '/api/v1/database/backup') { if (!this.application.database) throw new ValidationError('Database backup requires the sqlite driver'); const input = await body(req); const name = String(input.name ?? `minehive-${Date.now()}.sqlite`); if (!/^[A-Za-z0-9_.-]{1,100}\.sqlite$/.test(name)) throw new ValidationError('Backup name must be a safe .sqlite filename'); return send(201, { data: await this.application.database.backup(join(resolve(this.application.config.dataPath), 'backups', name)) }); }
         if (req.method === 'GET' && url.pathname === '/api/v1/memory') return send(200, { data: await this.application.worldMemory.search({ host: url.searchParams.get('host') || undefined, port: url.searchParams.get('port') || undefined, dimension: url.searchParams.get('dimension') || undefined, name: url.searchParams.get('name') || undefined, type: url.searchParams.get('type') || undefined }) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory') return send(201, { data: await this.application.worldMemory.remember(await body(req)) });
-        if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3]) return send(200, { data: { removed: await this.application.worldMemory.forget(parts[3]) } });
+        if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3] && parts.length === 4) return send(200, { data: await deleteMemory(this.application.worldMemory, 'World memory', decodeURIComponent(parts[3]), 'world') });
         if (parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'goals' && parts[3]) {
           if (req.method === 'GET' && parts.length === 4) return send(200, { data: this.application.goals.get(parts[3]).toDTO(), tasks: this.application.goals.tasks(parts[3]) });
           if (req.method === 'POST' && parts[4] === 'run') return send(200, { data: await this.application.goals.run(parts[3]) });
@@ -155,3 +156,4 @@ async function memoryDashboard(application, searchParams) {
 function queryInteger(value, name, minimum, maximum, fallback) { if (value === null || value === '') return fallback; const number = Number(value); if (!Number.isInteger(number) || number < minimum || number > maximum) throw new ValidationError(`${name} must be an integer between ${minimum} and ${maximum}`); return number; }
 function queryText(value, name, maximum) { const text = String(value ?? '').trim(); if (text.length > maximum || /[\r\n\0]/.test(text)) throw new ValidationError(`${name} must contain at most ${maximum} safe characters`); return text; }
 function memorySearchText(record) { return [record.name, record.content, record.displayType, record.worldKey, record.dimension, record.source, record.sourceBotId, ...(record.tags ?? [])].filter(value => value !== null && value !== undefined).join(' ').toLowerCase(); }
+async function deleteMemory(service, resource, id, category) { if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(id)) throw new ValidationError('Memory id must contain 1-128 safe characters'); const removed = await service.forget(id); if (!removed) throw new NotFoundError(resource, id); return { removed: true, id, category }; }

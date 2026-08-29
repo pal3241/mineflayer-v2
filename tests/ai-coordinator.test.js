@@ -37,11 +37,11 @@ class FleetAdapter extends EventEmitter {
   snapshot() { return { connection: 'READY', position: this.position, dimension: 'overworld', health: 20, food: 20, inventorySummary: this.items.filter(item => item.count > 0), camera: { active: false }, timestamp: new Date().toISOString() }; }
 }
 
-test('local OpenAI-compatible LLM returns a validated coordinator intent', async () => {
+test('self-hosted NVIDIA NIM returns a validated coordinator intent', async () => {
   let requestBody; const server = createServer(async (request, response) => { const chunks = []; for await (const chunk of request) chunks.push(chunk); requestBody = JSON.parse(Buffer.concat(chunks)); response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { content: '{"intent":"collect","selector":"class:miner","block":"stone","item":null,"count":8,"player":null,"x":null,"y":null,"z":null,"home":null}' } }] })); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
-    const gateway = new LlmGateway({ provider: 'local', localEndpoint: `http://127.0.0.1:${server.address().port}`, localModel: 'test', localStructuredOutput: false, timeoutMs: 1000 }, { warn() {} });
+    const gateway = new LlmGateway({ provider: 'nvidia', nvidiaEndpoint: `http://127.0.0.1:${server.address().port}`, nvidiaModel: 'test', nvidiaApiKeys: [], timeoutMs: 1000 }, { warn() {} });
     const fleet = [{ id: 'bot1', position: { x: 1, y: 64, z: 1 }, inventory: [{ name: 'stone_pickaxe', count: 1 }], nearby: [] }]; const result = await gateway.interpret('get stone', { fleet }); assert.equal(result.intent, 'collect'); assert.equal(result.block, 'stone'); assert.equal(result.count, 8); assert.equal(requestBody.max_tokens, 5); assert.deepEqual(JSON.parse(requestBody.messages[1].content).fleet, fleet);
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
@@ -55,8 +55,8 @@ test('OpenRouter provider rotates to the next key after a rate limit', async () 
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
-test('auto provider stays deterministic until a local model or OpenRouter key is configured', async () => {
-  const gateway = new LlmGateway({ provider: 'auto', localEndpoint: 'http://127.0.0.1:11434/v1', model: 'openrouter/auto' }, { warn() {} });
+test('disabled provider stays deterministic until OpenRouter or NVIDIA NIM is configured', async () => {
+  const gateway = new LlmGateway({ provider: 'none' }, { warn() {} });
   assert.equal(gateway.status().enabled, false);
   const result = await gateway.interpret('ikuti Steve', { selector: 'bot:worker' });
   assert.equal(result.intent, 'follow'); assert.equal(result.selector, 'bot:worker'); assert.equal(result.player, 'steve');
@@ -66,7 +66,7 @@ test('invalid LLM command safely falls back to the deterministic parser', async 
   const server = createServer(async (request, response) => { for await (const _ of request) {} response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { content: '{"intent":"move","selector":"auto","x":null,"y":null,"z":null}' } }] })); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
-    const gateway = new LlmGateway({ provider: 'local', localEndpoint: `http://127.0.0.1:${server.address().port}`, localModel: 'test', localStructuredOutput: false, timeoutMs: 1000 }, { warn() {} });
+    const gateway = new LlmGateway({ provider: 'nvidia', nvidiaEndpoint: `http://127.0.0.1:${server.address().port}`, nvidiaModel: 'test', nvidiaApiKeys: [], timeoutMs: 1000 }, { warn() {} });
     const result = await gateway.interpret('move 10 64 -5'); assert.deepEqual([result.x, result.y, result.z], [10, 64, -5]);
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
@@ -125,7 +125,7 @@ test('natural-language coordinator prepares hoe, axe, and sword for world action
 });
 
 test('deterministic companion translates natural commands and answers simple arithmetic', async () => {
-  const gateway = new LlmGateway({ provider: 'auto' }, { warn() {} }); assert.equal((await gateway.interpret('tebang pohon')).intent, 'deforest'); assert.equal((await gateway.interpret('berapa 1+1')).reply, '1 + 1 = 2'); assert.equal((await gateway.interpret('follow Steve')).intent, 'follow'); assert.equal((await gateway.interpret('come Steve')).intent, 'come'); assert.equal((await gateway.interpret('craft wooden sword')).item, 'wooden_sword'); assert.equal((await gateway.interpret('lebur besi 4')).item, 'iron_ingot'); assert.equal((await gateway.interpret('masak daging sapi 3')).item, 'cooked_beef'); const survey = await gateway.interpret('jelajah 32'); assert.equal(survey.intent, 'survey'); assert.equal(survey.radius, 32); const storage = await gateway.interpret('simpan cobbled_deepslate 32 gudang'); assert.equal(storage.intent, 'store'); assert.equal(storage.item, 'cobbled_deepslate'); assert.equal(storage.name, 'gudang');
+  const gateway = new LlmGateway({ provider: 'none' }, { warn() {} }); assert.equal((await gateway.interpret('tebang pohon')).intent, 'deforest'); assert.equal((await gateway.interpret('berapa 1+1')).reply, '1 + 1 = 2'); assert.equal((await gateway.interpret('follow Steve')).intent, 'follow'); assert.equal((await gateway.interpret('come Steve')).intent, 'come'); assert.equal((await gateway.interpret('craft wooden sword')).item, 'wooden_sword'); assert.equal((await gateway.interpret('lebur besi 4')).item, 'iron_ingot'); assert.equal((await gateway.interpret('masak daging sapi 3')).item, 'cooked_beef'); const survey = await gateway.interpret('jelajah 32'); assert.equal(survey.intent, 'survey'); assert.equal(survey.radius, 32); const storage = await gateway.interpret('simpan cobbled_deepslate 32 gudang'); assert.equal(storage.intent, 'store'); assert.equal(storage.item, 'cobbled_deepslate'); assert.equal(storage.name, 'gudang');
 });
 
 test('coordinator smelts iron and food from prepared input and fuel', async () => {

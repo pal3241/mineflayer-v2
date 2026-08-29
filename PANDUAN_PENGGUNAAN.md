@@ -89,22 +89,24 @@ MINEHIVE_LLM_PROVIDER=openrouter
 OPENROUTER_API_KEY_1=api-key-utama
 OPENROUTER_API_KEY_2=api-key-cadangan-1
 OPENROUTER_API_KEY_3=api-key-cadangan-2
-MINEHIVE_LLM_MODEL=openrouter/auto
+MINEHIVE_OPENROUTER_ENDPOINT=https://openrouter.ai/api/v1
+MINEHIVE_OPENROUTER_MODEL=openrouter/auto
 ```
 
 Ketiga key disimpan sebagai pool. Jika key aktif menerima HTTP `429` (rate limit), `402` (saldo/quota), atau `401` (key tidak valid), permintaan yang sama dipindahkan ke key berikutnya. Key yang terkena `429` mengikuti `Retry-After` atau cooldown 60 detik. Dashboard hanya menampilkan nomor key aktif dan jumlah key siap pakai, tidak pernah nilai key. Variabel lama `OPENROUTER_API_KEY` tetap didukung untuk satu key.
 
-Untuk server LLM lokal yang menyediakan API kompatibel OpenAI `/v1/chat/completions`, gunakan:
+Provider kedua adalah NVIDIA NIM. Untuk NVIDIA-hosted API Catalog gunakan:
 
 ```env
-MINEHIVE_LLM_PROVIDER=local
-MINEHIVE_LOCAL_LLM_ENDPOINT=http://127.0.0.1:11434/v1
-MINEHIVE_LOCAL_LLM_MODEL=nama-model-lokal
-MINEHIVE_LOCAL_LLM_API_KEY=
-MINEHIVE_LOCAL_LLM_STRUCTURED=false
+MINEHIVE_LLM_PROVIDER=nvidia
+NVIDIA_API_KEY_1=nvapi-key-utama
+NVIDIA_API_KEY_2=nvapi-key-cadangan-1
+NVIDIA_API_KEY_3=nvapi-key-cadangan-2
+MINEHIVE_NVIDIA_NIM_ENDPOINT=https://integrate.api.nvidia.com/v1
+MINEHIVE_NVIDIA_NIM_MODEL=meta/llama-3.1-8b-instruct
 ```
 
-Mode `auto` memilih OpenRouter jika salah satu API key tersedia, memilih lokal jika endpoint dan model lokal diisi, lalu menggunakan parser deterministik bila keduanya belum dikonfigurasi. Dashboard menampilkan provider, model, dan kesehatan pool key yang benar-benar aktif.
+NIM mandiri juga didukung dengan endpoint seperti `http://127.0.0.1:8000/v1`; API key boleh kosong untuk endpoint non-hosted. Kedua provider memakai `/chat/completions`, pool maksimal tiga key, rotasi status `401`, `402`, atau `429`, dan fallback request tanpa JSON schema jika model menolak structured output. Gunakan `MINEHIVE_LLM_PROVIDER=none` untuk parser deterministik tanpa layanan LLM. Dashboard menampilkan provider, model, dan kesehatan pool key yang benar-benar aktif.
 
 ## 3. Menjalankan sistem
 
@@ -298,7 +300,7 @@ Setelah selector, teks tidak harus berupa command baku:
 !bot1 halo, keadaanmu bagaimana?
 ```
 
-OpenRouter menerjemahkan teks menjadi intent JSON yang dibatasi. Pertanyaan atau percakapan memakai intent `converse` dan dibalas melalui chat Minecraft. Jika LLM tidak aktif, parser lokal masih memahami command umum dan operasi aritmetika sederhana.
+OpenRouter atau NVIDIA NIM menerjemahkan teks menjadi intent JSON yang dibatasi. Pertanyaan atau percakapan memakai intent `converse` dan dibalas melalui chat Minecraft. Jika LLM tidak aktif, parser lokal masih memahami command umum dan operasi aritmetika sederhana.
 
 ### Shared world memory
 
@@ -317,7 +319,7 @@ Bot kedua dapat memakai lokasi yang disimpan bot pertama selama berada di server
 
 Hasil pekerjaan coordinator disimpan lebih dahulu sebagai `SHORT_TERM`. Setiap recall yang relevan menambah `accessCount`. Konsolidasi otomatis berjalan sesuai `MINEHIVE_MEMORY_CONSOLIDATION_INTERVAL_MS`; memory dipromosikan menjadi `LONG_TERM` jika importance mencapai batas atau sudah dipakai berulang kali. Memory sementara yang kedaluwarsa atau melewati kapasitas dilupakan secara terkontrol, sedangkan long-term memory tidak ikut kebijakan TTL.
 
-Policy permanen dapat diatur melalui `MINEHIVE_MEMORY_MAX_RECORDS`, `MINEHIVE_SHORT_MEMORY_MAX_RECORDS`, `MINEHIVE_SHORT_MEMORY_TTL_MS`, `MINEHIVE_MEMORY_PROMOTION_ACCESSES`, `MINEHIVE_MEMORY_PROMOTION_IMPORTANCE`, dan `MINEHIVE_MEMORY_CONSOLIDATION_INTERVAL_MS`. Tab **Memory** menyediakan pencarian, filter category/type/world/dimension, pagination, jumlah record per jenis, pengaturan policy runtime, status lifecycle, dan tombol konsolidasi manual. Endpoint gabungan tersedia melalui `/api/v1/memory/dashboard`, sedangkan runtime policy memakai `PATCH /api/v1/settings/memory`. Semua record tetap menyimpan provenance, visibility, world, dimension, confidence, importance, access count, dan metadata embedding tanpa mengirim vector mentah ke browser.
+Policy permanen dapat diatur melalui `MINEHIVE_MEMORY_MAX_RECORDS`, `MINEHIVE_SHORT_MEMORY_MAX_RECORDS`, `MINEHIVE_SHORT_MEMORY_TTL_MS`, `MINEHIVE_MEMORY_PROMOTION_ACCESSES`, `MINEHIVE_MEMORY_PROMOTION_IMPORTANCE`, dan `MINEHIVE_MEMORY_CONSOLIDATION_INTERVAL_MS`. Tab **Memory** menyediakan pencarian, filter category/type/world/dimension, pagination, jumlah record per jenis, pengaturan policy runtime, status lifecycle, konsolidasi manual, serta penghapusan satu record dengan konfirmasi. Endpoint gabungan tersedia melalui `/api/v1/memory/dashboard`, sedangkan runtime policy memakai `PATCH /api/v1/settings/memory`. Semua record tetap menyimpan provenance, visibility, world, dimension, confidence, importance, access count, dan metadata embedding tanpa mengirim vector mentah ke browser.
 
 ### Farming dan kehutanan
 
@@ -648,13 +650,13 @@ MINEHIVE_AUTONOMY_ENABLED=false
 
 Autonomy sengaja nonaktif secara default. Tambahkan objective aman melalui `POST /api/v1/autonomy/objectives`, aktifkan melalui `POST /api/v1/autonomy/enabled`, lalu monitor `/health`, `/api/v1/hivemind/status`, `/api/v1/ml/status`, dan `/api/v1/autonomy/status`. Aksi autonomy dibatasi pada `collect`, `survey`, `farm`, `reforest`, `deforest`, `guard`, dan `status` serta tetap melewati consensus dan safety coordinator.
 
-Tab **Settings** pada dashboard dapat mengubah provider/model/endpoint LLM, mengganti hingga tiga OpenRouter key, memilih level log, membaca log runtime yang sudah disensor, serta mengatur autonomy dan objective. Perubahan ini berlaku sampai proses direstart; gunakan `.env` untuk konfigurasi permanen. Nilai OpenRouter key tidak pernah dikirim kembali ke browser.
+Tab **Settings** pada dashboard dapat memilih OpenRouter atau NVIDIA NIM, mengubah model/endpoint masing-masing, mengganti hingga tiga key per provider, memilih level log, membaca log runtime yang sudah disensor, serta mengatur autonomy dan objective. Perubahan ini berlaku sampai proses direstart; gunakan `.env` untuk konfigurasi permanen. Nilai key tidak pernah dikirim kembali ke browser.
 
 Tombol **Edit & inventory** pada setiap kartu bot membuka detail inventory dan editor display name, username Minecraft, server, port, authentication, protocol version, command alias, kelompok/class, dan auto-connect. Inventory di dialog ikut diperbarui oleh snapshot dashboard tanpa menutup dialog atau menimpa kolom editor. Pengaturan koneksi hanya dapat diganti ketika bot offline; hal ini mencegah profil tersimpan berbeda dari koneksi yang sedang aktif.
 
-Form LLM menyimpan draft model, endpoint, dan OpenRouter key selama polling dashboard berjalan. Key tetap dikosongkan setelah berhasil disimpan agar secret tidak tampil kembali. Request LLM dibatasi maksimal lima output token.
+Form LLM menyimpan draft provider, model, endpoint, dan key selama polling dashboard berjalan. Key OpenRouter maupun NVIDIA tetap dikosongkan setelah berhasil disimpan agar secret tidak tampil kembali. Request LLM dibatasi maksimal lima output token.
 
-Tombol **Reset runtime settings** mengembalikan konfigurasi LLM, OpenRouter key runtime, level log, autonomy, dan policy lifecycle memory ke nilai saat aplikasi pertama dijalankan. Reset ini tidak menghapus profil bot, admin, record world/semantic memory, database, saved log, atau API token.
+Tombol **Reset runtime settings** mengembalikan konfigurasi LLM, pool key kedua provider, level log, autonomy, dan policy lifecycle memory ke nilai saat aplikasi pertama dijalankan. Reset ini tidak menghapus profil bot, admin, record world/semantic memory, database, saved log, atau API token.
 
 ## Task queue dan laporan pekerjaan
 

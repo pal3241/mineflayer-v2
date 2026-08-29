@@ -171,19 +171,24 @@
     <section id="settings" class="view">
       <div class="settings-grid">
         <section class="panel">
-          <div class="panel-title"><div><p class="eyebrow">AI GATEWAY</p><h2>LLM & OpenRouter</h2></div><span id="llmSettingStatus" class="badge">—</span></div>
+          <div class="panel-title"><div><p class="eyebrow">AI GATEWAY</p><h2>OpenRouter & NVIDIA NIM</h2></div><span id="llmSettingStatus" class="badge">—</span></div>
           <form id="llmSettingsForm" class="form-grid">
-            <label>Provider<select id="llmProvider"><option value="none">Disabled</option><option value="auto">Auto</option><option value="openrouter">OpenRouter</option><option value="local">Local OpenAI-compatible</option></select></label>
-            <label>Model<input id="llmModel" placeholder="openrouter/auto"></label>
-            <label class="full">Endpoint<input id="llmEndpoint" placeholder="https://openrouter.ai/api/v1"></label>
+            <label class="full">Provider<select id="llmProvider"><option value="none">Disabled</option><option value="openrouter">OpenRouter</option><option value="nvidia">NVIDIA NIM</option></select></label>
+            <div class="full llm-provider-block"><p class="eyebrow">OPENROUTER</p><span>Cloud model routing dengan tiga key failover.</span></div>
+            <label>OpenRouter model<input id="openRouterModel" placeholder="openrouter/auto"></label>
+            <label>OpenRouter endpoint<input id="openRouterEndpoint" placeholder="https://openrouter.ai/api/v1"></label>
             <label>OpenRouter key 1<input id="openRouterKey1" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
             <label>OpenRouter key 2<input id="openRouterKey2" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
             <label>OpenRouter key 3<input id="openRouterKey3" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
-            <label>Local endpoint<input id="localLlmEndpoint" placeholder="http://127.0.0.1:11434/v1"></label>
-            <label>Local model<input id="localLlmModel" placeholder="qwen2.5"></label>
+            <div class="full llm-provider-block"><p class="eyebrow">NVIDIA NIM</p><span>NVIDIA-hosted API atau endpoint NIM mandiri.</span></div>
+            <label>NVIDIA NIM model<input id="nvidiaNimModel" placeholder="meta/llama-3.1-8b-instruct"></label>
+            <label>NVIDIA NIM endpoint<input id="nvidiaNimEndpoint" placeholder="https://integrate.api.nvidia.com/v1"></label>
+            <label>NVIDIA key 1<input id="nvidiaKey1" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
+            <label>NVIDIA key 2<input id="nvidiaKey2" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
+            <label>NVIDIA key 3<input id="nvidiaKey3" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
             <button class="button primary full" type="submit">Apply LLM settings</button>
           </form>
-          <p id="keyStatus" class="hint">API key tidak pernah ditampilkan kembali. Kolom kosong mempertahankan key runtime saat ini.</p>
+          <p id="keyStatus" class="hint">API key tidak pernah ditampilkan kembali. Kolom kosong mempertahankan pool key provider tersebut.</p>
         </section>
 
         <section class="panel">
