@@ -89,7 +89,7 @@
             <button class="button primary" type="submit">Execute command</button>
           </form>
           <div class="quick-commands">
-            <button data-command="status">status</button><button data-command="survey 64">survey</button><button data-command="register_chest gudang 16">register chest</button><button data-command="store stone 64 gudang">store</button><button data-command="retrieve stone 32 gudang">retrieve</button><button data-command="stock">stock</button><button data-command="goto 100 64 100">goto x y z</button><button data-command="collect oak_log 16">collect</button><button data-command="come Player">come</button><button data-command="follow Player">follow</button><button data-command="farm wheat 16">farm</button><button data-command="tebang pohon 1">deforest</button><button data-command="reboisasi 8">reforest</button><button data-command="guard 16">guard</button><button data-command="combat">combat</button><button data-command="meat">meat</button><button data-command="sethome home">set home</button><button data-command="home home">home</button><button data-command="craft wooden_sword 1">craft</button><button data-command="inventory">inventory</button><button data-command="stop">stop</button>
+            <button data-command="status">status</button><button data-command="survey 64">survey</button><button data-command="register_chest gudang 16">register chest</button><button data-command="store stone 64 gudang">store</button><button data-command="retrieve stone 32 gudang">retrieve</button><button data-command="stock">stock</button><button data-command="goto 100 64 100">goto x y z</button><button data-command="collect oak_log 16">collect</button><button data-command="smelt iron_ingot 8">smelt iron</button><button data-command="smelt cooked_beef 8">cook food</button><button data-command="come Player">come</button><button data-command="follow Player">follow</button><button data-command="farm wheat 16">farm</button><button data-command="tebang pohon 1">deforest</button><button data-command="reboisasi 8">reforest</button><button data-command="guard 16">guard</button><button data-command="combat">combat</button><button data-command="meat">meat</button><button data-command="sethome home">set home</button><button data-command="home home">home</button><button data-command="craft wooden_sword 1">craft</button><button data-command="inventory">inventory</button><button data-command="stop">stop</button>
           </div>
           <form id="aiForm" class="command-form ai-form"><label>Natural language / chat<input id="aiInput" placeholder="tebang pohon, jaga village, atau berapa 1+1"></label><button class="button secondary" type="submit">Kirim ke coordinator</button></form>
         </section>
@@ -182,7 +182,7 @@
       <label>Command alias<input id="editBotAlias" required></label>
       <label>Bot class / kelompok<input id="editBotClass" required></label>
       <label class="check"><input id="editBotAutoConnect" type="checkbox"><span>Connect automatically</span></label>
-      <section class="full inventory-detail"><h3>Inventory saat ini</h3><div id="editBotInventory" class="inventory-grid"></div></section>
+      <section class="full inventory-detail"><div class="inventory-live-title"><h3>Inventory saat ini</h3><span id="editBotInventoryUpdated" class="badge">Live</span></div><div id="editBotInventory" class="inventory-grid"></div></section>
       <p id="editBotHint" class="hint full"></p>
       <button class="button primary full" type="submit">Save bot configuration</button>
     </form>

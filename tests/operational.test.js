@@ -24,7 +24,7 @@ class OperationalAdapter extends EventEmitter {
   async followPlayer(input) { this.following = input.username; return { player: input.username }; }
   async comeToPlayer(input) { this.cameTo = input.username; return { player: input.username }; }
   async stopActions() {}
-  async startViewer({ port }) { this.camera = { active: true, port }; return this.camera; }
+  async startViewer({ port, mode }) { this.camera = { active: true, port, mode }; return this.camera; }
   async stopViewer() { this.camera = { active: false, port: null }; return this.camera; }
   snapshot() { return { connection: this.status, position: { x: 1, y: 64, z: 2 }, health: 20, food: 20, inventorySummary: this.items.filter(item => item.count > 0), plugins: {}, camera: this.camera ?? { active: false, port: null }, timestamp: new Date().toISOString() }; }
 }
@@ -119,7 +119,7 @@ test('Mineflayer storage adapter verifies chest deposits and withdrawals', async
   class StorageClient extends EventEmitter {
     constructor() { super(); this.entity = { position: new Vec3(0, 64, 0) }; this.game = { dimension: 'overworld' }; this.botItems = [{ name: 'stone', type: 1, count: 8 }]; this.chestItems = [{ name: 'stone', type: 1, count: 10 }]; this.inventory = { items: () => this.botItems.filter(item => item.count > 0) }; this.registry = { itemsByName: { stone: { id: 1 } } }; this.pathfinder = { goto: async goal => { this.entity.position = new Vec3(goal.x, goal.y, goal.z); }, setGoal() {} }; this.storageBlock = { name: 'chest', position: new Vec3(3, 64, 0) }; }
     findBlock() { return this.storageBlock; } blockAt() { return this.storageBlock; }
-    async openContainer() { return { type: 'minecraft:chest', inventoryStart: 27, slots: new Array(63), containerItems: () => this.chestItems.filter(item => item.count > 0), deposit: async (_type, _metadata, count) => { this.botItems[0].count -= count; this.chestItems[0].count += count; }, withdraw: async (_type, _metadata, count) => { this.chestItems[0].count -= count; this.botItems[0].count += count; }, close() {} }; }
+    async openContainer() { const slots = new Array(63); slots[0] = { ...this.chestItems[0] }; slots[27] = { ...this.botItems[0] }; return { type: 'minecraft:chest', inventoryStart: 27, inventoryEnd: 63, slots, containerItems: () => slots.slice(0, 27).filter(item => item?.count > 0), deposit: async (_type, _metadata, count) => { setTimeout(() => { slots[27].count -= count; slots[0].count += count; }, 40); }, withdraw: async (_type, _metadata, count) => { setTimeout(() => { slots[0].count -= count; slots[27].count += count; }, 40); }, close: () => { this.botItems[0].count = slots[27].count; this.chestItems[0].count = slots[0].count; } }; }
     clearControlStates() {} quit() { this.emit('end'); }
   }
   const client = new StorageClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear } }; client.emit('spawn'); const found = await adapter.findNearestStorage({ maxDistance: 16 }); assert.equal(found.inventory[0].count, 10);
@@ -161,6 +161,16 @@ test('crafting builds and safely places a required crafting table', async () => 
   const result = await adapter.craftItem({ item: 'wooden_pickaxe' }); assert.equal(result.count, 1); assert.equal(client.placed, true); await adapter.disconnect();
 });
 
+test('smelting produces verified iron and cooked food', async () => {
+  class SmeltingClient extends EventEmitter {
+    constructor(inputName, outputName) { super(); this.inputName = inputName; this.outputName = outputName; this.items = [{ name: inputName, type: 1, count: 2 }, { name: 'coal', type: 2, count: 1 }]; this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => this.items }; this.registry = { itemsByName: { [inputName]: { id: 1 }, coal: { id: 2 }, [outputName]: { id: 3 } }, blocksByName: { furnace: { id: 10 } } }; }
+    findBlock() { return { name: 'furnace', position: { x: 1, y: 64, z: 0 } }; }
+    async openFurnace() { let outputCount = 0; let inputCount = 0; return { inputItem: () => null, outputItem: () => outputCount ? { name: this.outputName, count: outputCount } : null, putInput: async (_type, _metadata, count) => { this.items.find(item => item.name === this.inputName).count -= count; inputCount = count; }, putFuel: async (_type, _metadata, count) => { this.items.find(item => item.name === 'coal').count -= count; outputCount = inputCount; }, takeOutput: async () => { this.items.push({ name: this.outputName, type: 3, count: outputCount }); outputCount = 0; }, close() {} }; }
+    clearControlStates() {} quit() { this.emit('end'); }
+  }
+  for (const recipe of [{ input: 'raw_iron', output: 'iron_ingot' }, { input: 'beef', output: 'cooked_beef' }]) { const client = new SmeltingClient(recipe.input, recipe.output); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn'); const plan = await adapter.smeltRequirements({ item: recipe.output, count: 2 }); assert.equal(plan.input.name, recipe.input); const result = await adapter.smeltItem({ item: recipe.output, count: 2, fuel: 'coal' }, {}); assert.equal(result.count, 2); assert.equal(adapter.snapshot().inventorySummary.find(item => item.name === recipe.output).count, 2); assert.equal(adapter.snapshot().inventorySummary.find(item => item.name === recipe.input).count, 0); await adapter.disconnect(); }
+});
+
 test('registry analysis identifies mandatory tools and recursive raw materials', async () => {
   const require = createRequire(import.meta.url); const registry = require('prismarine-registry')('1.20.4'); const Recipe = require('prismarine-recipe')(registry).Recipe;
   class RegistryClient extends EventEmitter {
@@ -200,7 +210,8 @@ test('each bot camera receives an independent live-view port', async () => {
   const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent', MINEHIVE_VIEWER_BASE_PORT: '43100' }, overrides: { adapterFactory: () => { const adapter = new OperationalAdapter(); adapters.push(adapter); return adapter; } } });
   app.bots.create({ id: 'camera-a' }); app.bots.create({ id: 'camera-b' }); await app.bots.start('camera-a'); await app.bots.start('camera-b');
   await Promise.all(app.bots.list().map(bot => app.bots.get(bot.id).transitionQueue));
-  const first = await app.startCamera('camera-a'); const second = await app.startCamera('camera-b');
-  assert.notEqual(first.port, second.port); assert.equal(app.bots.get('camera-a').snapshot().runtime.camera.active, true);
+  await assert.rejects(app.startCamera('camera-a', 'invalid'), /Viewer mode/);
+  const first = await app.startCamera('camera-a', 'surrounding'); const second = await app.startCamera('camera-b', 'first_person');
+  assert.notEqual(first.port, second.port); assert.equal(first.mode, 'surrounding'); assert.equal(second.mode, 'first_person'); assert.equal(app.bots.get('camera-a').snapshot().runtime.camera.active, true);
   await app.stopCamera('camera-a'); assert.equal(app.bots.get('camera-a').snapshot().runtime.camera.active, false); await app.stop();
 });

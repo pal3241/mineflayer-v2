@@ -54,6 +54,7 @@
 .bot-editor::backdrop { background: #000b; backdrop-filter: blur(5px); }
 .inventory-detail { border-top: 1px solid var(--line); padding-top: 14px; }
 .inventory-detail h3 { margin: 0 0 10px; }
+.inventory-live-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .inventory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 7px; }
 .inventory-item { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #0c1511; }
 .inventory-preview { color: var(--muted); font-size: 11px; margin: 9px 0; }

@@ -12,6 +12,7 @@ import { FleetScheduler } from '../fleet/scheduler.js';
 import { TaskExecutor } from '../tasks/task-executor.js';
 import { GoalService } from '../goals/goal-service.js';
 import { CheckpointManager } from '../orchestration/checkpoints.js';
+import { ValidationError } from './errors.js';
 import { MINECRAFT_CAPABILITIES, registerMinecraftCapabilities } from '../bots/minecraft-capabilities.js';
 import { ChatCommandController } from '../bots/chat-command-controller.js';
 import { MineflayerAdapter } from '../plugins/minecraft/mineflayer-adapter.js';
@@ -106,10 +107,10 @@ export class Application {
     await this.plugins.run('stop', this.context(), { reverse: true }); await this.modules.run('stop', this.context(), { reverse: true });
     this.state = 'STOPPED'; await this.events.publish('application.stopped', {}, { source: 'application' }); this.events.clear(); this.database?.close(); this.logger.info('application.stopped'); await this.logStore?.flush();
   }
-  async startCamera(botId) {
-    const runtime = this.bots.get(botId); let port = this.cameraPorts.get(botId);
+  async startCamera(botId, mode) {
+    const runtime = this.bots.get(botId); const viewMode = mode ?? 'surrounding'; if (!['first_person', 'surrounding'].includes(viewMode)) throw new ValidationError("Viewer mode must be 'first_person' or 'surrounding'"); const current = runtime.adapter.snapshot().camera; if (current.active && current.mode !== viewMode) await runtime.adapter.stopViewer(); let port = this.cameraPorts.get(botId);
     if (!port) { port = this.config.viewer?.basePort ?? 3100; const used = new Set(this.cameraPorts.values()); while (used.has(port) || !await portAvailable(port)) port++; this.cameraPorts.set(botId, port); }
-    const result = await runtime.adapter.startViewer({ port, firstPerson: true, viewDistance: this.config.viewer?.viewDistance ?? 6 }); return { ...result, botId };
+    const result = await runtime.adapter.startViewer({ port, firstPerson: viewMode === 'first_person', viewDistance: this.config.viewer?.viewDistance ?? 6, mode: viewMode }); return { ...result, mode: viewMode, botId };
   }
   async stopCamera(botId) { const result = await this.bots.get(botId).adapter.stopViewer(); this.cameraPorts.delete(botId); return { ...result, botId }; }
   resetRuntimeSettings() { const defaults = this.runtimeDefaults.llm; const keys = [...new Set([...(defaults.apiKeys ?? []), defaults.apiKey].filter(Boolean))]; const llm = this.llm.configure({ provider: defaults.provider ?? 'none', endpoint: defaults.endpoint ?? '', model: defaults.model ?? '', localEndpoint: defaults.localEndpoint ?? '', localModel: defaults.localModel ?? '', ...(keys.length ? { apiKeys: keys } : { clearKeys: true }) }); const log = this.logger.setLevel(this.runtimeDefaults.logLevel); const autonomy = this.autonomy.configure({ enabled: this.runtimeDefaults.autonomy.enabled, intervalMs: this.runtimeDefaults.autonomy.intervalMs, maxActionsPerHour: this.runtimeDefaults.autonomy.maxActionsPerHour }); this.logger.info('settings.runtime.reset', { provider: llm.provider, logLevel: log.level, autonomy: autonomy.status }); return { llm, log, autonomy, preserved: ['bot profiles', 'admins', 'memory', 'database', 'API token'] }; }

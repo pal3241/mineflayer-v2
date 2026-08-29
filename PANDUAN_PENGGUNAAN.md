@@ -139,7 +139,7 @@ Dashboard menyediakan:
 
 - **Overview** untuk health, jumlah bot online, goal aktif, dan status fleet.
 - **Bots & Join** untuk menambah bot, join/disconnect server, membuka kamera, atau menghapus profil.
-- **Live Cameras** untuk melihat kamera first-person setiap bot yang kameranya diaktifkan.
+- **Live Cameras** untuk melihat viewer first-person atau daerah 3D di sekitar setiap bot.
 - **Command Center** untuk menjalankan navigasi, collect, follow/come, farming, kehutanan, combat, memory, crafting, percakapan natural-language, inventory, dan stop.
 - **Admins** untuk menambah atau menghapus administrator command chat.
 
@@ -149,12 +149,14 @@ Profil bot dan admin yang ditambahkan melalui dashboard disimpan dalam folder `d
 
 1. Pastikan bot sudah berstatus `READY`.
 2. Buka menu **Bots & Join**.
-3. Tekan **Live camera** pada bot.
+3. Tekan **First person** untuk sudut pandang bot atau **3D area** untuk melihat daerah di sekitar bot dari kamera bebas.
 4. Dashboard berpindah ke menu **Live Cameras**.
 
 Setiap bot memakai port kamera berbeda mulai dari `MINEHIVE_VIEWER_BASE_PORT`, default `3100`. Viewer kamera tidak memakai bearer-token API. Jangan membuka port kamera ke internet; batasi ke localhost atau LAN tepercaya menggunakan firewall/reverse proxy.
 
 Live camera melakukan preflight native `canvas` sebelum viewer dibuka. Jika binding canvas gagal dimuat, dashboard menampilkan error kamera dan viewer tidak dijalankan setengah aktif.
+
+Mode **3D area** memakai renderer `prismarine-viewer` third-person dengan chunk di sekitar bot, sehingga kamera dapat diputar dan diperbesar seperti world viewer. Satu bot menjalankan satu mode viewer pada satu waktu.
 
 ## 5. Command dari chat Minecraft
 
@@ -248,7 +250,7 @@ Dekatkan bot ke chest, trapped chest, barrel, atau shulker box lalu daftarkan st
 !bot1 stock
 ```
 
-Nama storage persisten per server dan dimension. Sebelum mengambil item, MineHive membaca ulang isi storage, membuat reservasi stok, dan mengunci chest melalui HiveMind agar dua bot tidak memakai stok yang sama. Deposit dan withdrawal baru dianggap berhasil jika perubahan jumlah pada inventory bot dan storage sama persis. Setiap transfer tersimpan sebagai audit record. Tab **Logistics** menampilkan storage, stok tersedia, stok yang sedang direservasi, dan transfer terverifikasi.
+Nama storage persisten per server dan dimension. Sebelum mengambil item, MineHive membaca ulang isi storage, membuat reservasi stok, dan mengunci chest melalui HiveMind agar dua bot tidak memakai stok yang sama. Deposit dan withdrawal menunggu sinkronisasi slot dari server sampai lima detik, lalu baru dianggap berhasil jika perubahan jumlah pada inventory bot dan storage sama persis. Setiap transfer tersimpan sebagai audit record. Tab **Logistics** menampilkan storage, stok tersedia, stok yang sedang direservasi, dan transfer terverifikasi.
 
 ### Menyimpan dan kembali ke home
 
@@ -268,6 +270,20 @@ Home disimpan selama runtime bot aktif. Bot memakai Pathfinder untuk kembali ke 
 Crafting menyelesaikan bahan turunan secara rekursif. Jika resep membutuhkan crafting table, bot membuatnya bila bahan cukup lalu menempatkannya pada ruang aman di samping bot.
 
 Resolver membaca seluruh alternatif resep untuk setiap item, lalu memberi peringkat berdasarkan inventory nyata dan rantai bahan yang dapat dibuat. Contohnya, jika bot memiliki `birch_log`, resep wooden sword berbasis birch dipilih sebelum cherry; jika stone pickaxe membutuhkan varian stone ingredient dan bot memiliki `cobbled_deepslate`, resep tersebut dipilih. Hanya `selectedRecipe.missing` dari plan terbaik yang dianggap benar-benar kurang.
+
+### Smelting
+
+```text
+!bot1 smelt iron_ingot 8
+!bot1 smelt cooked_beef 4
+!bot1 lebur besi 8
+!bot1 masak daging sapi 4
+!global smelt cooked_chicken 16
+```
+
+Bot mencari furnace dalam jarak enam block. Jika furnace belum tersedia, coordinator menyiapkan bahan, membuat furnace, dan menempatkannya pada lokasi aman. Input serta bahan bakar dicari dari inventory sendiri, bot terdekat, atau resource yang dapat dikumpulkan. Coal dan charcoal didukung sebagai bahan bakar.
+
+Hasil yang didukung meliputi `iron_ingot`, `gold_ingot`, `copper_ingot`, seluruh cooked meat utama, `cooked_cod`, `cooked_salmon`, `baked_potato`, dan `dried_kelp`. Smelting baru dianggap selesai jika pertambahan output pada inventory sama persis dengan jumlah yang diminta.
 
 ### Bahasa natural dan teman ngobrol
 
@@ -633,7 +649,9 @@ Autonomy sengaja nonaktif secara default. Tambahkan objective aman melalui `POST
 
 Tab **Settings** pada dashboard dapat mengubah provider/model/endpoint LLM, mengganti hingga tiga OpenRouter key, memilih level log, membaca log runtime yang sudah disensor, serta mengatur autonomy dan objective. Perubahan ini berlaku sampai proses direstart; gunakan `.env` untuk konfigurasi permanen. Nilai OpenRouter key tidak pernah dikirim kembali ke browser.
 
-Tombol **Edit & inventory** pada setiap kartu bot membuka detail inventory dan editor display name, username Minecraft, server, port, authentication, protocol version, command alias, kelompok/class, dan auto-connect. Pengaturan koneksi hanya dapat diganti ketika bot offline; hal ini mencegah profil tersimpan berbeda dari koneksi yang sedang aktif.
+Tombol **Edit & inventory** pada setiap kartu bot membuka detail inventory dan editor display name, username Minecraft, server, port, authentication, protocol version, command alias, kelompok/class, dan auto-connect. Inventory di dialog ikut diperbarui oleh snapshot dashboard tanpa menutup dialog atau menimpa kolom editor. Pengaturan koneksi hanya dapat diganti ketika bot offline; hal ini mencegah profil tersimpan berbeda dari koneksi yang sedang aktif.
+
+Form LLM menyimpan draft model, endpoint, dan OpenRouter key selama polling dashboard berjalan. Key tetap dikosongkan setelah berhasil disimpan agar secret tidak tampil kembali. Request LLM dibatasi maksimal lima output token.
 
 Tombol **Reset runtime settings** mengembalikan konfigurasi LLM, OpenRouter key runtime, level log, dan autonomy ke nilai saat aplikasi pertama dijalankan. Reset ini tidak menghapus profil bot, admin, world/semantic memory, database, saved log, atau API token.
 
@@ -654,7 +672,7 @@ Backup SQLite dapat dibuat dengan `node src/cli.js backup nama-backup.sqlite` at
 ## 12. Batasan versi ini
 
 - Pengujian otomatis menggunakan fake Minecraft client; koneksi nyata tergantung server, jaringan, akun, dan versi protokol.
-- Koordinator mendukung intent aman `collect`, `craft`, `follow`, `come`, `move`, `set_home`, `home`, `survey`, `register_storage`, `store`, `retrieve`, `stock`, `farm`, `deforest`, `reforest`, `combat`, `remember`, `place`, `status`, dan `converse`.
+- Koordinator mendukung intent aman `collect`, `craft`, `smelt`, `follow`, `come`, `move`, `set_home`, `home`, `survey`, `register_storage`, `store`, `retrieve`, `stock`, `farm`, `deforest`, `reforest`, `combat`, `remember`, `place`, `status`, dan `converse`.
 - ML contextual-beta v2 menggabungkan evidence bot sendiri dan fleet berdasarkan intent, class, health, food, kapasitas inventory, ketersediaan alat, recency, durasi, serta kemiripan feature. Prediction hanya menentukan ranking/decision support dan tidak melewati safety rules.
 - Semantic memory memakai embedding hash lokal deterministik. Konsolidasi short-term ke long-term sudah terjadwal dan deterministik; model embedding neural eksternal serta peringkasan berbasis LLM belum tersedia.
 - Farming mendukung wheat, carrots, potatoes, dan beetroot. Combat memakai mob allowlist dan hanya bekerja pada entity yang sedang termuat oleh client.

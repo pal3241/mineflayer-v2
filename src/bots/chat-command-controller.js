@@ -1,4 +1,4 @@
-const HELP = 'commands: status, come, follow [player], goto <x> <y> <z>, collect, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, craft, natural language, inventory, stop';
+const HELP = 'commands: status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
 
 export class ChatCommandController {
   constructor({ goalService, executor, capabilities, coordinator, config, logger }) {
@@ -22,7 +22,7 @@ export class ChatCommandController {
     }
     try {
       if (command === 'help') return this.#reply(runtime, `use !${alias} <command>, !${className || 'class'} <command>, or !global <command>. ${HELP}`);
-      if (['ai', 'collect', 'craft', 'survey', 'scan', 'jelajah', 'register_chest', 'daftar_chest', 'store', 'simpan', 'retrieve', 'withdraw', 'ambil_chest', 'stock', 'stok', 'farm', 'farming', 'deforest', 'reforest', 'guard', 'combat', 'meat', 'remember', 'place'].includes(command)) {
+      if (['ai', 'collect', 'craft', 'smelt', 'cook', 'masak', 'lebur', 'survey', 'scan', 'jelajah', 'register_chest', 'daftar_chest', 'store', 'simpan', 'retrieve', 'withdraw', 'ambil_chest', 'stock', 'stok', 'farm', 'farming', 'deforest', 'reforest', 'guard', 'combat', 'meat', 'remember', 'place'].includes(command)) {
         const targetSelector = selector === 'global' ? 'global' : selector === className ? `class:${className}` : `bot:${alias}`; const request = command === 'ai' ? args.join(' ') : [command, ...args].join(' ');
         if (!this.coordinator.shouldHandle(runtime.bot.id, targetSelector)) return;
         const result = await this.coordinator.coordinateOnce(`${username}:${message}`, { text: request, selector: targetSelector, actor: username });

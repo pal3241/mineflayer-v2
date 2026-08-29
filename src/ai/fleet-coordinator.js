@@ -26,7 +26,7 @@ export class FleetCoordinator {
     this.hive.syncMembers(this.bots.list()); const memoryTargets = this.#select(selector ?? 'auto'); const targetRuntime = memoryTargets.length ? this.bots.get(memoryTargets[0].id) : null; const rawMemories = targetRuntime ? await this.memory?.forBot(targetRuntime, { limit: 12 }) : []; const identity = targetRuntime ? serverIdentity(targetRuntime.options) : null; const semantic = targetRuntime ? await this.semanticMemory.recall({ text, worldKey: `${identity.host}:${identity.port}`, dimension: targetRuntime.adapter.snapshot().dimension, sourceBotId: targetRuntime.id, limit: 8 }) : []; const memories = [...rawMemories.map(memory => ({ kind: 'world', type: memory.type, name: memory.name, position: memory.position, confidence: memory.confidence, updatedAt: memory.updatedAt })), ...semantic.map(memory => ({ kind: 'semantic', type: memory.type, content: memory.content, confidence: memory.confidence, relevance: memory.relevance, source: memory.source }))];
     const intent = await this.gateway.interpret(text, { selector, fleet: this.fleetView(), memories, conversationId: `${actor}:${selector ?? 'auto'}` });
     const selected = await rankByPrediction(this.#select(intent.selector), intent.intent, this.ml); if (!selected.length) throw new ConflictError(`No available bots match '${intent.selector}'`);
-    const singleton = ['register_storage', 'retrieve', 'stock'].includes(intent.intent); const distributed = ['collect', 'craft', 'store', 'farm', 'deforest', 'reforest'].includes(intent.intent); const targets = singleton ? selected.slice(0, 1) : distributed ? selected.slice(0, Math.min(selected.length, intent.count)) : selected; const counts = distribute(intent.count, targets.length);
+    const singleton = ['register_storage', 'retrieve', 'stock'].includes(intent.intent); const distributed = ['collect', 'craft', 'smelt', 'store', 'farm', 'deforest', 'reforest'].includes(intent.intent); const targets = singleton ? selected.slice(0, 1) : distributed ? selected.slice(0, Math.min(selected.length, intent.count)) : selected; const counts = distribute(intent.count, targets.length);
     this.#reserve(targets.map(bot => bot.id));
     const started = performance.now(); try {
       await this.events.publish('coordinator.requested', { actor, text, intent, targets: targets.map(bot => bot.id) }, { source: 'fleet-coordinator' });
@@ -68,6 +68,7 @@ export class FleetCoordinator {
     if (intent.intent === 'reforest') { const sites = await this.memory.forBot(runtime, { type: 'tree_site', limit: intent.count }); return adapter.reforest({ count: intent.count, sites: sites.map(site => ({ ...site.position, log: site.metadata?.log })) }); }
     if (intent.intent === 'combat') { const equipment = await this.#ensureEquipment(botId, SWORDS); const snapshot = adapter.snapshot(); let position = intent.mode === 'guard' ? snapshot.position : undefined; if (intent.mode === 'guard' && intent.name) { const place = (await this.memory.forBot(runtime, { name: intent.name, limit: 1 }))[0]; if (!place) throw new ConflictError(`Guard place '${intent.name}' was not found in shared memory`); position = place.position; } return { equipment, combat: await adapter.startCombat({ mode: intent.mode, position, radius: intent.radius }) }; }
     if (intent.intent === 'craft') { const preparation = await this.#prepareCraft(botId, intent.item, intent.count, new Set()); return { preparation, crafted: await adapter.craftItem({ item: intent.item, count: intent.count }) }; }
+    if (intent.intent === 'smelt') return this.#prepareSmelt(botId, intent.item, intent.count, new Set());
     if (intent.intent === 'collect') {
       const preparation = await this.#ensureToolForBlock(botId, intent.block, new Set());
       const goal = this.goals.create({ description: `Coordinator collect ${intent.count} ${intent.block}`, priority: 70, constraints: { preferredBot: botId }, steps: [{ type: 'collect', input: { block: intent.block, count: intent.count }, requiredCapabilities: ['minecraft.collection'], timeout: 300_000, retries: 1, reportLifecycle: false }] });
@@ -96,6 +97,12 @@ export class FleetCoordinator {
     const plan = await target.adapter.craftRequirements({ item, count }); const acquisitions = [];
     for (const missing of plan.missing) acquisitions.push(await this.#acquireItem(botId, missing.name, missing.count, visiting));
     return { item, count, source: 'prepared-materials', missing: plan.missing, acquisitions, steps: plan.steps };
+  }
+  async #prepareSmelt(botId, item, count, visiting) {
+    const target = this.bots.get(botId); const requirements = await target.adapter.smeltRequirements({ item, count }); if (!requirements) throw new ValidationError(`No supported smelting recipe for '${item}'`);
+    let furnacePreparation = null;
+    if (!requirements.furnace) { furnacePreparation = await this.#prepareCraft(botId, 'furnace', 1, visiting); if (itemCount(target.adapter.snapshot(), 'furnace') < 1) await target.adapter.craftItem({ item: 'furnace', count: 1 }); }
+    const input = await this.#acquireItem(botId, requirements.input.name, requirements.input.count, visiting); const fuel = await this.#acquireItem(botId, requirements.fuel.name, requirements.fuel.count, visiting); const smelted = await target.adapter.smeltItem({ item, count, fuel: requirements.fuel.name }); return { requirements, furnacePreparation, input, fuel, smelted };
   }
   async #acquireItem(botId, item, count, visiting) {
     const target = this.bots.get(botId); let shortage = Math.max(0, count - itemCount(target.adapter.snapshot(), item)); if (!shortage) return { item, count, source: 'inventory' };
