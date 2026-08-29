@@ -141,6 +141,7 @@ Dashboard menyediakan:
 - **Bots & Join** untuk menambah bot, join/disconnect server, membuka kamera, atau menghapus profil.
 - **Live Cameras** untuk melihat viewer first-person atau daerah 3D di sekitar setiap bot.
 - **Command Center** untuk menjalankan navigasi, collect, follow/come, farming, kehutanan, combat, memory, crafting, percakapan natural-language, inventory, dan stop.
+- **Memory** untuk melihat seluruh world/semantic/short-term/long-term memory, memfilter record, mengatur lifecycle, serta menjalankan konsolidasi manual.
 - **Admins** untuk menambah atau menghapus administrator command chat.
 
 Profil bot dan admin yang ditambahkan melalui dashboard disimpan dalam folder `data/` dan dimuat kembali saat restart.
@@ -316,7 +317,7 @@ Bot kedua dapat memakai lokasi yang disimpan bot pertama selama berada di server
 
 Hasil pekerjaan coordinator disimpan lebih dahulu sebagai `SHORT_TERM`. Setiap recall yang relevan menambah `accessCount`. Konsolidasi otomatis berjalan sesuai `MINEHIVE_MEMORY_CONSOLIDATION_INTERVAL_MS`; memory dipromosikan menjadi `LONG_TERM` jika importance mencapai batas atau sudah dipakai berulang kali. Memory sementara yang kedaluwarsa atau melewati kapasitas dilupakan secara terkontrol, sedangkan long-term memory tidak ikut kebijakan TTL.
 
-Policy dapat diatur melalui `MINEHIVE_SHORT_MEMORY_MAX_RECORDS`, `MINEHIVE_SHORT_MEMORY_TTL_MS`, `MINEHIVE_MEMORY_PROMOTION_ACCESSES`, dan `MINEHIVE_MEMORY_PROMOTION_IMPORTANCE`. Gunakan endpoint `/api/v1/memory/short-term`, `/api/v1/memory/long-term`, `/api/v1/memory/recall`, dan `/api/v1/memory/consolidate` untuk inspeksi atau operasi manual. Semua record tetap menyimpan provenance, visibility, world, dimension, confidence, importance, access count, dan metadata embedding.
+Policy permanen dapat diatur melalui `MINEHIVE_MEMORY_MAX_RECORDS`, `MINEHIVE_SHORT_MEMORY_MAX_RECORDS`, `MINEHIVE_SHORT_MEMORY_TTL_MS`, `MINEHIVE_MEMORY_PROMOTION_ACCESSES`, `MINEHIVE_MEMORY_PROMOTION_IMPORTANCE`, dan `MINEHIVE_MEMORY_CONSOLIDATION_INTERVAL_MS`. Tab **Memory** menyediakan pencarian, filter category/type/world/dimension, pagination, jumlah record per jenis, pengaturan policy runtime, status lifecycle, dan tombol konsolidasi manual. Endpoint gabungan tersedia melalui `/api/v1/memory/dashboard`, sedangkan runtime policy memakai `PATCH /api/v1/settings/memory`. Semua record tetap menyimpan provenance, visibility, world, dimension, confidence, importance, access count, dan metadata embedding tanpa mengirim vector mentah ke browser.
 
 ### Farming dan kehutanan
 
@@ -653,7 +654,7 @@ Tombol **Edit & inventory** pada setiap kartu bot membuka detail inventory dan e
 
 Form LLM menyimpan draft model, endpoint, dan OpenRouter key selama polling dashboard berjalan. Key tetap dikosongkan setelah berhasil disimpan agar secret tidak tampil kembali. Request LLM dibatasi maksimal lima output token.
 
-Tombol **Reset runtime settings** mengembalikan konfigurasi LLM, OpenRouter key runtime, level log, dan autonomy ke nilai saat aplikasi pertama dijalankan. Reset ini tidak menghapus profil bot, admin, world/semantic memory, database, saved log, atau API token.
+Tombol **Reset runtime settings** mengembalikan konfigurasi LLM, OpenRouter key runtime, level log, autonomy, dan policy lifecycle memory ke nilai saat aplikasi pertama dijalankan. Reset ini tidak menghapus profil bot, admin, record world/semantic memory, database, saved log, atau API token.
 
 ## Task queue dan laporan pekerjaan
 

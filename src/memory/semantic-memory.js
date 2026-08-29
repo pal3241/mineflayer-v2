@@ -13,7 +13,7 @@ export function createSemanticMemory({ repository, events, embeddingProvider, ma
   if (!repository || typeof repository.list !== 'function') throw new ValidationError('Semantic memory repository is required');
   if (!embeddingProvider || typeof embeddingProvider.embed !== 'function') throw new ValidationError('Semantic memory embedding provider is required');
   if (!Number.isInteger(maxRecords) || maxRecords < 100) throw new ValidationError('Semantic memory maxRecords must be at least 100');
-  const policy = normalizePolicy({ maxRecords, shortTermMaxRecords, shortTermTtlMs, promotionAccesses, promotionImportance });
+  let policy = normalizePolicy({ maxRecords, shortTermMaxRecords, shortTermTtlMs, promotionAccesses, promotionImportance });
   let cachePromise = null; let mutationQueue = Promise.resolve();
   const loadRecords = () => { cachePromise ??= repository.list(); return cachePromise; };
   const mutate = operation => { const result = mutationQueue.then(operation); mutationQueue = result.then(() => undefined, () => undefined); return result; };
@@ -54,19 +54,33 @@ export function createSemanticMemory({ repository, events, embeddingProvider, ma
   });
 
   const status = async () => { const records = await loadRecords(); const now = Date.now(); const byType = Object.fromEntries([...TYPES].map(type => [type, records.filter(record => record.type === type && !isExpired(record, now)).length])); return { status: records.length > policy.maxRecords ? 'DEGRADED' : 'HEALTHY', count: records.length, activeCount: records.filter(record => !isExpired(record, now)).length, expiredShortTerm: records.filter(record => record.type === 'SHORT_TERM' && isExpired(record, now)).length, maxRecords: policy.maxRecords, policy: { shortTermMaxRecords: policy.shortTermMaxRecords, shortTermTtlMs: policy.shortTermTtlMs, promotionAccesses: policy.promotionAccesses, promotionImportance: policy.promotionImportance }, embedding: { model: embeddingProvider.model, version: embeddingProvider.version, dimensions: embeddingProvider.dimensions }, byType }; };
+  const all = async () => (await loadRecords()).map(publicMemory);
+  const configure = input => mutate(async () => {
+    const nextPolicy = configuredPolicy(input); policy = nextPolicy;
+    await events?.publish('memory.policy.configured', { maxRecords: policy.maxRecords, shortTermMaxRecords: policy.shortTermMaxRecords, shortTermTtlMs: policy.shortTermTtlMs, promotionAccesses: policy.promotionAccesses, promotionImportance: policy.promotionImportance }, { source: 'semantic-memory' });
+    return status();
+  });
   const forget = id => mutate(async () => { const removed = await repository.delete(id); if (removed) cachePromise = Promise.resolve((await loadRecords()).filter(record => record.id !== id)); return removed; });
   const rememberShortTerm = input => remember({ ...input, type: 'SHORT_TERM' });
   const rememberLongTerm = input => remember({ ...input, type: 'LONG_TERM', importance: Math.max(0.8, Number(input.importance ?? 0.8)) });
-  return Object.freeze({ remember, rememberShortTerm, rememberLongTerm, search, recall, consolidate, forget, status });
+  return Object.freeze({ remember, rememberShortTerm, rememberLongTerm, search, recall, consolidate, forget, status, all, configure });
 }
 
 function normalizePolicy({ maxRecords, shortTermMaxRecords, shortTermTtlMs, promotionAccesses, promotionImportance }) {
   const policy = { maxRecords, shortTermMaxRecords: shortTermMaxRecords ?? Math.min(1000, maxRecords), shortTermTtlMs: shortTermTtlMs ?? 86_400_000, promotionAccesses: promotionAccesses ?? 3, promotionImportance: promotionImportance ?? 0.8 };
+  if (!Number.isInteger(policy.maxRecords) || policy.maxRecords < 100) throw new ValidationError('Semantic memory limit must be at least 100');
   if (!Number.isInteger(policy.shortTermMaxRecords) || policy.shortTermMaxRecords < 1 || policy.shortTermMaxRecords > maxRecords) throw new ValidationError('Short-term memory limit must be between 1 and maxRecords');
   if (!Number.isInteger(policy.shortTermTtlMs) || policy.shortTermTtlMs < 1000) throw new ValidationError('Short-term memory TTL must be at least 1000ms');
   if (!Number.isInteger(policy.promotionAccesses) || policy.promotionAccesses < 1) throw new ValidationError('Memory promotion accesses must be a positive integer');
   if (!Number.isFinite(policy.promotionImportance) || policy.promotionImportance < 0 || policy.promotionImportance > 1) throw new ValidationError('Memory promotion importance must be between 0 and 1');
   return Object.freeze(policy);
+}
+
+function configuredPolicy(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ValidationError('Memory settings must be an object');
+  const fields = ['maxRecords', 'shortTermMaxRecords', 'shortTermTtlMs', 'promotionAccesses', 'promotionImportance'];
+  for (const field of fields) if (input[field] === undefined) throw new ValidationError(`Memory setting '${field}' is required`);
+  return normalizePolicy({ maxRecords: Number(input.maxRecords), shortTermMaxRecords: Number(input.shortTermMaxRecords), shortTermTtlMs: Number(input.shortTermTtlMs), promotionAccesses: Number(input.promotionAccesses), promotionImportance: Number(input.promotionImportance) });
 }
 
 function normalizeMemory(input) {

@@ -15,6 +15,7 @@ Folder ini menyimpan satu catatan untuk setiap release atau update fitur MineHiv
 
 ## Daftar update fitur
 
+- [`2026-08-29 — Dashboard memory dan lifecycle settings`](2026-08-29-dashboard-memory-dan-lifecycle-settings.md)
 - [`2026-08-29 — Referensi command lengkap`](2026-08-29-referensi-command-lengkap.md)
 - [`2026-08-29 — Smelting iron dan makanan`](2026-08-29-smelting-iron-dan-makanan.md)
 - [`2026-08-29 — Stabilitas logistik, dashboard, dan viewer 3D`](2026-08-29-stabilitas-logistik-dashboard-dan-viewer-3d.md)

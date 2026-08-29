@@ -544,6 +544,7 @@ Invoke-RestMethod `
 | `GET` | `/api/v1/settings/log-files` | Daftar file log tersimpan. |
 | `GET` | `/api/v1/settings/log-files/:name?limit=1000` | Membaca satu file log. |
 | `PATCH` | `/api/v1/settings/autonomy` | Mengubah setting autonomy. |
+| `PATCH` | `/api/v1/settings/memory` | Mengubah limit, TTL, ambang promosi, dan interval konsolidasi memory. |
 | `POST` | `/api/v1/settings/reset` | Reset runtime settings. |
 
 Contoh mengatur LLM:
@@ -614,6 +615,7 @@ Gunakan `{"clearKeys":true}` bersama field setting yang diwajibkan form untuk me
 | `POST` | `/api/v1/memory/long-term` | Menambah long-term memory. |
 | `POST` | `/api/v1/memory/recall` | Recall memory yang relevan. |
 | `POST` | `/api/v1/memory/consolidate` | Menjalankan konsolidasi memory. |
+| `GET` | `/api/v1/memory/dashboard` | Browser gabungan world dan semantic memory dengan filter serta pagination. |
 | `GET` | `/api/v1/ml/status` | Status model ML. |
 | `GET` | `/api/v1/ml/models` | Daftar model ML. |
 | `GET` | `/api/v1/hivemind/status` | Status HiveMind. |
@@ -691,4 +693,3 @@ Invoke-RestMethod -Uri "$baseUrl/api/v1/goals/$goalId" -Headers $headers
 - Jika API mengembalikan `429`, tunggu nilai header `Retry-After`; dashboard menggunakan snapshot dan backoff agar tidak terus menambah request.
 - Maksimal tiga OpenRouter key dapat disimpan. Key berikutnya dipakai saat key aktif menerima status 401, 402, atau 429.
 - Untuk melihat penyebab task, buka tab **Logs** dan **Log files** di Settings, atau jalankan `npm run health`.
-

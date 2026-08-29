@@ -17,6 +17,7 @@
       <button class="nav" data-view="cameras">◉ <span>Live Cameras</span></button>
       <button class="nav" data-view="commands">⌁ <span>Command Center</span></button>
       <button class="nav" data-view="logistics">▦ <span>Logistics</span></button>
+      <button class="nav" data-view="memory">◫ <span>Memory</span></button>
       <button class="nav" data-view="admins">♙ <span>Admins</span></button>
       <button class="nav" data-view="settings">⚙ <span>Settings</span></button>
     </nav>
@@ -111,6 +112,52 @@
         <section class="panel full"><div class="panel-title"><div><p class="eyebrow">AUDIT</p><h2>Transactional transfers</h2></div></div><div id="logisticsTransfers" class="timeline"></div></section>
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">DEVELOPER</p><h2>Lifecycle timeline</h2></div></div><div id="logisticsTimeline" class="timeline"></div></section>
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">HIVEMIND</p><h2>Active storage locks</h2></div></div><div id="logisticsLocks" class="timeline"></div></section>
+      </div>
+    </section>
+
+    <section id="memory" class="view">
+      <div class="panel-title"><div><p class="eyebrow">SHARED KNOWLEDGE</p><h2>Saved memory</h2></div><div class="memory-toolbar"><button id="consolidateMemory" class="button secondary" type="button">Consolidate now</button><button id="refreshMemory" class="button secondary" type="button">Refresh memory</button></div></div>
+      <div class="stats compact-stats memory-stats">
+        <article><span>ALL RECORDS</span><strong id="memoryCountAll">0</strong><small>world + semantic</small></article>
+        <article><span>WORLD</span><strong id="memoryCountWorld">0</strong><small>places & structures</small></article>
+        <article><span>SEMANTIC</span><strong id="memoryCountSemantic">0</strong><small>shared knowledge</small></article>
+        <article><span>SHORT TERM</span><strong id="memoryCountShort">0</strong><small>temporary context</small></article>
+        <article><span>LONG TERM</span><strong id="memoryCountLong">0</strong><small>retained knowledge</small></article>
+      </div>
+      <section class="panel memory-filter-panel">
+        <form id="memoryFilterForm" class="memory-filter-form">
+          <label>Search<input id="memorySearch" maxlength="200" placeholder="village, bot, tag, atau isi memory"></label>
+          <label>Category<select id="memoryCategory"><option value="all">All memory</option><option value="world">World memory</option><option value="semantic">Semantic memory</option></select></label>
+          <label>Type<input id="memoryType" maxlength="64" placeholder="village, SHORT_TERM, LONG_TERM"></label>
+          <label>World / server<input id="memoryWorld" maxlength="300" placeholder="localhost:25565"></label>
+          <label>Dimension<input id="memoryDimension" maxlength="100" placeholder="overworld"></label>
+          <button class="button primary" type="submit">Apply filters</button>
+        </form>
+      </section>
+      <div class="settings-grid memory-layout">
+        <section class="panel full">
+          <div class="panel-title"><div><p class="eyebrow">RECORD BROWSER</p><h2>Stored knowledge</h2></div><span id="memoryPageStatus" class="badge">0 records</span></div>
+          <div id="memoryList" class="memory-list"><span class="hint">Open this tab to load memory.</span></div>
+          <div class="memory-pagination"><button id="memoryPrevious" class="button secondary" type="button">Previous</button><button id="memoryNext" class="button secondary" type="button">Next</button></div>
+        </section>
+        <section class="panel">
+          <div class="panel-title"><div><p class="eyebrow">LIFECYCLE POLICY</p><h2>Memory settings</h2></div><span id="memorySettingStatus" class="badge">—</span></div>
+          <form id="memorySettingsForm" class="form-grid">
+            <label>Total record limit<input id="memoryMaxRecords" type="number" min="100" step="100" required></label>
+            <label>Short-term limit<input id="memoryShortLimit" type="number" min="1" step="1" required></label>
+            <label>Short-term TTL (ms)<input id="memoryShortTtl" type="number" min="1000" step="1000" required></label>
+            <label>Recall untuk promosi<input id="memoryPromotionAccesses" type="number" min="1" step="1" required></label>
+            <label>Importance untuk promosi<input id="memoryPromotionImportance" type="number" min="0" max="1" step="0.05" required></label>
+            <label>Consolidation interval (ms)<input id="memoryConsolidationInterval" type="number" min="5000" step="1000" required></label>
+            <button class="button primary full" type="submit">Apply memory settings</button>
+          </form>
+          <p class="hint">Setting berlaku selama runtime. Gunakan `.env` untuk nilai permanen. Limit baru diterapkan pada penulisan atau konsolidasi berikutnya; memory long-term tidak dipangkas oleh batas total.</p>
+        </section>
+        <section class="panel">
+          <div class="panel-title"><div><p class="eyebrow">CONSOLIDATION</p><h2>Lifecycle status</h2></div></div>
+          <dl id="memoryLifecycleDetail" class="memory-detail-list"><div><dt>Status</dt><dd>—</dd></div></dl>
+          <p class="hint">Short-term dipromosikan ke long-term jika jumlah recall atau importance mencapai ambang. Memory kedaluwarsa dibersihkan saat konsolidasi.</p>
+        </section>
       </div>
     </section>
 

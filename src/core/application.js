@@ -40,7 +40,7 @@ import { createTaskReporter } from '../tasks/task-reporter.js';
 export class Application {
   constructor(config, overrides = {}) {
     this.config = config; this.state = 'CREATED'; this.startedAt = null;
-    this.runtimeDefaults = structuredClone({ llm: config.llm ?? { provider: 'none' }, logLevel: config.log.level, autonomy: config.autonomy });
+    this.runtimeDefaults = structuredClone({ llm: config.llm ?? { provider: 'none' }, logLevel: config.log.level, autonomy: config.autonomy, memory: defaultMemorySettings(config.semanticMemory) });
     this.cameraPorts = new Map();
     this.container = new Container(); this.events = overrides.eventBus ?? new EventBus(); this.logStore = config.profile === 'test' ? null : new RotatingLogStore({ directory: config.log.directory ?? join(resolve(config.dataPath), 'logs'), maxFiles: config.log.maxFiles }); this.logger = overrides.logger ?? new Logger({ ...config.log, store: this.logStore });
     this.modules = new ComponentRegistry('Module'); this.plugins = new ComponentRegistry('Plugin'); this.services = new Registry('Service');
@@ -113,7 +113,12 @@ export class Application {
     const result = await runtime.adapter.startViewer({ port, firstPerson: viewMode === 'first_person', viewDistance: this.config.viewer?.viewDistance ?? 6, mode: viewMode }); return { ...result, mode: viewMode, botId };
   }
   async stopCamera(botId) { const result = await this.bots.get(botId).adapter.stopViewer(); this.cameraPorts.delete(botId); return { ...result, botId }; }
-  resetRuntimeSettings() { const defaults = this.runtimeDefaults.llm; const keys = [...new Set([...(defaults.apiKeys ?? []), defaults.apiKey].filter(Boolean))]; const llm = this.llm.configure({ provider: defaults.provider ?? 'none', endpoint: defaults.endpoint ?? '', model: defaults.model ?? '', localEndpoint: defaults.localEndpoint ?? '', localModel: defaults.localModel ?? '', ...(keys.length ? { apiKeys: keys } : { clearKeys: true }) }); const log = this.logger.setLevel(this.runtimeDefaults.logLevel); const autonomy = this.autonomy.configure({ enabled: this.runtimeDefaults.autonomy.enabled, intervalMs: this.runtimeDefaults.autonomy.intervalMs, maxActionsPerHour: this.runtimeDefaults.autonomy.maxActionsPerHour }); this.logger.info('settings.runtime.reset', { provider: llm.provider, logLevel: log.level, autonomy: autonomy.status }); return { llm, log, autonomy, preserved: ['bot profiles', 'admins', 'memory', 'database', 'API token'] }; }
+  async memorySettings() { const semantic = await this.semanticMemory.status(); return { maxRecords: semantic.maxRecords, ...semantic.policy, consolidationIntervalMs: this.memoryLifecycle.status().intervalMs, embedding: semantic.embedding }; }
+  async configureMemory(input) {
+    const consolidationIntervalMs = Number(input?.consolidationIntervalMs); if (!Number.isInteger(consolidationIntervalMs) || consolidationIntervalMs < 5000) throw new ValidationError('Memory consolidation interval must be an integer of at least 5000ms');
+    const semantic = await this.semanticMemory.configure(input); const lifecycle = this.memoryLifecycle.configure({ intervalMs: consolidationIntervalMs }); const settings = await this.memorySettings(); this.logger.info('memory.settings.configured', { maxRecords: settings.maxRecords, shortTermMaxRecords: settings.shortTermMaxRecords, shortTermTtlMs: settings.shortTermTtlMs, promotionAccesses: settings.promotionAccesses, promotionImportance: settings.promotionImportance, consolidationIntervalMs: settings.consolidationIntervalMs }); return { settings, semantic, lifecycle };
+  }
+  async resetRuntimeSettings() { const defaults = this.runtimeDefaults.llm; const keys = [...new Set([...(defaults.apiKeys ?? []), defaults.apiKey].filter(Boolean))]; const llm = this.llm.configure({ provider: defaults.provider ?? 'none', endpoint: defaults.endpoint ?? '', model: defaults.model ?? '', localEndpoint: defaults.localEndpoint ?? '', localModel: defaults.localModel ?? '', ...(keys.length ? { apiKeys: keys } : { clearKeys: true }) }); const log = this.logger.setLevel(this.runtimeDefaults.logLevel); const autonomy = this.autonomy.configure({ enabled: this.runtimeDefaults.autonomy.enabled, intervalMs: this.runtimeDefaults.autonomy.intervalMs, maxActionsPerHour: this.runtimeDefaults.autonomy.maxActionsPerHour }); const memory = await this.configureMemory(this.runtimeDefaults.memory); this.logger.info('settings.runtime.reset', { provider: llm.provider, logLevel: log.level, autonomy: autonomy.status, memory: memory.settings }); return { llm, log, autonomy, memory, preserved: ['bot profiles', 'admins', 'memory records', 'database', 'API token'] }; }
   status() { return { name: 'MineHive', version: '0.7.0', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), autonomy: this.autonomy.status() }; }
 }
 
@@ -122,4 +127,8 @@ function portAvailable(port) {
     const server = createNetServer(); server.unref(); server.once('error', () => resolvePort(false));
     server.listen(port, '0.0.0.0', () => server.close(() => resolvePort(true)));
   });
+}
+
+function defaultMemorySettings(config) {
+  const maxRecords = config.maxRecords; return { maxRecords, shortTermMaxRecords: config.shortTermMaxRecords ?? Math.min(1000, maxRecords), shortTermTtlMs: config.shortTermTtlMs ?? 86_400_000, promotionAccesses: config.promotionAccesses ?? 3, promotionImportance: config.promotionImportance ?? 0.8, consolidationIntervalMs: config.consolidationIntervalMs ?? 60_000 };
 }

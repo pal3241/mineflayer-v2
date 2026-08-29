@@ -7,7 +7,7 @@ MineHive dirancang agar keputusan AI tetap berada di belakang validasi determini
 ## Cakupan proyek
 
 - Runtime Mineflayer multi-bot dengan lifecycle dan bounded reconnect
-- Dashboard untuk join, monitoring, viewer first-person/3D, command, admin, settings, dan logistik
+- Dashboard untuk join, monitoring, viewer first-person/3D, command, admin, browser serta lifecycle settings memory, dan logistik
 - Command individual, kelompok, dan global melalui alias bot atau class
 - Movement, follow, home, collect, crafting, smelting, farming, forestry, dan combat
 - Koordinator OpenRouter tiga-key atau LLM lokal kompatibel OpenAI

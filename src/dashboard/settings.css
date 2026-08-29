@@ -59,3 +59,43 @@
 .inventory-item { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #0c1511; }
 .inventory-preview { color: var(--muted); font-size: 11px; margin: 9px 0; }
 .inventory-preview b { color: var(--text); }
+
+.memory-toolbar,
+.memory-pagination {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.memory-stats {
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+}
+
+.memory-filter-panel { margin-bottom: 16px; }
+.memory-filter-form { display: grid; grid-template-columns: 2fr repeat(4, 1fr) auto; gap: 12px; align-items: end; }
+.memory-layout { margin-top: 16px; }
+.memory-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+.memory-pagination { justify-content: flex-end; margin-top: 14px; }
+.memory-record { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: #0c1511; }
+.memory-record-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.memory-record time { color: var(--muted); font-size: 10px; }
+.memory-record h3 { margin: 12px 0 7px; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.memory-record p,
+.memory-record small { display: block; margin: 0; color: var(--muted); line-height: 1.55; overflow-wrap: anywhere; }
+.memory-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.memory-tags span { padding: 3px 7px; border-radius: 99px; background: #1c2d23; color: var(--green); font-size: 10px; }
+.memory-detail-list { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 0; }
+.memory-detail-list div { padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #0c1511; }
+.memory-detail-list dt { color: var(--muted); font-size: 11px; }
+.memory-detail-list dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+
+@media (max-width: 1250px) {
+  .memory-filter-form { grid-template-columns: repeat(3, 1fr); }
+  .memory-stats { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 720px) {
+  .memory-filter-form,
+  .memory-stats { grid-template-columns: 1fr; }
+  .memory-list { grid-template-columns: 1fr; }
+}
