@@ -161,6 +161,19 @@ test('crafting builds and safely places a required crafting table', async () => 
   const result = await adapter.craftItem({ item: 'wooden_pickaxe' }); assert.equal(result.count, 1); assert.equal(client.placed, true); await adapter.disconnect();
 });
 
+test('crafting executes every registry wood and stone tool material recipe', async () => {
+  const require = createRequire(import.meta.url); const registry = require('prismarine-registry')('1.20.4'); const Recipe = require('prismarine-recipe')(registry).Recipe; const materials = { wooden_sword: ['oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks', 'crimson_planks', 'warped_planks', 'mangrove_planks', 'bamboo_planks', 'cherry_planks'], stone_pickaxe: ['cobblestone', 'blackstone', 'cobbled_deepslate'] };
+  class MaterialClient extends EventEmitter {
+    constructor(output, material) { super(); this.registry = registry; this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.items = [{ name: material, type: registry.itemsByName[material].id, count: output === 'wooden_sword' ? 2 : 3 }, { name: 'stick', type: registry.itemsByName.stick.id, count: output === 'wooden_sword' ? 1 : 2 }]; this.inventory = { items: () => this.items }; this.table = { name: 'crafting_table', position: { x: 1, y: 64, z: 0 } }; }
+    findBlock() { return this.table; } recipesAll(id, metadata, table) { return Recipe.find(id, metadata).filter(recipe => !recipe.requiresTable || table); }
+    async craft(recipe, count) { for (const delta of recipe.delta) { const name = registry.items[delta.id]?.name; const existing = this.items.find(item => item.name === name); if (existing) existing.count += delta.count * count; else if (delta.count > 0) this.items.push({ name, type: delta.id, count: delta.count * count }); } }
+    clearControlStates() {} quit() { this.emit('end'); }
+  }
+  for (const [output, variants] of Object.entries(materials)) for (const material of variants) { const client = new MaterialClient(output, material); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn'); const result = await adapter.craftItem({ item: output, count: 1 }); assert.equal(result.inventory.find(item => item.name === output)?.count, 1, `${output} must accept ${material}`); await adapter.disconnect(); }
+  const woodSources = [['oak_log', 1], ['spruce_log', 1], ['birch_log', 1], ['jungle_log', 1], ['acacia_log', 1], ['dark_oak_log', 1], ['crimson_stem', 1], ['warped_stem', 1], ['mangrove_log', 1], ['bamboo_block', 2], ['cherry_log', 1]];
+  for (const [source, count] of woodSources) { const client = new MaterialClient('wooden_sword', 'oak_planks'); client.items = [{ name: source, type: registry.itemsByName[source].id, count }]; const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn'); const result = await adapter.craftItem({ item: 'wooden_sword', count: 1 }); assert.equal(result.inventory.find(item => item.name === 'wooden_sword')?.count, 1, `wooden_sword must craft recursively from ${source}`); await adapter.disconnect(); }
+});
+
 test('smelting produces verified iron and cooked food', async () => {
   class SmeltingClient extends EventEmitter {
     constructor(inputName, outputName) { super(); this.inputName = inputName; this.outputName = outputName; this.items = [{ name: inputName, type: 1, count: 2 }, { name: 'coal', type: 2, count: 1 }]; this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => this.items }; this.registry = { itemsByName: { [inputName]: { id: 1 }, coal: { id: 2 }, [outputName]: { id: 3 } }, blocksByName: { furnace: { id: 10 } } }; }

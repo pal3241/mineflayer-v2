@@ -9,9 +9,10 @@ class FleetAdapter extends EventEmitter {
   constructor(items = [], { position = { x: 1, y: 64, z: 1 }, requireMaterials = false } = {}) { super(); this.status = 'READY'; this.items = items.map(value => typeof value === 'string' ? { name: value, count: 1 } : { ...value }); this.storageItems = []; this.collected = []; this.position = position; this.requireMaterials = requireMaterials; }
   async connect() { this.emit('login'); this.emit('spawn'); }
   async disconnect() { this.emit('end'); }
-  async smartMove(input) { this.movedTo = input; }
+  async smartMove(input) { this.movedTo = input; this.position = { x: input.x, y: input.y, z: input.z }; }
   async dropItem({ item, count = 1 }) { this.items.find(entry => entry.name === item).count -= count; this.dropped = item; }
-  async pickupItem({ item, count = 1 }) { this.items.push({ name: item, count }); }
+  async pickupItem({ item, count = 1 }) { this.pickedUp = { item, count }; const existing = this.items.find(entry => entry.name === item); if (existing) existing.count += count; else this.items.push({ name: item, count }); }
+  async chat(message) { this.messages ??= []; this.messages.push(message); return { sent: true }; }
   async analyzeBlock({ block }) { const requiredTools = /stone|ore|obsidian/.test(block) ? ['wooden_pickaxe', 'stone_pickaxe', 'iron_pickaxe', 'diamond_pickaxe'] : []; return { block, diggable: true, handMineable: !requiredTools.length, requiredTools }; }
   async craftRequirements({ item, count }) { return { item, count, missing: this.requireMaterials && item.endsWith('_pickaxe') && this.count('oak_log') < 3 ? [{ name: 'oak_log', count: 3 - this.count('oak_log') }] : [], steps: [{ item, crafts: count }] }; }
   async smeltRequirements({ item, count }) { const inputs = { iron_ingot: 'raw_iron', cooked_beef: 'beef' }; return inputs[item] ? { item, count, input: { name: inputs[item], count }, fuel: { name: 'coal', count: Math.ceil(count / 8) }, furnace: true } : null; }
@@ -76,9 +77,9 @@ test('coordinator borrows an idle pickaxe before collecting stone', async () => 
   const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' }, overrides: { adapterFactory: input => { const adapter = new FleetAdapter(input.id === 'donor' ? ['stone_pickaxe'] : []); adapters.set(input.id, adapter); return adapter; } } });
   app.bots.create({ id: 'target', name: 'Target', metadata: { commandAlias: 'target', className: 'miner' } }); app.bots.create({ id: 'donor', name: 'Donor', metadata: { commandAlias: 'donor', className: 'support' } });
   await app.bots.start('target'); await app.bots.start('donor'); await Promise.all(['target', 'donor'].map(id => app.bots.get(id).transitionQueue));
-  app.coordinator.gateway.provider = null;
+  app.coordinator.gateway.provider = null; const droppedEvents = []; app.events.subscribe('coordinator.item.dropped', event => droppedEvents.push(event));
   const result = await app.coordinator.coordinate({ text: 'collect stone 4', selector: 'bot:target', actor: 'test' });
-  assert.equal(result.results[0].status, 'COMPLETED'); assert.ok(adapters.get('target').items.some(item => item.name === 'stone_pickaxe' && item.count > 0)); assert.equal(adapters.get('donor').items[0].count, 0); assert.equal(adapters.get('target').collected[0].block, 'stone'); await app.stop();
+  assert.equal(result.results[0].status, 'COMPLETED'); assert.ok(adapters.get('target').items.some(item => item.name === 'stone_pickaxe' && item.count > 0)); assert.equal(adapters.get('donor').items[0].count, 0); assert.deepEqual(adapters.get('target').movedTo, adapters.get('donor').movedTo); assert.match(adapters.get('donor').messages[0], /target, 1 stone_pickaxe sudah dijatuhkan/); assert.deepEqual(adapters.get('target').pickedUp, { item: 'stone_pickaxe', count: 1 }); assert.equal(droppedEvents.length, 1); assert.equal(droppedEvents[0].payload.meeting.x, 1); assert.equal(adapters.get('target').collected[0].block, 'stone'); await app.stop();
 });
 
 test('nearest-bot algorithm ignores a farther tool donor', async () => {

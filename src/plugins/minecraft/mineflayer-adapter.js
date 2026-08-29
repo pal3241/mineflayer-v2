@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { ValidationError } from '../../core/errors.js';
+import { NotFoundError, ValidationError } from '../../core/errors.js';
 
 const SMELTING_RECIPES = Object.freeze({
   iron_ingot: 'raw_iron', gold_ingot: 'raw_gold', copper_ingot: 'raw_copper',
@@ -147,7 +147,7 @@ export class MineflayerAdapter extends EventEmitter {
     const cleanup = this.#abort(signal, () => { void bot.collectBlock.cancelTask(); });
     try { await bot.collectBlock.collect(blocks); return { block, requested: amount, collectedTargets: blocks.length, inventory: this.snapshot().inventorySummary }; } finally { cleanup(); }
   }
-  async #withStorage(position, capability, operation) { const bot = this.#ready(capability); const { Vec3 } = await import('vec3'); const target = new Vec3(Number(position.x), Number(position.y), Number(position.z)); await this.smartMove({ x: target.x, y: target.y, z: target.z, range: 2 }); const block = bot.blockAt(target); if (!block || !isStorageBlock(block.name)) throw new ValidationError(`Storage block was not found at ${target.x},${target.y},${target.z}`); const container = await bot.openContainer(block); try { return await operation(container); } finally { container.close(); } }
+  async #withStorage(position, capability, operation) { const bot = this.#ready(capability); const { Vec3 } = await import('vec3'); const target = new Vec3(Number(position.x), Number(position.y), Number(position.z)); await this.smartMove({ x: target.x, y: target.y, z: target.z, range: 2 }); const block = bot.blockAt(target); if (!block || !isStorageBlock(block.name)) throw new NotFoundError('Storage block', `${target.x},${target.y},${target.z}`); const container = await bot.openContainer(block); try { return await operation(container); } finally { container.close(); } }
   async farm({ crop = 'wheat', count = 16, maxDistance = 32 } = {}, { signal } = {}) {
     const bot = this.#ready('farming'); const seedName = CROP_ITEMS[crop]; const age = CROP_AGE[crop]; if (!seedName || !bot.registry.blocksByName?.[crop]) throw new ValidationError(`Unsupported crop '${crop}'`); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1)); let harvested = 0; let planted = 0;
     const mature = bot.findBlocks({ matching: block => block.name === crop && Number(block.getProperties?.().age ?? -1) >= age, maxDistance, count: amount }).map(position => bot.blockAt(position)).filter(Boolean);
@@ -198,16 +198,13 @@ export class MineflayerAdapter extends EventEmitter {
     if (depth > 8 || visiting.has(name)) throw new ValidationError(`Cannot resolve crafting dependencies for '${name}'`);
     const definition = bot.registry?.itemsByName?.[name]; if (!definition) throw new ValidationError(`Unknown item '${name}'`); visiting.add(name);
     let table = bot.findBlock({ matching: bot.registry.blocksByName?.crafting_table?.id, maxDistance: 6 });
-    const recipes = rankRecipes(bot, name, requiredCount, inventoryLedger(bot), visiting, depth, bot.recipesAll(definition.id, null, table || true)); let lastError;
+    const recipes = rankRecipes(bot, name, requiredCount, inventoryLedger(bot), visiting, depth, bot.recipesAll(definition.id, null, true)); let lastError;
     for (const recipe of recipes) {
       try {
-        for (const ingredient of recipe.delta.filter(value => value.count < 0)) {
-          const ingredientName = bot.registry.items[ingredient.id]?.name; if (!ingredientName) continue;
-          const crafts = Math.ceil((requiredCount - inventoryCount(bot, name)) / recipe.result.count); await this.#ensureCrafted(ingredientName, Math.abs(ingredient.count) * crafts, new Set(visiting), depth + 1);
-        }
         if (recipe.requiresTable && !table) { await this.#ensureCrafted('crafting_table', 1, new Set(visiting), depth + 1); await this.#placeCraftingTable(); table = bot.findBlock({ matching: bot.registry.blocksByName.crafting_table.id, maxDistance: 6 }); if (!table) throw new ValidationError('Could not place crafting table'); }
-        const ready = bot.recipesFor(definition.id, null, requiredCount - inventoryCount(bot, name), table)[0]; if (!ready) throw new ValidationError(`Ingredients for '${name}' are incomplete`);
-        const craftCount = Math.ceil((requiredCount - inventoryCount(bot, name)) / ready.result.count); await bot.craft(ready, craftCount, table ?? undefined); visiting.delete(name); return;
+        const craftCount = Math.ceil((requiredCount - inventoryCount(bot, name)) / recipe.result.count); const ingredients = recipe.delta.filter(value => value.count < 0).map(ingredient => ({ name: bot.registry.items[ingredient.id]?.name, count: Math.abs(ingredient.count) * craftCount })).filter(ingredient => ingredient.name);
+        for (let pass = 0; pass <= ingredients.length; pass++) { const missing = ingredients.filter(ingredient => inventoryCount(bot, ingredient.name) < ingredient.count); if (!missing.length) break; for (const ingredient of missing) await this.#ensureCrafted(ingredient.name, ingredient.count, new Set(visiting), depth + 1); if (pass === ingredients.length && ingredients.some(ingredient => inventoryCount(bot, ingredient.name) < ingredient.count)) throw new ValidationError(`Ingredients for '${name}' could not be prepared together`); }
+        await bot.craft(recipe, craftCount, table ?? undefined); if (inventoryCount(bot, name) < requiredCount) throw new ValidationError(`Crafting '${name}' produced fewer items than required`); visiting.delete(name); return;
       } catch (error) { lastError = error; }
     }
     visiting.delete(name); throw new ValidationError(`Unable to craft '${name}': ${lastError?.message ?? 'no recipe or ingredients'}`);
@@ -287,8 +284,8 @@ function planSpecificRecipe(bot, name, requiredCount, recipe, ledger, visiting, 
 }
 function rankRecipes(bot, _name, _requiredCount, ledger, _visiting, _depth, recipes) { return [...recipes].map((recipe, index) => ({ recipe, index, score: recipeAffinity(bot, recipe, ledger) })).sort((left, right) => left.score - right.score || left.index - right.index).map(value => value.recipe); }
 function inspectRecipeAlternatives(bot, name, requiredCount, ledger, selected) { const definition = bot.registry?.itemsByName?.[name]; if (!definition) return []; const recipes = rankRecipes(bot, name, requiredCount, ledger, new Set(), 0, bot.recipesAll(definition.id, null, true) ?? []); if (selected) recipes.sort((left, right) => Number(right === selected) - Number(left === selected)); return recipes.map((recipe, index) => ({ rank: index + 1, selected: recipe === selected, score: recipeAffinity(bot, recipe, ledger), requiresTable: recipe.requiresTable, ingredients: recipe.delta.filter(value => value.count < 0).map(value => ({ name: bot.registry.items?.[value.id]?.name, count: Math.abs(value.count) })).filter(value => value.name) })); }
-function recipeAffinity(bot, recipe, ledger) { let score = 0; for (const ingredient of recipe.delta.filter(value => value.count < 0)) { const name = bot.registry.items?.[ingredient.id]?.name; if (!name) continue; const required = Math.abs(ingredient.count); const direct = ledger.get(name) ?? 0; score += Math.max(0, required - direct) * 100; if (direct >= required) score -= 1000; else if (relatedMaterialAvailable(name, ledger)) score -= 50; } return score; }
-function relatedMaterialAvailable(name, ledger) { const prefix = name.replace(/_(planks|log|wood|stem|hyphae|sapling)$/, ''); return [...ledger].some(([item, count]) => count > 0 && item.startsWith(`${prefix}_`) && /_(planks|log|wood|stem|hyphae)$/.test(item)); }
+function recipeAffinity(bot, recipe, ledger) { let score = 0; for (const ingredient of recipe.delta.filter(value => value.count < 0)) { const name = bot.registry.items?.[ingredient.id]?.name; if (!name) continue; const required = Math.abs(ingredient.count); const direct = ledger.get(name) ?? 0; score += Math.max(0, required - direct) * 100; if (direct >= required) score -= 1000; else if (craftSourceAvailable(bot, name, ledger)) score -= 50; } return score; }
+function craftSourceAvailable(bot, name, ledger) { const definition = bot.registry.itemsByName?.[name]; if (!definition) return false; return (bot.recipesAll(definition.id, null, true) ?? []).some(recipe => recipe.delta.some(ingredient => ingredient.count < 0 && (ledger.get(bot.registry.items?.[ingredient.id]?.name) ?? 0) > 0)); }
 function missingList(missing) { return [...missing].map(([name, count]) => ({ name, count })); }
 function mergeMissing(target, source) { for (const [name, count] of source) target.set(name, (target.get(name) ?? 0) + count); }
 function isAir(block) { return ['air', 'cave_air', 'void_air'].includes(block?.name); }

@@ -133,8 +133,8 @@ export class FleetCoordinator {
       const item = findInventoryItem(donor.runtime, acceptedItems); if (!item) continue; const available = itemCount(donor.runtime, item); const count = Math.min(requestedCount, available); if (!count) continue;
       this.#reserve([donor.id]);
       try {
-        const donorRuntime = this.bots.get(donor.id); await target.adapter.smartMove({ ...donor.runtime.position, range: 2 }); await donorRuntime.adapter.dropItem({ item, count }); await target.adapter.pickupItem({ item, count });
-        if (itemCount(target.adapter.snapshot(), item) > 0) { const result = { item, count, donor: donor.id, distance: round(donor.distance) }; await this.events.publish('coordinator.item.transferred', { target: targetId, ...result }, { source: 'fleet-coordinator' }); return result; }
+        const donorRuntime = this.bots.get(donor.id); const targetBefore = itemCount(target.adapter.snapshot(), item); const donorBefore = itemCount(donorRuntime.adapter.snapshot(), item); const meeting = meetingPoint(target.adapter.snapshot().position, donorRuntime.adapter.snapshot().position); await Promise.all([target.adapter.smartMove({ ...meeting, range: 2 }), donorRuntime.adapter.smartMove({ ...meeting, range: 2 })]); await donorRuntime.adapter.dropItem({ item, count }); const donorAfterDrop = itemCount(donorRuntime.adapter.snapshot(), item); if (donorBefore - donorAfterDrop !== count) throw new ConflictError(`Donor '${donor.id}' dropped ${donorBefore - donorAfterDrop} '${item}', expected ${count}`); const message = `[MineHive handoff] ${targetId}, ${count} ${item} sudah dijatuhkan`; await donorRuntime.adapter.chat(message); await this.events.publish('coordinator.item.dropped', { target: targetId, donor: donor.id, item, count, meeting, message }, { source: 'fleet-coordinator' }); await target.adapter.pickupItem({ item, count }); const targetAfterPickup = itemCount(target.adapter.snapshot(), item); if (targetAfterPickup - targetBefore !== count) throw new ConflictError(`Recipient '${targetId}' picked up ${targetAfterPickup - targetBefore} '${item}', expected ${count}`);
+        const result = { item, count, donor: donor.id, distance: round(donor.distance), meeting, notification: message, verified: true }; await this.events.publish('coordinator.item.transferred', { target: targetId, ...result }, { source: 'fleet-coordinator' }); return result;
       } finally { this.#release([donor.id]); }
     }
     return null;
@@ -152,6 +152,7 @@ function nearestTo(target, bots, manager) {
 function findInventoryItem(snapshot, accepted) { return accepted.find(name => itemCount(snapshot, name) > 0); }
 function itemCount(snapshot, name) { return snapshot.inventorySummary?.filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0) ?? 0; }
 function distance(left, right) { return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z); }
+function meetingPoint(left, right) { if (!left || !right || ![left.x, left.y, left.z, right.x, right.y, right.z].every(value => Number.isFinite(Number(value)))) throw new ConflictError('Both bots require finite positions for an item handoff'); return { x: Math.round((Number(left.x) + Number(right.x)) / 2), y: Math.ceil(Math.max(Number(left.y), Number(right.y))), z: Math.round((Number(left.z) + Number(right.z)) / 2) }; }
 function round(value) { return Math.round(value * 100) / 100; }
 function toolOrder(left, right) { return toolTier(left) - toolTier(right) || left.localeCompare(right); }
 function toolTier(name) { const material = Object.keys(TOOL_TIER).find(value => name.startsWith(`${value}_`)); return TOOL_TIER[material] ?? 99; }

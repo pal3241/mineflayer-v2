@@ -15,6 +15,9 @@ Folder ini menyimpan satu catatan untuk setiap release atau update fitur MineHiv
 
 ## Daftar update fitur
 
+- [`2026-08-29 — Handoff item antarbot`](2026-08-29-handoff-item-antarbot.md)
+- [`2026-08-29 — Crafting semua varian kayu dan batu`](2026-08-29-crafting-semua-varian-kayu-dan-batu.md)
+- [`2026-08-29 — Identitas chest dan rename storage`](2026-08-29-identitas-chest-dan-rename-storage.md)
 - [`2026-08-29 — Provider OpenRouter dan NVIDIA NIM`](2026-08-29-provider-openrouter-dan-nvidia-nim.md)
 - [`2026-08-29 — Penghapusan memory dari dashboard`](2026-08-29-penghapusan-memory-dashboard.md)
 - [`2026-08-29 — Dashboard memory dan lifecycle settings`](2026-08-29-dashboard-memory-dan-lifecycle-settings.md)

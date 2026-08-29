@@ -86,6 +86,7 @@ export class ApiServer {
         if (req.method === 'GET' && url.pathname === '/api/v1/database/status') return send(200, { data: this.application.database?.health() ?? { status: 'HEALTHY', driver: this.application.config.profile === 'test' ? 'memory' : 'json' } });
         if (req.method === 'GET' && url.pathname === '/api/v1/logistics/status') return send(200, { data: await this.application.logistics.status() });
         if (req.method === 'GET' && url.pathname === '/api/v1/logistics/storages') return send(200, { data: await this.application.logistics.stock({ worldKey: url.searchParams.get('worldKey') ?? undefined, dimension: url.searchParams.get('dimension') ?? undefined }) });
+        if (req.method === 'PATCH' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'logistics' && parts[3] === 'storages' && parts[4] && parts.length === 5) return send(200, { data: await this.application.logistics.renameStorage({ storageId: decodeURIComponent(parts[4]), name: (await body(req)).name }) });
         if (req.method === 'GET' && url.pathname === '/api/v1/logistics/reservations') return send(200, { data: await this.application.logistics.reservations() });
         if (req.method === 'GET' && url.pathname === '/api/v1/logistics/transfers') return send(200, { data: await this.application.logistics.transfers() });
         if (req.method === 'GET' && url.pathname === '/api/v1/logistics/timeline') return send(200, { data: await this.application.logistics.timeline({ limit: Number(url.searchParams.get('limit') ?? 100) }) });
