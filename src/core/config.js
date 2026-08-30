@@ -18,6 +18,7 @@ export function loadConfig(env = process.env) {
     ml: { minimumSamples: integer(env.MINEHIVE_ML_MINIMUM_SAMPLES, 10) },
     hive: { heartbeatTimeoutMs: integer(env.MINEHIVE_HIVE_HEARTBEAT_TIMEOUT_MS, 30_000) },
     autonomy: { enabled: bool(env.MINEHIVE_AUTONOMY_ENABLED ?? false), intervalMs: integer(env.MINEHIVE_AUTONOMY_INTERVAL_MS, 60_000), maxActionsPerHour: integer(env.MINEHIVE_AUTONOMY_MAX_ACTIONS_PER_HOUR, 20) },
+    acquisition: { enabled: bool(env.MINEHIVE_ACQUISITION_ENABLED ?? true), maxDepth: integer(env.MINEHIVE_ACQUISITION_MAX_DEPTH, 8), maxSubtasks: integer(env.MINEHIVE_ACQUISITION_MAX_SUBTASKS, 32), maxAttempts: integer(env.MINEHIVE_ACQUISITION_MAX_ATTEMPTS, 3), maxDistance: integer(env.MINEHIVE_ACQUISITION_MAX_DISTANCE, 2000), storageFirst: bool(env.MINEHIVE_ACQUISITION_STORAGE_FIRST ?? true), allowFleet: bool(env.MINEHIVE_ACQUISITION_ALLOW_FLEET ?? true), allowCraft: bool(env.MINEHIVE_ACQUISITION_ALLOW_CRAFT ?? true), allowSmelt: bool(env.MINEHIVE_ACQUISITION_ALLOW_SMELT ?? true), allowCollect: bool(env.MINEHIVE_ACQUISITION_ALLOW_COLLECT ?? true), allowPartial: bool(env.MINEHIVE_ACQUISITION_ALLOW_PARTIAL ?? false), toolPreservation: bool(env.MINEHIVE_ACQUISITION_TOOL_PRESERVATION ?? true) },
     recovery: { enabled: bool(env.MINEHIVE_DEATH_RECOVERY_ENABLED ?? true), maxAttempts: integer(env.MINEHIVE_MAX_RECOVERY_ATTEMPTS, 3), minScore: integer(env.MINEHIVE_RECOVERY_MIN_SCORE, 40), optionalScore: integer(env.MINEHIVE_RECOVERY_OPTIONAL_SCORE, 20), urgentScore: integer(env.MINEHIVE_RECOVERY_URGENT_SCORE, 70), despawnTicks: integer(env.MINEHIVE_RECOVERY_ITEM_DESPAWN_TICKS, 6000), safetyMarginTicks: integer(env.MINEHIVE_RECOVERY_SAFETY_MARGIN_TICKS, 600), maxDistance: integer(env.MINEHIVE_RECOVERY_MAX_DISTANCE, 2000), dangerLimit: Number(env.MINEHIVE_RECOVERY_DANGER_LIMIT ?? 0.75) },
     tasks: { maxQueuePerBot: integer(env.MINEHIVE_MAX_QUEUE_PER_BOT, 100) },
     bot: {
@@ -44,6 +45,7 @@ export function loadConfig(env = process.env) {
   if (config.ml.minimumSamples < 2) throw new ValidationError('Invalid ML minimum sample count');
   if (config.hive.heartbeatTimeoutMs < 1000) throw new ValidationError('Invalid HiveMind heartbeat timeout');
   if (config.autonomy.intervalMs < 5000 || config.autonomy.maxActionsPerHour < 1) throw new ValidationError('Invalid autonomy limits');
+  validateAcquisition(config.acquisition);
   validateRecovery(config.recovery);
   if (!Number.isInteger(config.tasks.maxQueuePerBot) || config.tasks.maxQueuePerBot < 1 || config.tasks.maxQueuePerBot > 10_000) throw new ValidationError('Task queue limit must be between 1 and 10000 per bot');
   if (!['development', 'test', 'staging', 'production'].includes(config.profile)) throw new ValidationError('Invalid MINEHIVE_PROFILE');
@@ -54,4 +56,14 @@ export function loadConfig(env = process.env) {
 function providerKeys(values, provider) { const keys = [...new Set(values.filter(Boolean))]; if (keys.length > 3 || keys.some(key => typeof key !== 'string' || key.length > 500)) throw new ValidationError(`${provider} must have at most three API keys of up to 500 characters`); return keys; }
 function validateHttpEndpoint(value, provider) { let url; try { url = new URL(value); } catch { throw new ValidationError(`${provider} endpoint must be a valid URL`); } if (!['http:', 'https:'].includes(url.protocol)) throw new ValidationError(`${provider} endpoint must use HTTP or HTTPS`); }
 function resolveLlmProvider(value, hasOpenRouter, hasNvidia) { const requested = value ?? 'auto'; if (requested === 'auto') return hasOpenRouter ? 'openrouter' : hasNvidia ? 'nvidia' : 'none'; if (requested === 'local') return 'nvidia'; return requested; }
+function validateAcquisition(value) {
+  const fields = ['maxDepth', 'maxSubtasks', 'maxAttempts', 'maxDistance'];
+  for (const field of fields) if (!Number.isInteger(value[field])) throw new ValidationError(`Acquisition setting '${field}' must be an integer`);
+  if (value.enabled !== undefined && typeof value.enabled !== 'boolean') throw new ValidationError('Acquisition enabled must be a boolean');
+  if (value.maxDepth < 1 || value.maxDepth > 32) throw new ValidationError('Acquisition maxDepth must be between 1 and 32');
+  if (value.maxSubtasks < 1 || value.maxSubtasks > 256) throw new ValidationError('Acquisition maxSubtasks must be between 1 and 256');
+  if (value.maxAttempts < 1 || value.maxAttempts > 10) throw new ValidationError('Acquisition maxAttempts must be between 1 and 10');
+  if (value.maxDistance < 16 || value.maxDistance > 100_000) throw new ValidationError('Acquisition maxDistance must be between 16 and 100000');
+  for (const field of ['storageFirst', 'allowFleet', 'allowCraft', 'allowSmelt', 'allowCollect', 'allowPartial', 'toolPreservation']) if (typeof value[field] !== 'boolean') throw new ValidationError(`Acquisition setting '${field}' must be a boolean`);
+}
 function validateRecovery(value) { const integerFields = ['maxAttempts', 'minScore', 'optionalScore', 'urgentScore', 'despawnTicks', 'safetyMarginTicks', 'maxDistance']; for (const field of integerFields) if (!Number.isInteger(value[field])) throw new ValidationError(`Recovery setting '${field}' must be an integer`); if (value.maxAttempts < 1 || value.maxAttempts > 10) throw new ValidationError('Recovery maxAttempts must be between 1 and 10'); if (value.optionalScore < 0 || value.optionalScore > value.minScore || value.minScore > value.urgentScore || value.urgentScore > 100) throw new ValidationError('Recovery score thresholds must satisfy 0 <= optionalScore <= minScore <= urgentScore <= 100'); if (value.despawnTicks < 1200 || value.despawnTicks > 72_000 || value.safetyMarginTicks < 0 || value.safetyMarginTicks >= value.despawnTicks) throw new ValidationError('Recovery despawn tick budget or safety margin is invalid'); if (value.maxDistance < 16 || value.maxDistance > 100_000) throw new ValidationError('Recovery maxDistance must be between 16 and 100000'); if (!Number.isFinite(value.dangerLimit) || value.dangerLimit < 0 || value.dangerLimit > 1) throw new ValidationError('Recovery dangerLimit must be between 0 and 1'); }

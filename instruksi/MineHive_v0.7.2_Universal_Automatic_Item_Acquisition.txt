@@ -1,0 +1,1063 @@
+MINEHIVE v0.7.2 — UNIVERSAL AUTOMATIC ITEM ACQUISITION
+OFFLINE DEVELOPMENT PLAN
+============================================================
+
+Project:
+MineHive / mineflayer-v2
+
+Target Version:
+0.7.2
+
+Nama Konsep:
+Universal Automatic Item Acquisition
+
+Alternatif nama:
+- Automatic Item & Tool Acquisition
+- Intelligent Item Acquisition
+- Universal Requirement Resolution
+
+============================================================
+1. VISI UTAMA 0.7.2
+============================================================
+
+Prinsip utama:
+
+"Task menyatakan apa yang dibutuhkan.
+MineHive menentukan bagaimana mendapatkannya."
+
+Task tidak perlu mengetahui:
+- item ada di inventory atau tidak
+- chest mana yang menyimpan item
+- bot lain mana yang punya item
+- item perlu dicraft atau tidak
+- bahan crafting tersedia atau tidak
+- item perlu dismelt atau tidak
+- resource perlu dicari sendiri atau tidak
+
+Task hanya mendeklarasikan requirement.
+
+Contoh:
+
+TASK:
+mine stone x64
+
+Requirement:
+PICKAXE
+minimum tier sesuai rule
+
+MineHive akan mencoba:
+
+1. Inventory sendiri
+2. Registered Storage
+3. Bot lain yang punya surplus
+4. Craft
+5. Acquire bahan crafting
+6. Smelt / Produce
+7. Collect resource
+8. Fail dengan alasan jelas
+
+Jika item berhasil diperoleh:
+task awal otomatis dilanjutkan.
+
+============================================================
+2. KONDISI SISTEM YANG SUDAH ADA
+============================================================
+
+Fondasi existing yang bisa direuse:
+
+FleetCoordinator saat ini sudah memiliki logic seperti:
+- #ensureToolForBlock()
+- #ensureEquipment()
+- #prepareCraft()
+- #prepareSmelt()
+- #acquireItem()
+- #borrowNearest()
+
+MineflayerAdapter sudah memiliki:
+- dropItem()
+- pickupItem()
+- findSourceBlocks()
+- craftRequirements()
+- craftItem()
+- smeltRequirements()
+- smeltItem()
+- storage withdrawal
+- dropped item pickup verification
+
+Sistem handoff antar-bot sudah memiliki:
+- donor selection
+- meeting point
+- donor movement
+- receiver movement
+- item drop
+- donor inventory verification
+- recipient pickup
+- recipient inventory verification
+- event coordinator.item.dropped
+- event coordinator.item.transferred
+
+Task Queue juga sudah tersedia.
+
+Maka 0.7.2 bukan rewrite.
+
+Fokus utama 0.7.2:
+REFACTOR + GENERALIZATION + UNIVERSAL INTEGRATION
+
+============================================================
+3. MASALAH ARSITEKTUR SAAT INI
+============================================================
+
+Intelligence acquisition saat ini terlalu melekat ke FleetCoordinator.
+
+FleetCoordinator
+├── #ensureToolForBlock
+├── #ensureEquipment
+├── #prepareCraft
+├── #prepareSmelt
+├── #acquireItem
+└── #borrowNearest
+
+Akibatnya:
+- logic tidak reusable secara bersih
+- subsystem lain bergantung ke coordinator
+- task harus lewat intent tertentu agar acquisition berjalan
+- tidak semua task dapat mendeklarasikan dependency universal
+- storage belum menjadi source otomatis di acquisition chain
+- recursive acquisition belum memanfaatkan task queue sepenuhnya
+
+Target 0.7.2:
+Pindahkan menjadi subsystem:
+src/logistics/acquisition/
+
+============================================================
+4. ARSITEKTUR TARGET
+============================================================
+
+Task / Subsystem
+      |
+      v
+Requirement Resolver
+      |
+      v
+Requirement Contract
+      |
+      v
+Acquisition Service
+      |
+      v
+Strategy Planner
+      |
+      +-----------------------------+
+      |                             |
+      v                             v
+Exact Item                     Tool / Category
+      |                             |
+      +--------------+--------------+
+                     |
+                     v
+              Source Resolution
+                     |
+                     v
+1. INVENTORY
+2. REGISTERED STORAGE
+3. FLEET BOT
+4. CRAFT
+5. ACQUIRE CRAFT INGREDIENTS
+6. PRODUCE / SMELT
+7. COLLECT RESOURCE
+8. FAIL
+
+============================================================
+5. REQUIREMENT CONTRACT
+============================================================
+
+Semua subsystem harus menggunakan format requirement universal.
+
+Exact item example:
+
+{
+  "requesterBotId": "bot1",
+  "type": "ITEM",
+  "item": "iron_ingot",
+  "count": 3,
+  "purpose": "craft iron_pickaxe",
+  "consume": true,
+  "priority": 70
+}
+
+Tool requirement example:
+
+{
+  "requesterBotId": "bot1",
+  "type": "TOOL",
+  "category": "PICKAXE",
+  "acceptedItems": [
+    "stone_pickaxe",
+    "iron_pickaxe",
+    "diamond_pickaxe",
+    "netherite_pickaxe"
+  ],
+  "minimumTier": "STONE",
+  "count": 1,
+  "purpose": "mine stone",
+  "consume": false,
+  "returnAfterTask": false,
+  "priority": 70
+}
+
+============================================================
+6. UNIVERSAL ACQUISITION FLOW
+============================================================
+
+TASK
+  |
+  v
+Requirement detected
+  |
+  v
+Requirement already satisfied?
+  |
+ +-------------------+
+ | YES               | NO
+ v                   v
+Continue         Create Acquisition Request
+Task                 |
+                     v
+                Plan Strategy
+                     |
+                     v
+                Execute Strategy
+                     |
+                     v
+                  Verify
+                     |
+               +-----+------+
+               |            |
+             SUCCESS       FAILED
+               |            |
+               v            v
+          Resume Task   Failure Tree
+
+============================================================
+7. SOURCE PRIORITY DEFAULT
+============================================================
+
+Default strategy:
+1. INVENTORY
+2. STORAGE
+3. FLEET BOT
+4. CRAFT
+5. ACQUIRE INGREDIENTS
+6. PRODUCE / SMELT
+7. COLLECT
+8. FAIL
+
+Storage sebelum fleet bot karena:
+- storage adalah shared resource
+- bot lain mungkin sedang membutuhkan item untuk task aktif
+- handoff bot lebih mahal
+- donor movement dapat mengganggu task
+
+============================================================
+8. INVENTORY RESOLVER
+============================================================
+
+Need:
+iron_ingot x3
+
+Inventory:
+iron_ingot x7
+
+Output:
+{
+  "status": "SATISFIED",
+  "source": "INVENTORY",
+  "item": "iron_ingot",
+  "count": 3
+}
+
+Tidak menghasilkan task tambahan.
+
+============================================================
+9. STORAGE RESOLVER
+============================================================
+
+Ini salah satu fitur utama baru 0.7.2.
+
+Gunakan fondasi Logistics 0.7.0:
+- stock()
+- reserve()
+- retrieve()
+- registered storage
+- reservation
+- verification
+
+Flow:
+Need iron_ingot x3
+Inventory 0
+MainChest = 64
+
+reserve 3 iron
+-> navigate storage
+-> withdraw
+-> verify
+-> finalize reservation
+
+============================================================
+10. FLEET RESOLVER
+============================================================
+
+Reuse handoff existing.
+
+Target Bot
+   |
+   v
+Find Donor
+   |
+   v
+Check Shareable
+   |
+   v
+Calculate Meeting Point
+   |
+   v
+Move Both Bots
+   |
+   v
+Drop
+   |
+   v
+Verify Donor Delta
+   |
+   v
+Pickup
+   |
+   v
+Verify Receiver Delta
+   |
+   v
+COMPLETED
+
+============================================================
+11. SHAREABLE ITEM POLICY
+============================================================
+
+Bot tidak boleh memberikan item penting secara sembarangan.
+
+Item SHAREABLE jika:
+- bukan reserved cargo
+- bukan satu-satunya required tool untuk current task
+- bukan emergency food reserve
+- bukan armor/weapon penting untuk current task
+- jumlah setelah transfer masih >= donor minimum reserve
+- donor tidak sedang membutuhkan item tersebut
+- donor tidak berada dalam critical task stage
+
+Contoh:
+Bot2 iron_pickaxe x1, sedang mining -> NOT SHAREABLE
+Bot2 iron_pickaxe x3, idle -> SHAREABLE x2
+
+============================================================
+12. TOOL RESOLVER
+============================================================
+
+Task jangan meminta exact tool jika tidak perlu.
+
+Need:
+PICKAXE
+minimumTier = STONE
+
+Accepted:
+stone_pickaxe
+iron_pickaxe
+diamond_pickaxe
+netherite_pickaxe
+
+Resolver memilih item yang:
+- mampu menjalankan task
+- tidak terlalu mahal
+- durability cukup
+- mudah didapat
+
+============================================================
+13. TOOL TIER
+============================================================
+
+WOODEN = 1
+GOLDEN = 2
+STONE = 3
+IRON = 4
+DIAMOND = 5
+NETHERITE = 6
+
+Example:
+diamond_ore requires minimumTier = IRON
+stone_pickaxe ditolak.
+
+============================================================
+14. TOOL SUITABILITY + DURABILITY
+============================================================
+
+ToolScore:
+CanPerformTask
++ Durability
++ Efficiency
++ Availability
++ EnchantmentSuitability
+- RarityCost
+- ReplacementCost
+- PreservationPenalty
+
+Jangan memakai tool yang hampir rusak untuk task panjang.
+
+============================================================
+15. TOOL PRESERVATION POLICY
+============================================================
+
+Policy:
+NORMAL
+PRESERVE
+CRITICAL_PRESERVE
+
+Contoh:
+diamond_pickaxe enchanted Mending -> PRESERVE
+
+Gunakan hanya jika:
+- tidak ada alternatif yang cukup
+- task membutuhkan tier tinggi
+- policy membolehkan
+
+============================================================
+16. CRAFTING RESOLVER
+============================================================
+
+Jika item tidak ditemukan:
+try craft
+
+Need stone_pickaxe
+Recipe:
+cobblestone x3
+stick x2
+
+Jika bahan kurang:
+buat child requirements.
+
+============================================================
+17. RECURSIVE ACQUISITION + DEPENDENCY GRAPH
+============================================================
+
+Need iron_pickaxe
+
+iron_pickaxe
+├── iron_ingot x3
+│   └── raw_iron
+│       └── smelt
+└── stick x2
+    └── planks
+        └── logs
+
+Jangan hanya recursive await dalam satu fungsi besar.
+Bangun dependency graph dan jalankan lewat Task Queue.
+
+============================================================
+18. TASK QUEUE INTEGRATION
+============================================================
+
+Main task:
+task-100
+status: WAITING_DEPENDENCY
+blockedBy: acq-200
+
+Acquisition graph menghasilkan subtasks.
+
+Setelah dependency selesai:
+WAITING_DEPENDENCY -> QUEUED -> RUNNING
+
+============================================================
+19. TASK CHECKPOINT / RESUME
+============================================================
+
+Sebelum acquisition:
+save checkpoint.
+
+Contoh:
+Build wall progress 42/128
+Need stone_bricks x86
+
+Setelah acquisition:
+resume dari 42/128, bukan restart dari 0.
+
+============================================================
+20. SMELTING / PRODUCTION RESOLVER
+============================================================
+
+Need iron_ingot x3
+No iron
+Raw iron x3
+Coal x1
+
+Acquire raw iron
+Acquire coal
+Smelt iron
+Verify
+Complete acquisition
+
+============================================================
+21. COLLECTION RESOLVER
+============================================================
+
+Fallback terakhir.
+
+Need oak_log x3
+No inventory
+No storage
+No donor
+
+findSourceBlocks("oak_log")
+-> create collect task
+-> verify inventory
+
+============================================================
+22. ACQUISITION COST
+============================================================
+
+Possible cost inputs:
+- distance
+- travel time
+- danger
+- bot workload
+- storage pressure
+- crafting complexity
+- resource rarity
+- tool rarity
+- task priority
+- expected duration
+- generated subtasks
+
+Choose lowest acceptable cost strategy.
+
+============================================================
+23. ACQUISITION BUDGET
+============================================================
+
+Task kecil tidak boleh menghasilkan acquisition sangat mahal.
+
+Use limits:
+- maxAcquisitionCost
+- maxAcquisitionDistance
+- maxGeneratedSubtasks
+- maxDependencyDepth
+
+Example:
+mine 4 stone tidak layak membuat journey 3000 blocks untuk iron pickaxe.
+
+============================================================
+24. DEPENDENCY SAFETY
+============================================================
+
+Suggested:
+MINEHIVE_ACQUISITION_MAX_DEPTH=8
+MINEHIVE_ACQUISITION_MAX_SUBTASKS=32
+
+Cycle:
+A -> B -> C -> A
+=> DEPENDENCY_CYCLE
+
+Too deep:
+=> DEPENDENCY_DEPTH_EXCEEDED
+
+============================================================
+25. BATCH REQUIREMENT PLANNING
+============================================================
+
+Sangat penting.
+
+Task:
+Build 64 Stone Bricks
+
+Requirements:
+pickaxe x1
+food x8
+coal x4
+stone x64
+
+Planner melihat semuanya sekaligus.
+
+Main Warehouse:
+- pickaxe
+- bread
+- coal
+
+Mining Site:
+- stone
+
+Then resume build.
+
+============================================================
+26. MULTI-SOURCE + PARTIAL ACQUISITION
+============================================================
+
+Need iron x100
+Chest A 40
+Chest B 30
+Bot3 surplus 20
+Remaining 10
+
+Plan dapat menggabungkan sumber.
+
+Partial acquisition policy:
+- start partial
+- wait remaining
+- replan
+- fail
+
+============================================================
+27. INVENTORY CAPACITY PLANNING
+============================================================
+
+Check:
+- free slots
+- stackability
+- required slots
+- existing stack capacity
+
+If insufficient:
+- store junk
+- return unused
+- split trip
+- request courier
+- fail INVENTORY_CAPACITY
+
+============================================================
+28. BORROW VS CONSUME
+============================================================
+
+iron_ingot -> consume=true
+pickaxe -> consume=false
+
+Tool pinjaman dapat memiliki lifecycle return.
+
+============================================================
+29. TOOL LEASE
+============================================================
+
+{
+  "id": "lease-100",
+  "ownerType": "BOT",
+  "ownerId": "bot2",
+  "borrowerBotId": "bot1",
+  "item": "diamond_pickaxe",
+  "reason": "mine obsidian",
+  "returnAfterTask": true,
+  "status": "ACTIVE"
+}
+
+Task completed:
+ACTIVE -> RETURN_REQUIRED -> RETURNED
+
+Jika borrower mati:
+0.7.1 recovery -> recover leased tool -> return owner.
+
+============================================================
+30. ACQUISITION DEDUP + RESERVATION
+============================================================
+
+Jika bot butuh:
+iron x10
+iron x20
+
+Gabung bila aman menjadi x30.
+
+Setelah source dipilih:
+reserve item untuk mencegah double-spend.
+
+============================================================
+31. REVALIDATION
+============================================================
+
+Sebelum strategy mahal:
+cek ulang requirement.
+
+Mungkin:
+- task dibatalkan
+- item sudah didapat
+- user memberi item
+- requirement berubah
+
+Jika sudah satisfied:
+cancel acquisition branch.
+
+============================================================
+32. DANGER / DIMENSION AWARENESS
+============================================================
+
+Source terdekat belum tentu terbaik.
+
+Consider:
+- distance
+- danger
+- route reliability
+- dimension
+- hostile density
+- death history
+- task urgency
+
+Basic 0.7.2:
+prefer same dimension.
+
+============================================================
+33. FAILURE EXPLANATION TREE
+============================================================
+
+Jangan hanya ITEM_UNAVAILABLE.
+
+{
+  "status": "FAILED",
+  "code": "ITEM_UNAVAILABLE",
+  "item": "iron_pickaxe",
+  "attempts": [
+    {"strategy":"INVENTORY","result":"NOT_FOUND"},
+    {"strategy":"STORAGE","result":"NOT_FOUND"},
+    {"strategy":"FLEET","result":"NOT_SHAREABLE"},
+    {"strategy":"CRAFT","result":"MISSING_INGREDIENTS"},
+    {"strategy":"COLLECT","result":"SOURCE_NOT_FOUND"}
+  ]
+}
+
+============================================================
+34. ACQUISITION STATE MACHINE
+============================================================
+
+DETECTED
+-> PLANNING
+-> WAITING_DEPENDENCY
+-> READY
+-> EXECUTING
+-> VERIFYING
+-> COMPLETED
+
+Additional:
+WAITING_STORAGE
+WAITING_BOT
+WAITING_RESOURCE
+BLOCKED
+RETRY_REQUIRED
+FAILED
+CANCELLED
+
+============================================================
+35. RECOVERY 0.7.1 INTEGRATION
+============================================================
+
+Acquisition
+-> bot membawa item
+-> bot mati
+-> 0.7.1 Recovery
+
+Recovered:
+resume acquisition
+
+Permanent Loss:
+replan shortage only
+
+Example:
+Need 100 iron
+Recovered 80
+Reacquire 20, bukan 100.
+
+============================================================
+36. UNIVERSAL CALLERS
+============================================================
+
+Acquisition Service harus reusable oleh:
+- Mining
+- Crafting
+- Smelting
+- Farming
+- Forestry
+- Combat
+- Building
+- Exploration
+- Logistics
+- Autonomy
+- Goal Planner
+- Task Executor
+- Future Territory
+- Future Colony
+
+============================================================
+37. EVENT MODEL
+============================================================
+
+acquisition.requirement.detected
+acquisition.request.created
+acquisition.plan.created
+acquisition.strategy.selected
+acquisition.inventory.satisfied
+acquisition.storage.search
+acquisition.storage.reserved
+acquisition.storage.retrieved
+acquisition.fleet.search
+acquisition.fleet.donor.selected
+acquisition.fleet.transferred
+acquisition.craft.planned
+acquisition.craft.completed
+acquisition.production.planned
+acquisition.production.completed
+acquisition.collection.planned
+acquisition.collection.completed
+acquisition.verifying
+acquisition.completed
+acquisition.partial
+acquisition.failed
+acquisition.cancelled
+acquisition.task.blocked
+acquisition.task.resumed
+
+============================================================
+38. SUGGESTED FILE STRUCTURE
+============================================================
+
+src/logistics/acquisition/
+├── index.js
+├── acquisition-service.js
+├── acquisition-request.js
+├── acquisition-schema.js
+├── requirement-resolver.js
+├── requirement-contract.js
+├── strategy-planner.js
+├── dependency-builder.js
+├── acquisition-verifier.js
+├── acquisition-reconciler.js
+├── acquisition-errors.js
+├── resolvers/
+│   ├── inventory-resolver.js
+│   ├── storage-resolver.js
+│   ├── fleet-resolver.js
+│   ├── crafting-resolver.js
+│   ├── smelting-resolver.js
+│   └── collection-resolver.js
+├── tools/
+│   ├── tool-resolver.js
+│   ├── tool-tier.js
+│   ├── durability-evaluator.js
+│   └── tool-lease.js
+└── policies/
+    ├── sharing-policy.js
+    ├── acquisition-cost.js
+    ├── preservation-policy.js
+    └── inventory-policy.js
+
+============================================================
+39. EXISTING CODE TO REFACTOR
+============================================================
+
+#ensureToolForBlock() -> ToolResolver + RequirementResolver
+#ensureEquipment() -> ToolResolver
+#prepareCraft() -> CraftingResolver
+#prepareSmelt() -> SmeltingResolver
+#acquireItem() -> AcquisitionService
+#borrowNearest() -> FleetResolver
+
+FleetCoordinator tetap boleh menggunakan service,
+tetapi bukan lagi pemilik logic.
+
+============================================================
+40. CONFIG SUGGESTION
+============================================================
+
+MINEHIVE_ACQUISITION_ENABLED=true
+MINEHIVE_ACQUISITION_MAX_DEPTH=8
+MINEHIVE_ACQUISITION_MAX_SUBTASKS=32
+MINEHIVE_ACQUISITION_MAX_ATTEMPTS=3
+MINEHIVE_ACQUISITION_MAX_DISTANCE=2000
+MINEHIVE_ACQUISITION_STORAGE_FIRST=true
+MINEHIVE_ACQUISITION_ALLOW_FLEET=true
+MINEHIVE_ACQUISITION_ALLOW_CRAFT=true
+MINEHIVE_ACQUISITION_ALLOW_SMELT=true
+MINEHIVE_ACQUISITION_ALLOW_COLLECT=true
+MINEHIVE_ACQUISITION_ALLOW_PARTIAL=false
+MINEHIVE_ACQUISITION_TOOL_PRESERVATION=true
+
+============================================================
+41. IMPLEMENTATION PHASES
+============================================================
+
+PHASE 1 — UNIVERSAL CONTRACT
+[ ] requirement schema
+[ ] exact item
+[ ] tool category
+[ ] consume flag
+[ ] returnAfterTask
+[ ] accepted items
+[ ] minimum tier
+
+PHASE 2 — EXTRACT EXISTING LOGIC
+[ ] extract acquireItem
+[ ] extract borrowNearest
+[ ] extract prepareCraft
+[ ] extract prepareSmelt
+[ ] extract tool resolver
+[ ] keep coordinator compatibility
+
+PHASE 3 — STORAGE RESOLVER
+[ ] global stock search
+[ ] source selection
+[ ] reservation
+[ ] retrieve
+[ ] verification
+[ ] fallback
+
+PHASE 4 — FLEET RESOLVER
+[ ] donor search
+[ ] sharing policy
+[ ] scoring
+[ ] meeting point
+[ ] drop verification
+[ ] pickup verification
+[ ] lease support
+
+PHASE 5 — DEPENDENCY GRAPH
+[ ] graph builder
+[ ] depth limit
+[ ] cycle detection
+[ ] max subtasks
+[ ] task queue integration
+[ ] task resume
+
+PHASE 6 — CRAFT / SMELT / COLLECT
+[ ] recursive ingredients
+[ ] smelting resolver
+[ ] fuel resolver
+[ ] collection resolver
+[ ] verify result
+
+PHASE 7 — TOOL INTELLIGENCE
+[ ] tool category
+[ ] minimum tier
+[ ] suitability
+[ ] durability
+[ ] rarity preservation
+[ ] lease
+[ ] return
+
+PHASE 8 — OPTIMIZATION
+[ ] batch requirements
+[ ] deduplication
+[ ] multi-source
+[ ] partial acquisition
+[ ] capacity planning
+[ ] revalidation
+[ ] cost planner
+
+PHASE 9 — RECOVERY INTEGRATION
+[ ] link to 0.7.1
+[ ] pause/resume
+[ ] permanent loss shortage
+[ ] leased tool recovery
+
+PHASE 10 — OBSERVABILITY
+[ ] dashboard
+[ ] dependency tree
+[ ] strategy
+[ ] source
+[ ] donor
+[ ] failure tree
+[ ] metrics
+
+============================================================
+42. IMPORTANT TESTS
+============================================================
+
+1. Craft iron_pickaxe, iron missing, storage has iron -> retrieve then craft.
+2. Mine stone, no pickaxe, storage has pickaxe -> retrieve and resume.
+3. Storage empty, idle bot has spare pickaxe -> handoff and resume.
+4. No pickaxe anywhere, materials exist -> craft and resume.
+5. Missing crafting ingredients -> recursively acquire ingredients.
+6. Need iron, only raw iron + fuel -> smelt then continue.
+7. Need log, nowhere available except world -> collect fallback.
+8. Donor has only one critical tool -> NOT SHAREABLE.
+9. Donor has spare rare tool -> lease and return.
+10. Acquisition cost absurd for tiny task -> reject expensive plan.
+11. Dependency cycle -> DEPENDENCY_CYCLE.
+12. Dependency too deep -> DEPENDENCY_DEPTH_EXCEEDED.
+13. Multiple requirements -> batch acquisition.
+14. Duplicate same-item needs -> merge/dedup.
+15. Bot dies during acquisition -> 0.7.1 recovery, reacquire only shortage.
+
+============================================================
+43. DEFINITION OF DONE
+============================================================
+
+[ ] Acquisition logic bukan private FleetCoordinator-only
+[ ] Semua subsystem dapat menggunakan Requirement Contract
+[ ] Inventory resolver
+[ ] Storage resolver
+[ ] Storage reservation
+[ ] Fleet handoff reusable
+[ ] Shareable policy
+[ ] Craft fallback
+[ ] Smelt fallback
+[ ] Collection fallback
+[ ] Tool category resolution
+[ ] Tool tier
+[ ] Durability awareness
+[ ] Dependency graph
+[ ] Cycle detection
+[ ] Depth limit
+[ ] Task Queue dependency execution
+[ ] Main task WAITING_DEPENDENCY
+[ ] Main task checkpoint/resume
+[ ] Batch acquisition
+[ ] Verification
+[ ] Failure explanation tree
+[ ] 0.7.1 integration
+[ ] Permanent loss reacquires shortage only
+[ ] Automated tests
+
+============================================================
+44. ROADMAP
+============================================================
+
+0.7.0 — Logistics Foundation
+MineHive mampu menyimpan, reserve, transfer, dan verify resource.
+
+0.7.1 — Intelligent Death Recovery
+MineHive mampu menyelamatkan item ketika bot mati.
+
+0.7.2 — Universal Automatic Item Acquisition
+MineHive mampu mendapatkan sendiri item/tool yang dibutuhkan setiap task.
+
+0.7.3 — Smart Logistics / Resource Optimization
+MineHive mengoptimalkan supply, warehouse, route, rebalancing, forecasting, dan resource economy.
+
+0.8.0 — Territory
+MineHive menggunakan spatial knowledge, danger zone, resource zone, dan route intelligence.
+
+============================================================
+45. PRINSIP ARSITEKTUR
+============================================================
+
+1. Task menyatakan WHAT, bukan HOW.
+2. Acquisition Service menentukan HOW.
+3. Core tidak boleh mengakses raw Mineflayer API.
+4. Existing handoff logic harus direuse.
+5. Existing Task Queue menjadi executor dependency.
+6. Storage dicoba sebelum mengambil item dari bot lain.
+7. Bot donor hanya memberi resource shareable.
+8. Tool tidak harus exact item jika category cukup.
+9. Rare tool dipreservasi.
+10. Recursive dependency harus bounded.
+11. Cycle harus terdeteksi.
+12. Acquisition harus diverifikasi.
+13. Main task tidak langsung gagal jika requirement bisa diperoleh.
+14. Main task harus bisa pause dan resume.
+15. 0.7.1 menjadi failsafe acquisition saat bot mati.
+16. Permanent loss hanya memicu reacquisition shortage.
+17. LLM bukan eksekutor acquisition.
+18. Acquisition default deterministic.
+19. Universal Acquisition harus reusable oleh seluruh MineHive.
+
+============================================================
+END OF DOCUMENT
+============================================================

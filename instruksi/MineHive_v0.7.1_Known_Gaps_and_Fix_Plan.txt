@@ -1,0 +1,845 @@
+MINEHIVE v0.7.1 — INTELLIGENT DEATH RECOVERY
+KNOWN GAPS / FIX PLAN
+============================================================
+
+Project:
+MineHive / mineflayer-v2
+
+Target:
+Perbaikan dan hardening setelah release 0.7.1
+
+Tujuan:
+Mencatat masalah/gap yang ditemukan setelah review implementasi 0.7.1
+agar dapat diperbaiki nanti tanpa kehilangan konteks.
+
+============================================================
+1. KONDISI UMUM
+============================================================
+
+0.7.1 sudah memiliki:
+- death manifest
+- item value evaluator
+- REQUIRED / OPTIONAL / IGNORE
+- dynamic item value
+- recovery score
+- despawn budget
+- chunk-aware estimated timer
+- recovery bot selector
+- recovery state machine
+- max attempts
+- verification
+- partial recovery
+- reconciliation
+- transfer takeover model
+- recovery dashboard
+- recovery API settings
+- unit tests
+- MineflayerAdapter death state capture
+
+Gap utama:
+RECOVERY ENGINE sudah ada,
+tetapi FULL END-TO-END AUTOMATIC WORLD RECOVERY masih perlu dipastikan/hardening.
+
+============================================================
+2. GAP UTAMA — DEATH EVENT ORCHESTRATION
+============================================================
+
+MineflayerAdapter sudah emit death dengan:
+- last alive state
+- position
+- dimension
+- inventory snapshot
+- cause
+- keepInventory
+- detectedAt
+
+Yang harus dipastikan otomatis:
+
+death event
+-> Death Manifest
+-> Logistics Death Context
+-> Item Evaluation
+-> Recovery Job
+-> Bot Selection
+-> Recovery Task
+-> Execution
+-> Verification
+-> Reconciliation
+-> Cleanup
+
+============================================================
+3. TARGET FIX — DEATH RECOVERY ORCHESTRATOR
+============================================================
+
+Suggested module:
+src/logistics/recovery/death-recovery-orchestrator.js
+
+Responsibilities:
+- attach ke runtime bot
+- listen death event
+- capture death context
+- create death manifest
+- ask logistics.deathContext()
+- merge logistics cargo
+- evaluate items
+- skip junk-only death
+- mark logistics RECOVERY_REQUIRED
+- create recovery job
+- select recovery bot
+- enqueue recovery task
+- monitor execution
+- verify
+- reconcile
+- cleanup memory
+
+============================================================
+4. TARGET FLOW
+============================================================
+
+REAL BOT DEATH
+-> adapter.emit('death')
+-> DeathRecoveryOrchestrator
+-> createDeathManifest()
+-> logistics.deathContext()
+-> evaluateRecoveryItems()
+
+If RECOVER:
+markDeathRecovery()
+-> create recovery job
+-> select bot
+-> Task Queue
+-> navigate
+-> search
+-> collect
+-> verify
+-> reconcile
+-> cleanup
+
+If IGNORE:
+record death episode
+-> cleanup operational state
+
+============================================================
+5. GAP — RECOVERY EXECUTOR END-TO-END
+============================================================
+
+Primitive adapter sudah mendukung:
+- navigation
+- dropped item search
+- dropped item collection
+- inventory verification
+
+Perlu executor yang menyatukan:
+ASSIGNED
+-> TRAVELLING
+-> SEARCHING
+-> COLLECTING
+-> VERIFYING
+-> RECOVERED
+
+Suggested:
+recovery-executor.js
+
+============================================================
+6. GAP — TASK QUEUE INTEGRATION
+============================================================
+
+Recovery sebaiknya memakai Task Queue untuk:
+- navigation
+- search
+- collect
+- verification
+- retry
+- timeout
+- cancellation
+
+Recovery Job = domain lifecycle.
+Task Queue = executor.
+
+============================================================
+7. GAP — REAL BOT ASSIGNMENT
+============================================================
+
+Recovery Bot Selector sudah ada.
+Pastikan result selector benar-benar digunakan untuk:
+recovery.assign()
++ enqueue recovery task
+
+REASSIGN_REQUIRED harus memicu selector lagi.
+
+============================================================
+8. GAP — SELF RECOVERY
+============================================================
+
+Original bot boleh recovery setelah respawn jika score terbaik.
+
+Saat mati:
+alive=false -> reject.
+
+Setelah respawn:
+alive=true -> eligible lagi.
+
+============================================================
+9. GAP — KEEP INVENTORY
+============================================================
+
+Jika keepInventory enabled:
+- jangan buat item recovery job
+- jangan mark cargo lost
+- death episode tetap boleh dicatat
+
+Jika unknown:
+gunakan conservative handling.
+
+============================================================
+10. GAP — CHUNK TIMER ESTIMATION
+============================================================
+
+Perlu hardening terhadap:
+- double advancing
+- restart
+- stale chunk status
+- server tick mismatch
+
+Suggested fields:
+lastObservedServerTick
+lastChunkActive
+timerUpdatedAt
+
+============================================================
+11. GAP — RESTART RECOVERY
+============================================================
+
+Test restart saat status:
+ASSIGNED
+TRAVELLING
+SEARCHING
+COLLECTING
+VERIFYING
+
+Expected:
+- job restored
+- stale assignment revalidated
+- recovery resumes/reassigns
+- despawn budget tidak double-count
+
+============================================================
+12. GAP — ITEM ENTITY MATCHING
+============================================================
+
+Handle:
+- multiple stacks item sama
+- item merge
+- item split
+- water movement
+- pickup by other entity/player
+- entity id changes
+- partial missing
+
+Verification harus inventory-based, bukan entity-based saja.
+
+============================================================
+13. GAP — PARTIAL RECOVERY ORCHESTRATION
+============================================================
+
+VERIFYING
+-> PARTIAL
+-> reconcile
+-> PARTIAL_RECONCILED
+-> cleanup
+
+REQUIRED loss = permanent loss.
+OPTIONAL loss = optional not recovered.
+
+============================================================
+14. GAP — LOGISTICS RESERVATION PROTECTION
+============================================================
+
+Death during transfer:
+reservation jangan RELEASED terlalu awal.
+
+Use:
+RECOVERY_REQUIRED
+
+Final only after:
+RECOVERED
+atau
+PERMANENT_LOSS
+
+============================================================
+15. GAP — TRANSFER TAKEOVER EXECUTION
+============================================================
+
+Model sudah punya TAKEOVER_REQUIRED.
+Perlu executor nyata:
+
+Recovery Bot
+-> recovered cargo
+-> take over transfer
+-> continue destination
+-> verify delivery
+
+Alternative:
+return cargo to storage.
+
+============================================================
+16. GAP — RECOVERY HEALTH STATUS
+============================================================
+
+Normal active recovery tidak seharusnya otomatis membuat application DEGRADED.
+
+Suggested:
+HEALTHY:
+- active recovery normal
+- progress berjalan
+- attempts rendah
+
+DEGRADED:
+- urgent despawn
+- repeated failure
+- stuck
+- no valid bot
+- queue saturation
+
+============================================================
+17. GAP — DASHBOARD RECOVERED ITEM KPI
+============================================================
+
+Jangan hitung semua manifest items sebagai recovered.
+
+Example:
+diamond x4 REQUIRED
+dirt x64 IGNORE
+
+Recovered:
+diamond x4
+
+Correct recoveredItems = 4
+Not 68.
+
+Gunakan verification.items[].recoveredCount.
+
+============================================================
+18. GAP — PERMANENT LOSS KPI
+============================================================
+
+Jangan anggap semua item failed job sebagai permanent loss.
+
+Bedakan:
+- REQUIRED permanent loss
+- OPTIONAL not recovered
+- IGNORE junk
+
+============================================================
+19. TARGET DASHBOARD KPI
+============================================================
+
+- Active Recovery Jobs
+- Urgent Recoveries
+- Recovered REQUIRED Items
+- Recovered OPTIONAL Items
+- Permanent REQUIRED Loss
+- Optional Not Recovered
+- Ignored Junk
+- Recovery Success Rate
+- Average Recovery Duration
+- Average Attempts
+- Recovered Cargo Value
+- Lost Cargo Value
+
+============================================================
+20. GAP — OPERATIONAL MEMORY VS EPISODIC MEMORY
+============================================================
+
+DEATH_DROP:
+hapus setelah terminal reconciliation.
+
+DEATH_EPISODE:
+simpan ringkasan:
+- position
+- dimension
+- cause
+- danger
+- recovery result
+- required loss
+- optional loss
+- bot id
+- transfer relation
+- timestamp
+
+============================================================
+21. FUTURE TERRITORY SIGNAL
+============================================================
+
+Death episode dapat dipakai 0.8.0 untuk:
+- death density
+- hostile cause
+- lava
+- fall
+- void
+- repeated loss
+- failed recovery
+
+Output future:
+DANGER_ZONE
+
+============================================================
+22. GAP — RECOVERY ATTEMPT CASCADE
+============================================================
+
+Bot A mati.
+Bot B recovery lalu mati.
+Bot C recovery.
+
+Perlu audit chain:
+parentRecoveryJobId
+rootDeathManifestId
+
+============================================================
+23. GAP — NESTED DEATH CARGO
+============================================================
+
+Recovery bot dapat membawa:
+- recovered cargo
+- personal item
+- active logistics cargo lain
+
+Manifest harus membedakan semuanya.
+
+============================================================
+24. GAP — UNIQUE ITEM METADATA
+============================================================
+
+Untuk rare/unique items pertimbangkan metadata:
+- customName
+- enchanted
+- nbtHash
+- durability
+- unique marker
+
+Penting untuk:
+- named tools
+- enchanted gear
+- shulker
+- leased tools
+
+============================================================
+25. GAP — ITEM IDENTITY
+============================================================
+
+Jangan hanya name.
+
+Possible identity:
+name
+customName
+enchanted
+nbtHash
+durability bucket
+unique
+
+============================================================
+26. GAP — DANGER EVALUATION
+============================================================
+
+Current basic danger dapat dikembangkan dengan:
+- hostile density
+- lava nearby
+- void risk
+- fall risk
+- darkness
+- previous deaths
+- route danger
+- bot health
+- armor
+
+Interface harus extensible.
+
+============================================================
+27. GAP — ITEM DESPAWN CONFIG
+============================================================
+
+Default 6000 ticks harus configurable.
+Server/mod/plugin dapat berbeda.
+
+Jangan hardcode 6000 di banyak tempat.
+
+============================================================
+28. GAP — TIMER AFTER RESTART
+============================================================
+
+Saat restart:
+wall-clock tidak boleh dianggap loaded ticks.
+
+Jika chunk state unknown:
+TIMER_STATE_UNKNOWN
+
+Policy:
+jangan expire hanya karena wall-clock.
+
+============================================================
+29. GAP — DUPLICATE DEATH / IDEMPOTENCY
+============================================================
+
+Satu manifest tidak boleh punya dua active jobs.
+
+Orchestrator harus idempotent terhadap:
+- duplicate death event
+- reconnect event
+- replay
+
+============================================================
+30. GAP — CANCELLED MAIN TASK
+============================================================
+
+Jika original task cancel:
+recovery tidak selalu ikut cancel.
+
+Continue jika:
+- valuable cargo
+- leased tool
+- logistics reservation
+
+Cancel jika:
+- junk only
+- no strategic value
+
+============================================================
+31. GAP — RECOVERY PRIORITY
+============================================================
+
+Priority sebaiknya mempertimbangkan:
+- despawn urgency
+- item value
+- logistics importance
+- leased/unique tool
+- distance
+- danger
+- main task priority
+
+============================================================
+32. GAP — OPTIONAL ITEM PICKUP
+============================================================
+
+Setelah REQUIRED selesai:
+OPTIONAL hanya diambil jika:
+- nearby
+- inventory cukup
+- time budget aman
+- danger tidak naik
+
+============================================================
+33. GAP — RECOVERY BOT CAPACITY
+============================================================
+
+Selector perlu menghitung:
+- free slots
+- existing stack space
+- required stack count
+
+Bukan hanya slot count sederhana.
+
+============================================================
+34. GAP — PICKUP OVERFLOW
+============================================================
+
+Jika inventory recovery bot tidak cukup:
+- collect REQUIRED only
+- split recovery
+- return to storage then resume
+- assign second bot (advanced)
+
+============================================================
+35. RECOVERY COMPLETION CONDITION
+============================================================
+
+Recovery selesai jika:
+all REQUIRED recovered atau reconciled.
+
+OPTIONAL tidak wajib.
+IGNORE tidak dipertimbangkan.
+
+============================================================
+36. MANUAL OVERRIDE FUTURE
+============================================================
+
+Possible dashboard/API:
+- force recover
+- cancel recovery
+- reassign bot
+- mark unrecoverable
+
+Harus tetap audit trail.
+
+============================================================
+37. API FUTURE
+============================================================
+
+Possible:
+GET /api/v1/recovery/jobs
+GET /api/v1/recovery/jobs/:id
+POST /api/v1/recovery/jobs/:id/reassign
+POST /api/v1/recovery/jobs/:id/cancel
+
+============================================================
+38. EVENT COMPLETENESS
+============================================================
+
+Ensure real runtime emits:
+logistics.recovery.detected
+logistics.recovery.manifest.created
+logistics.recovery.evaluated
+logistics.recovery.job.created
+logistics.recovery.assigned
+logistics.recovery.started
+logistics.recovery.searching
+logistics.recovery.collecting
+logistics.recovery.verifying
+logistics.recovery.completed
+logistics.recovery.partial
+logistics.recovery.reconciled
+logistics.recovery.failed
+logistics.recovery.expired
+logistics.recovery.memory.cleaned
+
+============================================================
+39. OBSERVABILITY CORRELATION
+============================================================
+
+Track:
+deathManifestId
+recoveryJobId
+transferId
+reservationId
+deadBotId
+recoveryBotId
+rootCorrelationId
+
+============================================================
+40. IMPORTANT END-TO-END TEST
+============================================================
+
+Simulate:
+adapter.emit('death')
+
+Expected:
+job automatically created.
+
+Bukan hanya manual createRecoveryJobService unit test.
+
+============================================================
+41. FULL E2E TEST
+============================================================
+
+Bot A:
+diamond x4
+dirt x64
+
+Death event.
+
+Expected:
+diamond REQUIRED
+dirt IGNORE
+Bot B selected
+Bot B navigates
+collect diamond
+verify +4
+RECOVERED
+DEATH_DROP cleaned
+DEATH_EPISODE stored
+
+============================================================
+42. JUNK ONLY TEST
+============================================================
+
+Bot dies with:
+dirt x64
+rotten_flesh x32
+
+Expected:
+no recovery task
+death episode stored
+
+============================================================
+43. KEEP INVENTORY TEST
+============================================================
+
+keepInventory enabled.
+
+Expected:
+no item recovery
+no cargo marked lost
+death episode stored
+
+============================================================
+44. DEATH DURING TRANSFER TEST
+============================================================
+
+Bot carries iron x64 in active transfer.
+
+Expected:
+transfer = RECOVERY_REQUIRED
+reservation = RECOVERY_REQUIRED
+no release
+
+============================================================
+45. TAKEOVER TEST
+============================================================
+
+Recovery bot gets iron x64.
+
+Expected:
+takeover transfer
+continue delivery
+destination verified
+transfer completed
+
+============================================================
+46. PARTIAL TEST
+============================================================
+
+Expected iron x64
+Recovered iron x59
+
+Expected:
+permanent loss 5
+reservation/transfer reconciled
+
+============================================================
+47. RECOVERY BOT DIES TEST
+============================================================
+
+Recovery bot dies.
+
+Expected:
+attempt++
+REASSIGN_REQUIRED
+
+If max:
+FAILED
+MAX_RECOVERY_ATTEMPTS
+
+============================================================
+48. RESTART TEST
+============================================================
+
+Job TRAVELLING.
+App restart.
+
+Expected:
+job persisted
+assignment revalidated
+recovery resumes
+
+============================================================
+49. TIMER TEST
+============================================================
+
+Death chunk active 1000 ticks.
+Chunk unload 10 wall-clock minutes.
+
+Expected:
+remaining 5000 ticks
+no wall-clock auto-expiry
+
+============================================================
+50. DASHBOARD COUNT TEST
+============================================================
+
+Manifest:
+diamond x4 REQUIRED
+dirt x64 IGNORE
+
+Recovered:
+diamond x4
+
+Expected:
+recoveredItems = 4
+ignoredJunk = 64
+
+============================================================
+51. FIX PRIORITY
+============================================================
+
+PRIORITY 1 — END TO END
+[ ] DeathRecoveryOrchestrator
+[ ] death event wiring
+[ ] automatic manifest
+[ ] automatic evaluation
+[ ] automatic job creation
+[ ] Task Queue execution
+
+PRIORITY 2 — REAL EXECUTION
+[ ] navigate
+[ ] search
+[ ] collect
+[ ] verify
+[ ] reconcile
+[ ] cleanup
+
+PRIORITY 3 — CORRECTNESS
+[ ] reservation protection
+[ ] transfer takeover
+[ ] partial recovery
+[ ] restart safety
+[ ] timer safety
+
+PRIORITY 4 — OBSERVABILITY
+[ ] health semantics
+[ ] dashboard KPI
+[ ] timeline
+[ ] correlation IDs
+
+PRIORITY 5 — FUTURE KNOWLEDGE
+[ ] death episode
+[ ] territory signal
+[ ] unique item metadata
+
+============================================================
+52. DEFINITION OF FIXED 0.7.1
+============================================================
+
+[ ] Real Mineflayer death event triggers recovery automatically
+[ ] Death manifest automatically created
+[ ] Junk-only death does not create recovery mission
+[ ] Valuable item automatically creates recovery mission
+[ ] Active logistics transfer protected
+[ ] Recovery bot automatically selected
+[ ] Recovery work enters Task Queue
+[ ] Recovery bot navigates automatically
+[ ] Dropped item entities searched automatically
+[ ] REQUIRED items collected first
+[ ] Inventory delta verified
+[ ] Partial recovery reconciled
+[ ] Permanent loss recorded correctly
+[ ] Transfer takeover can continue
+[ ] DEATH_DROP cleaned
+[ ] DEATH_EPISODE stored
+[ ] Recovery persists through restart
+[ ] Timer does not use wall-clock-only expiry
+[ ] Dashboard recovered count uses actual count
+[ ] Health does not become DEGRADED for normal active recovery
+[ ] Tests cover full death-event vertical slice
+
+============================================================
+53. RELATION TO 0.7.2
+============================================================
+
+0.7.2 Universal Automatic Item Acquisition akan bergantung pada 0.7.1 sebagai failsafe.
+
+Acquisition
+-> bot acquires item
+-> bot dies
+-> 0.7.1 Recovery
+
+Recovered:
+resume acquisition
+
+Permanent loss:
+reacquire shortage only
+
+0.7.1 tidak harus langsung selesai sebelum desain 0.7.2 dibuat,
+tetapi gap end-to-end sebaiknya ditutup sebelum 0.7.2 dianggap production-ready.
+
+============================================================
+END OF DOCUMENT
+============================================================

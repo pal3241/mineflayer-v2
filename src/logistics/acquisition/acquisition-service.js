@@ -1,0 +1,209 @@
+import { randomUUID } from 'node:crypto';
+import { ConflictError, ValidationError } from '../../core/errors.js';
+
+const DEFAULT_CONFIG = Object.freeze({
+  enabled: true,
+  maxDepth: 8,
+  maxSubtasks: 32,
+  maxAttempts: 3,
+  maxDistance: 2000,
+  storageFirst: true,
+  allowFleet: true,
+  allowCraft: true,
+  allowSmelt: true,
+  allowCollect: true,
+  allowPartial: false,
+  toolPreservation: true
+});
+
+export function createAcquisitionService({ bots, logistics, events, logger, config = {} } = {}) {
+  const settings = normalizeConfig({ ...DEFAULT_CONFIG, ...config });
+  const records = new Map();
+
+  const record = requirement => {
+    const normalized = normalizeRequirement(requirement);
+    const id = normalized.id ?? randomUUID();
+    const existing = records.get(id);
+    const request = {
+      id,
+      status: 'PENDING',
+      attempts: 0,
+      requirement: normalized,
+      strategy: 'deterministic',
+      trace: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(existing ?? {})
+    };
+    records.set(id, request);
+    return request;
+  };
+
+  const configure = input => {
+    Object.assign(settings, normalizeConfig({ ...settings, ...input }));
+    logger?.info?.('acquisition.settings.configured', { settings: structuredClone(settings) });
+    return structuredClone(settings);
+  };
+
+  const resolve = async input => {
+    if (!settings.enabled) throw new ConflictError('Acquisition subsystem is disabled');
+    const request = record(input);
+    const candidateBots = bots?.list?.() ?? [];
+    const target = candidateBots.find(bot => bot.id === request.requirement.requesterBotId) ?? candidateBots[0];
+    if (!target) throw new ValidationError('Acquisition requires at least one bot runtime');
+    const runtime = bots.get?.(target.id) ?? target;
+    const requirement = request.requirement;
+    request.attempts += 1;
+    request.status = 'RESOLVING';
+    request.updatedAt = new Date().toISOString();
+    request.trace.push({ at: request.updatedAt, step: 'resolve-start', detail: requirement.type === 'TOOL' ? `tool ${requirement.category}` : requirement.item });
+
+    const inventory = runtime.adapter?.snapshot?.().inventorySummary ?? [];
+    const hasExact = requirement.type === 'ITEM' ? inventory.some(entry => entry.name === requirement.item && entry.count >= requirement.count) : inventory.some(entry => requirement.acceptedItems.includes(entry.name));
+    if (hasExact) {
+      request.status = 'SATISFIED';
+      request.updatedAt = new Date().toISOString();
+      request.trace.push({ at: request.updatedAt, step: 'inventory-satisfied', detail: requirement.type === 'ITEM' ? requirement.item : requirement.category });
+      events?.publish?.('acquisition.inventory.satisfied', { requestId: request.id, requirement }, { source: 'acquisition' });
+      return { requestId: request.id, status: 'SATISFIED', source: 'inventory', requirement, inventory: runtime.adapter?.snapshot?.().inventorySummary ?? [] };
+    }
+
+    if (settings.storageFirst && logistics?.stock) {
+      const stock = await logistics.stock({ worldKey: `${String(runtime.options?.host ?? 'localhost').toLowerCase()}:${Number(runtime.options?.port ?? 25565)}`, dimension: runtime.adapter?.snapshot?.().dimension ?? 'overworld' });
+      const match = stock.find(storage => storage.availableInventory?.some(entry => requirement.type === 'ITEM' ? entry.name === requirement.item && entry.available >= requirement.count : requirement.acceptedItems.includes(entry.name)));
+      if (match) {
+        const item = requirement.type === 'ITEM' ? requirement.item : requirement.acceptedItems.find(name => match.availableInventory.some(entry => entry.name === name));
+        request.status = 'STORAGE_FOUND';
+        request.updatedAt = new Date().toISOString();
+        request.trace.push({ at: request.updatedAt, step: 'storage-resolved', detail: `${match.name}:${item}` });
+        events?.publish?.('acquisition.storage.reserved', { requestId: request.id, storage: match.name, item }, { source: 'acquisition' });
+        return { requestId: request.id, status: 'STORAGE_FOUND', source: 'storage', storage: match.name, item, requirement };
+      }
+    }
+
+    if (settings.allowFleet) {
+      const donors = candidateBots.filter(bot => bot.id !== target.id && bot.status === 'READY');
+      const donor = donors.find(bot => {
+        const snapshot = bot.runtime?.inventorySummary ?? [];
+        return requirement.type === 'ITEM' ? snapshot.some(entry => entry.name === requirement.item && entry.count >= requirement.count) : snapshot.some(entry => requirement.acceptedItems.includes(entry.name));
+      });
+      if (donor) {
+        request.status = 'FLEET_DONOR_SELECTED';
+        request.updatedAt = new Date().toISOString();
+        request.trace.push({ at: request.updatedAt, step: 'fleet-transfer', detail: `${donor.id}` });
+        events?.publish?.('acquisition.fleet.transferred', { requestId: request.id, donorId: donor.id, requirement }, { source: 'acquisition' });
+        return { requestId: request.id, status: 'FLEET_DONOR_SELECTED', source: 'fleet', donorId: donor.id, requirement };
+      }
+    }
+
+    if (settings.allowCraft && requirement.type === 'ITEM') {
+      const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item: requirement.item, count: requirement.count }) : null;
+      if (recipe && recipe.missing?.length) {
+        const subrequests = recipe.missing.map(ingredient => ({ requesterBotId: target.id, type: 'ITEM', item: ingredient.name, count: ingredient.count, purpose: `craft ${requirement.item}`, priority: requirement.priority, consume: true }));
+        request.status = 'CRAFT_PLAN_CREATED';
+        request.updatedAt = new Date().toISOString();
+        request.trace.push({ at: request.updatedAt, step: 'craft-plan', detail: recipe.missing.map(item => `${item.name}:${item.count}`).join(', ') });
+        events?.publish?.('acquisition.craft.planned', { requestId: request.id, requirement, subrequests }, { source: 'acquisition' });
+        return { requestId: request.id, status: 'CRAFT_PLAN_CREATED', source: 'craft', requirement, subrequests };
+      }
+    }
+
+    if (settings.allowSmelt && requirement.type === 'ITEM') {
+      const formula = runtime.adapter?.smeltRequirements ? await runtime.adapter.smeltRequirements({ item: requirement.item, count: requirement.count }) : null;
+      if (formula) {
+        request.status = 'SMELT_PLAN_CREATED';
+        request.updatedAt = new Date().toISOString();
+        request.trace.push({ at: request.updatedAt, step: 'smelt-plan', detail: `${formula.input.name}:${formula.input.count}` });
+        events?.publish?.('acquisition.production.planned', { requestId: request.id, requirement, formula }, { source: 'acquisition' });
+        return { requestId: request.id, status: 'SMELT_PLAN_CREATED', source: 'smelt', requirement, formula };
+      }
+    }
+
+    if (settings.allowCollect && requirement.type === 'ITEM') {
+      const blocks = runtime.adapter?.findSourceBlocks ? await runtime.adapter.findSourceBlocks({ item: requirement.item }) : [];
+      if (blocks.length) {
+        request.status = 'COLLECTION_PLANNED';
+        request.updatedAt = new Date().toISOString();
+        request.trace.push({ at: request.updatedAt, step: 'collect-plan', detail: blocks.slice(0, 3).join(', ') });
+        events?.publish?.('acquisition.collection.planned', { requestId: request.id, requirement, blocks }, { source: 'acquisition' });
+        return { requestId: request.id, status: 'COLLECTION_PLANNED', source: 'collect', requirement, blocks };;
+      }
+    }
+
+    request.status = 'FAILED';
+    request.updatedAt = new Date().toISOString();
+    request.trace.push({ at: request.updatedAt, step: 'failed', detail: 'no viable source' });
+    events?.publish?.('acquisition.failed', { requestId: request.id, requirement }, { source: 'acquisition' });
+    throw new ConflictError(`Unable to satisfy acquisition requirement for '${requirement.type === 'ITEM' ? requirement.item : requirement.category}'`);
+  };
+
+  const status = () => ({
+    enabled: settings.enabled,
+    activeRequests: records.size,
+    maxDepth: settings.maxDepth,
+    maxSubtasks: settings.maxSubtasks,
+    maxAttempts: settings.maxAttempts,
+    maxDistance: settings.maxDistance,
+    storageFirst: settings.storageFirst,
+    allowFleet: settings.allowFleet,
+    allowCraft: settings.allowCraft,
+    allowSmelt: settings.allowSmelt,
+    allowCollect: settings.allowCollect,
+    allowPartial: settings.allowPartial,
+    toolPreservation: settings.toolPreservation,
+    requests: [...records.values()].slice(-20)
+  });
+
+  return Object.freeze({
+    settings: () => structuredClone(settings),
+    configure,
+    status,
+    resolve,
+    request: resolve,
+    list: () => [...records.values()],
+    clear: () => { records.clear(); return true; },
+    normalizeRequirement
+  });
+}
+
+function normalizeConfig(input = {}) {
+  const config = { ...DEFAULT_CONFIG, ...input };
+  if (typeof config.enabled !== 'boolean') throw new ValidationError('Acquisition enabled must be a boolean');
+  if (!Number.isInteger(config.maxDepth) || config.maxDepth < 1 || config.maxDepth > 32) throw new ValidationError('Acquisition maxDepth must be an integer between 1 and 32');
+  if (!Number.isInteger(config.maxSubtasks) || config.maxSubtasks < 1 || config.maxSubtasks > 256) throw new ValidationError('Acquisition maxSubtasks must be an integer between 1 and 256');
+  if (!Number.isInteger(config.maxAttempts) || config.maxAttempts < 1 || config.maxAttempts > 10) throw new ValidationError('Acquisition maxAttempts must be an integer between 1 and 10');
+  if (!Number.isInteger(config.maxDistance) || config.maxDistance < 16 || config.maxDistance > 100_000) throw new ValidationError('Acquisition maxDistance must be between 16 and 100000');
+  if (typeof config.storageFirst !== 'boolean') throw new ValidationError('Acquisition storageFirst must be a boolean');
+  if (typeof config.allowFleet !== 'boolean') throw new ValidationError('Acquisition allowFleet must be a boolean');
+  if (typeof config.allowCraft !== 'boolean') throw new ValidationError('Acquisition allowCraft must be a boolean');
+  if (typeof config.allowSmelt !== 'boolean') throw new ValidationError('Acquisition allowSmelt must be a boolean');
+  if (typeof config.allowCollect !== 'boolean') throw new ValidationError('Acquisition allowCollect must be a boolean');
+  if (typeof config.allowPartial !== 'boolean') throw new ValidationError('Acquisition allowPartial must be a boolean');
+  if (typeof config.toolPreservation !== 'boolean') throw new ValidationError('Acquisition toolPreservation must be a boolean');
+  return config;
+}
+
+function normalizeRequirement(requirement) {
+  if (!requirement || typeof requirement !== 'object' || Array.isArray(requirement)) throw new ValidationError('Acquisition requirement must be an object');
+  const normalized = { ...requirement };
+  normalized.requesterBotId = String(requirement.requesterBotId ?? 'unknown');
+  if (!['ITEM', 'TOOL'].includes(requirement.type)) throw new ValidationError("Acquisition requirement type must be 'ITEM' or 'TOOL'");
+  if (normalized.type === 'ITEM') {
+    if (typeof requirement.item !== 'string' || !requirement.item.trim()) throw new ValidationError('Acquisition item requirement requires a non-empty item name');
+    normalized.item = requirement.item.trim().toLowerCase();
+    normalized.count = Number(requirement.count ?? 1);
+    if (!Number.isInteger(normalized.count) || normalized.count < 1 || normalized.count > 10_000) throw new ValidationError('Acquisition item count must be a positive integer up to 10000');
+  }
+  if (normalized.type === 'TOOL') {
+    normalized.category = String(requirement.category ?? 'TOOL').toUpperCase();
+    normalized.acceptedItems = Array.isArray(requirement.acceptedItems) && requirement.acceptedItems.length ? requirement.acceptedItems.map(value => String(value).trim().toLowerCase()).filter(Boolean) : ['stone_pickaxe', 'iron_pickaxe', 'diamond_pickaxe', 'netherite_pickaxe'];
+    normalized.minimumTier = String(requirement.minimumTier ?? 'WOODEN').toUpperCase();
+    normalized.count = Number(requirement.count ?? 1);
+    if (!Number.isInteger(normalized.count) || normalized.count < 1) throw new ValidationError('Acquisition tool count must be a positive integer');
+  }
+  normalized.priority = Number(requirement.priority ?? 50);
+  normalized.consume = Boolean(requirement.consume ?? true);
+  normalized.purpose = String(requirement.purpose ?? 'general acquisition');
+  normalized.id = requirement.id ?? `${normalized.requesterBotId}:${normalized.type}:${normalized.type === 'ITEM' ? normalized.item : normalized.category}:${Date.now()}`;
+  return normalized;
+}
