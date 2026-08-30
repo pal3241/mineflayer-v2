@@ -22,10 +22,14 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
 
   const record = requirement => {
     const normalized = normalizeRequirement(requirement);
+    const candidateBots = bots?.list?.() ?? [];
+    const requester = candidateBots.find(bot => bot.id === normalized.requesterBotId) ?? null;
+    if (!requester) throw new ValidationError(`Acquisition requesterBotId '${normalized.requesterBotId}' was not found in the active bot fleet`);
     const id = normalized.id ?? randomUUID();
     const existing = records.get(id);
     const request = {
       id,
+      requesterBotId: normalized.requesterBotId,
       status: 'PENDING',
       attempts: 0,
       requirement: normalized,
@@ -98,12 +102,19 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
 
     if (settings.allowCraft && requirement.type === 'ITEM') {
       const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item: requirement.item, count: requirement.count }) : null;
-      if (recipe && recipe.missing?.length) {
+      if (recipe) {
+        if (recipe.missing?.length === 0) {
+          request.status = 'CRAFT_READY';
+          request.updatedAt = new Date().toISOString();
+          request.trace.push({ at: request.updatedAt, step: 'craft-ready', detail: `${requirement.item}:${requirement.count}` });
+          await events?.publish?.('acquisition.craft.ready', { requestId: request.id, requirement, recipe }, { source: 'acquisition' });
+          return { requestId: request.id, status: 'CRAFT_READY', source: 'craft', requirement, recipe };
+        }
         const subrequests = recipe.missing.map(ingredient => ({ requesterBotId: target.id, type: 'ITEM', item: ingredient.name, count: ingredient.count, purpose: `craft ${requirement.item}`, priority: requirement.priority, consume: true }));
         request.status = 'CRAFT_PLAN_CREATED';
         request.updatedAt = new Date().toISOString();
         request.trace.push({ at: request.updatedAt, step: 'craft-plan', detail: recipe.missing.map(item => `${item.name}:${item.count}`).join(', ') });
-        events?.publish?.('acquisition.craft.planned', { requestId: request.id, requirement, subrequests }, { source: 'acquisition' });
+        await events?.publish?.('acquisition.craft.planned', { requestId: request.id, requirement, subrequests }, { source: 'acquisition' });
         return { requestId: request.id, status: 'CRAFT_PLAN_CREATED', source: 'craft', requirement, subrequests };
       }
     }
@@ -186,7 +197,8 @@ function normalizeConfig(input = {}) {
 function normalizeRequirement(requirement) {
   if (!requirement || typeof requirement !== 'object' || Array.isArray(requirement)) throw new ValidationError('Acquisition requirement must be an object');
   const normalized = { ...requirement };
-  normalized.requesterBotId = String(requirement.requesterBotId ?? 'unknown');
+  normalized.requesterBotId = String(requirement.requesterBotId ?? '').trim();
+  if (!normalized.requesterBotId) throw new ValidationError('Acquisition requirement requires requesterBotId');
   if (!['ITEM', 'TOOL'].includes(requirement.type)) throw new ValidationError("Acquisition requirement type must be 'ITEM' or 'TOOL'");
   if (normalized.type === 'ITEM') {
     if (typeof requirement.item !== 'string' || !requirement.item.trim()) throw new ValidationError('Acquisition item requirement requires a non-empty item name');

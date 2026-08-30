@@ -127,10 +127,16 @@ export class Application {
   }
   async resetRuntimeSettings() { const defaults = this.runtimeDefaults.llm; const openRouterKeys = [...new Set(defaults.openRouterApiKeys ?? [])]; const nvidiaKeys = [...new Set(defaults.nvidiaApiKeys ?? [])]; const llm = this.llm.configure({ provider: defaults.provider ?? 'none', openRouterEndpoint: defaults.openRouterEndpoint ?? 'https://openrouter.ai/api/v1', openRouterModel: defaults.openRouterModel ?? 'openrouter/auto', nvidiaEndpoint: defaults.nvidiaEndpoint ?? 'https://integrate.api.nvidia.com/v1', nvidiaModel: defaults.nvidiaModel ?? 'meta/llama-3.1-8b-instruct', ...(openRouterKeys.length ? { openRouterApiKeys: openRouterKeys } : { clearOpenRouterKeys: true }), ...(nvidiaKeys.length ? { nvidiaApiKeys: nvidiaKeys } : { clearNvidiaKeys: true }) }); const log = this.logger.setLevel(this.runtimeDefaults.logLevel); const autonomy = this.autonomy.configure({ enabled: this.runtimeDefaults.autonomy.enabled, intervalMs: this.runtimeDefaults.autonomy.intervalMs, maxActionsPerHour: this.runtimeDefaults.autonomy.maxActionsPerHour }); const acquisition = await this.configureAcquisition(this.runtimeDefaults.acquisition); const recovery = await this.configureRecovery(this.runtimeDefaults.recovery); const memory = await this.configureMemory(this.runtimeDefaults.memory); this.logger.info('settings.runtime.reset', { provider: llm.provider, logLevel: log.level, autonomy: autonomy.status, acquisition: acquisition, recovery: recovery, memory: memory.settings }); return { llm, log, autonomy, acquisition, recovery, memory, preserved: ['bot profiles', 'admins', 'memory records', 'database', 'API token'] }; }
   async configureAcquisition(input) {
-    const next = this.acquisition.settings ? this.acquisition.settings() : (this.config.acquisition ?? { enabled: true, maxDepth: 8, maxSubtasks: 32, maxAttempts: 3, maxDistance: 2000, storageFirst: true, allowFleet: true, allowCraft: true, allowSmelt: true, allowCollect: true, allowPartial: false, toolPreservation: true });
-    const normalized = createAcquisitionService({ bots: this.bots, logistics: this.logistics, events: this.events, logger: this.logger, config: input ?? next }).settings();
+    const next = this.acquisition?.settings ? this.acquisition.settings() : (this.config.acquisition ?? { enabled: true, maxDepth: 8, maxSubtasks: 32, maxAttempts: 3, maxDistance: 2000, storageFirst: true, allowFleet: true, allowCraft: true, allowSmelt: true, allowCollect: true, allowPartial: false, toolPreservation: true });
+    const merged = { ...next, ...(input ?? {}) };
+    if (!this.acquisition) {
+      this.acquisition = createAcquisitionService({ bots: this.bots, logistics: this.logistics, events: this.events, logger: this.logger, config: merged });
+      this.container.register('acquisition', this.acquisition, { replace: true });
+      this.config.acquisition = this.acquisition.settings();
+      return this.config.acquisition;
+    }
+    const normalized = this.acquisition.configure(merged);
     this.config.acquisition = normalized;
-    this.acquisition = createAcquisitionService({ bots: this.bots, logistics: this.logistics, events: this.events, logger: this.logger, config: normalized });
     this.container.register('acquisition', this.acquisition, { replace: true });
     return normalized;
   }

@@ -11,7 +11,7 @@ export class FleetCoordinator {
   #busy = new Map();
   #operationTails = new Map();
   #operationWaiting = new Map();
-  constructor({ gateway, bots, goals, memory, semanticMemory, discovery, logistics, ml, hive, events, logger, maxQueuePerBot }) { if (!Number.isInteger(maxQueuePerBot) || maxQueuePerBot < 1) throw new ValidationError('Coordinator queue limit must be a positive integer'); this.gateway = gateway; this.bots = bots; this.goals = goals; this.memory = memory; this.semanticMemory = semanticMemory; this.discovery = discovery; this.logistics = logistics; this.ml = ml; this.hive = hive; this.events = events; this.logger = logger; this.maxQueuePerBot = maxQueuePerBot; }
+  constructor({ gateway, bots, goals, memory, semanticMemory, discovery, logistics, acquisition, ml, hive, events, logger, maxQueuePerBot }) { if (!Number.isInteger(maxQueuePerBot) || maxQueuePerBot < 1) throw new ValidationError('Coordinator queue limit must be a positive integer'); this.gateway = gateway; this.bots = bots; this.goals = goals; this.memory = memory; this.semanticMemory = semanticMemory; this.discovery = discovery; this.logistics = logistics; this.acquisition = acquisition ?? null; this.ml = ml; this.hive = hive; this.events = events; this.logger = logger; this.maxQueuePerBot = maxQueuePerBot; }
   status() { const depths = [...this.#operationWaiting.values()]; const maximumDepth = Math.max(0, ...depths); return { llm: this.gateway.status(), bots: this.bots.list().length, coordination: 'semantic-ml-hivemind-resource-planning', queuedOperations: depths.reduce((sum, count) => sum + count, 0), queues: Object.fromEntries(this.#operationWaiting), maxQueuePerBot: this.maxQueuePerBot, maximumDepth, saturation: maximumDepth / this.maxQueuePerBot }; }
   fleetView() {
     const bots = this.bots.list();
@@ -82,6 +82,18 @@ export class FleetCoordinator {
     if (!analysis.diggable) throw new ConflictError(`Block '${block}' is not diggable`);
     if (analysis.handMineable || !analysis.requiredTools.length) { visiting.delete(key); return { block, required: false, source: 'hand' }; }
     const existing = findInventoryItem(target.adapter.snapshot(), analysis.requiredTools); if (existing) { visiting.delete(key); return { block, required: true, tool: existing, source: 'inventory' }; }
+    if (this.acquisition) {
+      try {
+        const plan = await this.acquisition.request({ requesterBotId: botId, type: 'TOOL', category: 'TOOL', acceptedItems: analysis.requiredTools, minimumTier: 'WOODEN', count: 1, purpose: `prepare tool for ${block}` });
+        if (plan.status === 'SATISFIED' || plan.status === 'CRAFT_READY') {
+          const tool = findInventoryItem(target.adapter.snapshot(), analysis.requiredTools) ?? analysis.requiredTools[0];
+          visiting.delete(key);
+          return { block, required: true, tool, source: plan.status === 'SATISFIED' ? 'acquisition-inventory' : 'acquisition-craft', plan };
+        }
+      } catch (error) {
+        this.logger?.warn?.('coordinator.acquisition.tool-fallback', { botId, block, error: error.message });
+      }
+    }
     const borrowed = await this.#borrowNearest(botId, analysis.requiredTools, 1);
     if (borrowed) { visiting.delete(key); return { block, required: true, tool: borrowed.item, source: 'nearest-bot', donor: borrowed.donor, distance: borrowed.distance }; }
     let lastError;
@@ -94,8 +106,23 @@ export class FleetCoordinator {
   async #prepareCraft(botId, item, count, visiting) {
     const target = this.bots.get(botId); const available = itemCount(target.adapter.snapshot(), item); if (available >= count) return { item, count, source: 'inventory' };
     try { await target.adapter.craftItem({ item, count }); return { item, count, source: 'existing-materials' }; } catch {}
-    const plan = await target.adapter.craftRequirements({ item, count }); const acquisitions = [];
-    for (const missing of plan.missing) acquisitions.push(await this.#acquireItem(botId, missing.name, missing.count, visiting));
+    const plan = await target.adapter.craftRequirements({ item, count });
+    if (plan && Array.isArray(plan.missing) && plan.missing.length === 0) {
+      return { item, count, source: 'craft-ready', steps: plan.steps ?? [], recipe: plan };
+    }
+    const acquisitions = [];
+    for (const missing of plan.missing) {
+      if (this.acquisition) {
+        try {
+          const result = await this.acquisition.request({ requesterBotId: botId, type: 'ITEM', item: missing.name, count: missing.count, purpose: `craft ${item}` });
+          acquisitions.push({ item: missing.name, count: missing.count, acquisitionResult: result });
+          continue;
+        } catch (error) {
+          this.logger?.warn?.('coordinator.acquisition.craft-fallback', { botId, item, missing: missing.name, error: error.message });
+        }
+      }
+      acquisitions.push(await this.#acquireItem(botId, missing.name, missing.count, visiting));
+    }
     return { item, count, source: 'prepared-materials', missing: plan.missing, acquisitions, steps: plan.steps };
   }
   async #prepareSmelt(botId, item, count, visiting) {
