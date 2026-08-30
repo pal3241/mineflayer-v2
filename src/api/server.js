@@ -101,6 +101,7 @@ export class ApiServer {
         if (parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'help' && parts[3] === 'sessions' && parts[4]) {
           if (req.method === 'GET' && parts.length === 5) return send(200, { data: await this.application.help.get(parts[4]) });
           if (req.method === 'POST' && parts[5] === 'collected') return send(200, { data: await this.application.help.recordCollected({ sessionId: parts[4], ...(await body(req)) }) });
+          if (req.method === 'POST' && parts[5] === 'execute') return send(200, { data: await this.application.help.executeShare({ sessionId: parts[4], ...(await body(req)) }) });
           if (req.method === 'POST' && parts[5] === 'handoff') return send(200, { data: await this.application.help.handoff({ sessionId: parts[4], ...(await body(req)) }) });
           if (req.method === 'POST' && parts[5] === 'recovery') return send(200, { data: await this.application.help.reconcileRecovery({ sessionId: parts[4], ...(await body(req)) }) });
         }
