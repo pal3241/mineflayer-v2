@@ -100,7 +100,13 @@ export class MineflayerAdapter extends EventEmitter {
   }
   async findSourceBlocks({ item }) {
     const bot = this.#ready('resource-analysis'); const definition = bot.registry?.itemsByName?.[item]; if (!definition) return [];
-    return (bot.registry.blocksArray ?? Object.values(bot.registry.blocksByName ?? {})).filter(block => block?.diggable !== false && block.drops?.includes(definition.id)).sort((left, right) => Number(right.name === item) - Number(left.name === item)).map(block => block.name);
+    const itemId = Number(definition.id);
+    const candidates = (bot.registry.blocksArray ?? Object.values(bot.registry.blocksByName ?? {})).filter(block => {
+      if (!block || block.diggable === false) return false;
+      const dropIds = Array.isArray(block.drops) ? block.drops : [];
+      return dropIds.some(dropId => Number(dropId) === itemId || bot.registry.items?.[Number(dropId)]?.name === item || block.name === item);
+    });
+    return [...new Set(candidates.map(block => block.name))].sort((left, right) => left.localeCompare(right));
   }
   async survey({ maxDistance }) {
     const bot = this.#ready('survey'); const radius = boundedDistance(maxDistance, 8, 128, 'Survey distance');
@@ -145,7 +151,8 @@ export class MineflayerAdapter extends EventEmitter {
     const bot = this.#ready('collection'); if (!bot.collectBlock) throw new ValidationError('CollectBlock plugin is unavailable');
     const definition = bot.registry?.blocksByName?.[block]; if (!definition) throw new ValidationError(`Unknown block '${block}'`);
     const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1));
-    const radius = boundedDistance(maxDistance, 1, 128, 'Collection distance'); const positions = bot.findBlocks({ matching: definition.id, maxDistance: radius, count: amount });
+    const radius = boundedDistance(maxDistance, 1, 128, 'Collection distance');
+    const positions = bot.findBlocks({ matching: candidate => candidate && candidate.name === block, maxDistance: radius, count: amount });
     const blocks = positions.map(position => bot.blockAt(position)).filter(Boolean); if (!blocks.length) throw new ValidationError(`No '${block}' found within ${maxDistance} blocks`);
     const cleanup = this.#abort(signal, () => { void bot.collectBlock.cancelTask(); });
     try { await bot.collectBlock.collect(blocks); return { block, requested: amount, collectedTargets: blocks.length, inventory: this.snapshot().inventorySummary }; } finally { cleanup(); }
@@ -255,9 +262,16 @@ export class MineflayerAdapter extends EventEmitter {
 
   snapshot() {
     const bot = this.client;
+    const inventory = (bot?.inventory?.items?.() ?? []).reduce((result, item) => {
+      if (!item || !item.name || Number(item.count) <= 0) return result;
+      const name = String(item.name).toLowerCase();
+      const existing = result.get(name);
+      result.set(name, { name, count: (existing?.count ?? 0) + Number(item.count) });
+      return result;
+    }, new Map());
     return { connection: this.status, position: bot?.entity?.position ? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z } : null,
       health: bot?.health ?? null, food: bot?.food ?? null, alive: this.alive, dimension: bot?.game?.dimension ?? null,
-      inventorySummary: bot?.inventory?.items?.().map(item => ({ name: item.name, count: item.count })) ?? [], plugins: { ...this.pluginStatus },
+      inventorySummary: [...inventory.values()], plugins: { ...this.pluginStatus },
       camera: { active: Boolean(bot?.viewer), port: this.viewerPort ?? null, mode: this.viewerMode ?? null, version: bot?.version ?? null, renderVersion: this.viewerRenderVersion ?? null, versionSupported: this.viewerVersionSupported ?? null }, combat: { ...this.combatState }, timestamp: new Date().toISOString() };
   }
 

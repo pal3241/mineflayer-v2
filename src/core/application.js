@@ -132,11 +132,13 @@ export class Application {
     if (!this.acquisition) {
       this.acquisition = createAcquisitionService({ bots: this.bots, logistics: this.logistics, events: this.events, logger: this.logger, config: merged });
       this.container.register('acquisition', this.acquisition, { replace: true });
+      if (this.coordinator) this.coordinator.acquisition = this.acquisition;
       this.config.acquisition = this.acquisition.settings();
       return this.config.acquisition;
     }
     const normalized = this.acquisition.configure(merged);
     this.config.acquisition = normalized;
+    if (this.coordinator) this.coordinator.acquisition = this.acquisition;
     this.container.register('acquisition', this.acquisition, { replace: true });
     return normalized;
   }

@@ -25,8 +25,11 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     const candidateBots = bots?.list?.() ?? [];
     const requester = candidateBots.find(bot => bot.id === normalized.requesterBotId) ?? null;
     if (!requester) throw new ValidationError(`Acquisition requesterBotId '${normalized.requesterBotId}' was not found in the active bot fleet`);
-    const id = normalized.id ?? randomUUID();
+    if (normalized.type === 'TOOL' && normalized.count !== 1) throw new ValidationError('Tool acquisition requires an exact count of 1');
+    if (normalized.count > settings.maxSubtasks) throw new ValidationError(`Acquisition count ${normalized.count} exceeds the runtime maxSubtasks limit of ${settings.maxSubtasks}`);
+    const id = normalized.id;
     const existing = records.get(id);
+    if (existing) return existing;
     const request = {
       id,
       requesterBotId: normalized.requesterBotId,
@@ -53,7 +56,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     if (!settings.enabled) throw new ConflictError('Acquisition subsystem is disabled');
     const request = record(input);
     const candidateBots = bots?.list?.() ?? [];
-    const target = candidateBots.find(bot => bot.id === request.requirement.requesterBotId) ?? candidateBots[0];
+    const target = candidateBots.find(bot => bot.id === request.requirement.requesterBotId);
     if (!target) throw new ValidationError('Acquisition requires at least one bot runtime');
     const runtime = bots.get?.(target.id) ?? target;
     const requirement = request.requirement;
@@ -63,7 +66,10 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     request.trace.push({ at: request.updatedAt, step: 'resolve-start', detail: requirement.type === 'TOOL' ? `tool ${requirement.category}` : requirement.item });
 
     const inventory = runtime.adapter?.snapshot?.().inventorySummary ?? [];
-    const hasExact = requirement.type === 'ITEM' ? inventory.some(entry => entry.name === requirement.item && entry.count >= requirement.count) : inventory.some(entry => requirement.acceptedItems.includes(entry.name));
+    const inventoryTotals = aggregateInventory(inventory);
+    const hasExact = requirement.type === 'ITEM'
+      ? (inventoryTotals[requirement.item] ?? 0) >= requirement.count
+      : requirement.acceptedItems.some(name => (inventoryTotals[name] ?? 0) > 0);
     if (hasExact) {
       request.status = 'SATISFIED';
       request.updatedAt = new Date().toISOString();
@@ -74,9 +80,16 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
 
     if (settings.storageFirst && logistics?.stock) {
       const stock = await logistics.stock({ worldKey: `${String(runtime.options?.host ?? 'localhost').toLowerCase()}:${Number(runtime.options?.port ?? 25565)}`, dimension: runtime.adapter?.snapshot?.().dimension ?? 'overworld' });
-      const match = stock.find(storage => storage.availableInventory?.some(entry => requirement.type === 'ITEM' ? entry.name === requirement.item && entry.available >= requirement.count : requirement.acceptedItems.includes(entry.name)));
+      const match = stock.find(storage => {
+        const totals = aggregateInventory(storage.availableInventory ?? []);
+        return requirement.type === 'ITEM'
+          ? (totals[requirement.item] ?? 0) >= requirement.count
+          : requirement.acceptedItems.some(name => (totals[name] ?? 0) > 0);
+      });
       if (match) {
-        const item = requirement.type === 'ITEM' ? requirement.item : requirement.acceptedItems.find(name => match.availableInventory.some(entry => entry.name === name));
+        const item = requirement.type === 'ITEM'
+          ? requirement.item
+          : requirement.acceptedItems.find(name => (aggregateInventory(match.availableInventory ?? [])[name] ?? 0) > 0) ?? requirement.acceptedItems[0];
         request.status = 'STORAGE_FOUND';
         request.updatedAt = new Date().toISOString();
         request.trace.push({ at: request.updatedAt, step: 'storage-resolved', detail: `${match.name}:${item}` });
@@ -89,7 +102,10 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
       const donors = candidateBots.filter(bot => bot.id !== target.id && bot.status === 'READY');
       const donor = donors.find(bot => {
         const snapshot = bot.runtime?.inventorySummary ?? [];
-        return requirement.type === 'ITEM' ? snapshot.some(entry => entry.name === requirement.item && entry.count >= requirement.count) : snapshot.some(entry => requirement.acceptedItems.includes(entry.name));
+        const totals = aggregateInventory(snapshot);
+        return requirement.type === 'ITEM'
+          ? (totals[requirement.item] ?? 0) >= requirement.count
+          : requirement.acceptedItems.some(name => (totals[name] ?? 0) > 0);
       });
       if (donor) {
         request.status = 'FLEET_DONOR_SELECTED';
@@ -177,6 +193,16 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
   });
 }
 
+function aggregateInventory(items = []) {
+  return (Array.isArray(items) ? items : []).reduce((totals, entry) => {
+    if (!entry || !entry.name) return totals;
+    const name = String(entry.name).trim().toLowerCase();
+    if (!name) return totals;
+    totals[name] = (totals[name] ?? 0) + Number(entry.count ?? entry.available ?? 0);
+    return totals;
+  }, {});
+}
+
 function normalizeConfig(input = {}) {
   const config = { ...DEFAULT_CONFIG, ...input };
   if (typeof config.enabled !== 'boolean') throw new ValidationError('Acquisition enabled must be a boolean');
@@ -216,6 +242,7 @@ function normalizeRequirement(requirement) {
   normalized.priority = Number(requirement.priority ?? 50);
   normalized.consume = Boolean(requirement.consume ?? true);
   normalized.purpose = String(requirement.purpose ?? 'general acquisition');
-  normalized.id = requirement.id ?? `${normalized.requesterBotId}:${normalized.type}:${normalized.type === 'ITEM' ? normalized.item : normalized.category}:${Date.now()}`;
+  if (normalized.type === 'TOOL' && (!Number.isInteger(normalized.count) || normalized.count !== 1)) throw new ValidationError('Tool acquisition requires an exact count of 1');
+  normalized.id = requirement.id ?? `${normalized.requesterBotId}:${normalized.type}:${normalized.type === 'ITEM' ? normalized.item : normalized.category}:${randomUUID()}`;
   return normalized;
 }
