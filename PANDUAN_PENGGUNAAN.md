@@ -425,7 +425,7 @@ Invoke-RestMethod -Method Post `
   -Body '{"position":{"x":10,"y":64,"z":20}}'
 ```
 
-Action lain yang tersedia adalah `equip`, `unequip`, `use_item`, `interact_entity`, `interact_block`, `shear`, `milk`, `sleep`, `wake`, `close_door`, `open_trapdoor`, dan `close_trapdoor`. Semua action masuk Goal/TaskExecutor dan menerima cancellation dari task context.
+Action lain yang tersedia adalah `equip`, `unequip`, `use_item`, `interact_entity`, `interact_block`, `shear`, `milk`, `sleep`, `wake`, `close_door`, `open_trapdoor`, dan `close_trapdoor`. Semua action masuk Goal/TaskExecutor dan menerima cancellation dari task context. Navigation otomatis membuka wooden/copper door yang menghalangi rute; iron door, iron trapdoor, dan trapdoor yang bukan door tidak akan diaktifkan sebagai door.
 
 Policy runtime dapat diubah melalui `PATCH /api/v1/settings/survival`. Nilai aktif juga tersedia pada `GET /api/v1/settings` dan snapshot dashboard.
 

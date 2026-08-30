@@ -157,6 +157,20 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       if (storageResult) return storageResult;
     }
 
+    if (requirement.type === 'ITEM') {
+      const special = [...specialSources.values()].find(source => source.matches(requirement.item));
+      if (special) {
+        const declaredDependencies = special.dependencies({ item: requirement.item, count: shortage });
+        if (!Array.isArray(declaredDependencies)) throw new ValidationError(`Acquisition special source '${special.name}' dependencies must return an array`);
+        const dependencies = declaredDependencies.map(dependency => normalizeRequirement({ ...dependency, requesterBotId: target.id, purpose: `special source ${special.name} for ${requirement.item}`, priority: requirement.priority }));
+        request.status = 'SPECIAL_SOURCE_PLANNED';
+        request.updatedAt = new Date().toISOString();
+        request.trace.push({ at: request.updatedAt, step: 'special-source-plan', detail: `${special.name}:${requirement.item}:${shortage}` });
+        await events?.publish?.('acquisition.special.planned', { requestId: request.id, requirement, source: special.name, dependencies }, { source: 'acquisition' });
+        return { requestId: request.id, status: 'SPECIAL_SOURCE_PLANNED', source: 'special', specialSource: special.name, item: requirement.item, count: shortage, requirement, dependencies };
+      }
+    }
+
     if (settings.allowCraft && requirement.type === 'ITEM') {
       const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item: requirement.item, count: shortage }) : null;
       if (recipe?.craftable === true) {
@@ -201,20 +215,6 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
         request.trace.push({ at: request.updatedAt, step: 'smelt-plan', detail: `${formula.input.name}:${formula.input.count}` });
         events?.publish?.('acquisition.production.planned', { requestId: request.id, requirement, formula }, { source: 'acquisition' });
         return { requestId: request.id, status: 'SMELT_PLAN_CREATED', source: 'smelt', count: shortage, requirement, formula };
-      }
-    }
-
-    if (requirement.type === 'ITEM') {
-      const special = [...specialSources.values()].find(source => source.matches(requirement.item));
-      if (special) {
-        const declaredDependencies = special.dependencies({ item: requirement.item, count: shortage });
-        if (!Array.isArray(declaredDependencies)) throw new ValidationError(`Acquisition special source '${special.name}' dependencies must return an array`);
-        const dependencies = declaredDependencies.map(dependency => normalizeRequirement({ ...dependency, requesterBotId: target.id, purpose: `special source ${special.name} for ${requirement.item}`, priority: requirement.priority }));
-        request.status = 'SPECIAL_SOURCE_PLANNED';
-        request.updatedAt = new Date().toISOString();
-        request.trace.push({ at: request.updatedAt, step: 'special-source-plan', detail: `${special.name}:${requirement.item}:${shortage}` });
-        await events?.publish?.('acquisition.special.planned', { requestId: request.id, requirement, source: special.name, dependencies }, { source: 'acquisition' });
-        return { requestId: request.id, status: 'SPECIAL_SOURCE_PLANNED', source: 'special', specialSource: special.name, item: requirement.item, count: shortage, requirement, dependencies };
       }
     }
 

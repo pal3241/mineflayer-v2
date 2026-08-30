@@ -91,10 +91,10 @@ test('Mineflayer survey detects supported markers and removes duplicate position
   assert.equal(result.maxDistance, 128); assert.deepEqual(result.discoveries.map(discovery => discovery.type), ['village', 'stronghold']); assert.deepEqual(result.discoveries[0].position, { x: 8, y: 65, z: 4 }); await adapter.disconnect();
 });
 
-test('movement policy disables scaffolding, towers, and risky shortcuts', async () => {
-  class Movements { constructor() { this.allow1by1towers = true; this.allowParkour = true; this.allowFreeMotion = true; this.scafoldingBlocks = [1, 2]; this.placeCost = 1; this.maxDropDown = 4; } }
-  class MovementClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.pathfinder = { setMovements: movements => { this.movements = movements; }, setGoal() {} }; } clearControlStates() {} quit() { this.emit('end'); } }
-  const client = new MovementClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { Movements }; client.emit('spawn'); await new Promise(resolve => setImmediate(resolve)); assert.equal(client.movements.allow1by1towers, false); assert.equal(client.movements.allowParkour, false); assert.deepEqual(client.movements.scafoldingBlocks, []); assert.equal(client.movements.placeCost, Number.POSITIVE_INFINITY); assert.equal(client.movements.maxDropDown, 3); await adapter.disconnect();
+test('movement policy disables risky shortcuts and enables safe wooden door navigation', async () => {
+  class Movements { constructor() { this.allow1by1towers = true; this.allowParkour = true; this.allowFreeMotion = true; this.scafoldingBlocks = [1, 2]; this.placeCost = 1; this.maxDropDown = 4; this.canOpenDoors = false; this.openable = new Set([99]); } }
+  class MovementClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.registry = { blocksArray: [{ id: 4, name: 'oak_door' }, { id: 5, name: 'oak_trapdoor' }, { id: 6, name: 'iron_door' }] }; this.pathfinder = { setMovements: movements => { this.movements = movements; }, setGoal() {} }; } clearControlStates() {} quit() { this.emit('end'); } }
+  const client = new MovementClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { Movements }; client.emit('spawn'); await new Promise(resolve => setImmediate(resolve)); assert.equal(client.movements.allow1by1towers, false); assert.equal(client.movements.allowParkour, false); assert.deepEqual(client.movements.scafoldingBlocks, []); assert.equal(client.movements.placeCost, Number.POSITIVE_INFINITY); assert.equal(client.movements.maxDropDown, 3); assert.equal(client.movements.canOpenDoors, true); assert.equal(client.movements.openable.has(4), true); assert.equal(client.movements.openable.has(5), false); assert.equal(client.movements.openable.has(6), false); assert.equal(client.movements.openable.has(99), true); await adapter.disconnect();
 });
 
 test('movement setup failures become observable plugin errors', async () => {
@@ -159,6 +159,12 @@ test('crafting builds and safely places a required crafting table', async () => 
   }
   const client = new TableCraftClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); client.emit('spawn');
   const result = await adapter.craftItem({ item: 'wooden_pickaxe' }); assert.equal(result.count, 1); assert.equal(client.placed, true); await adapter.disconnect();
+});
+
+test('navigation accepts a door activation step and continues to its destination', async () => {
+  class GoalNear { constructor(x, y, z, range) { Object.assign(this, { x, y, z, range }); } }
+  class DoorClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.pathfinder = { goto: async goal => { this.emit('path_update', { path: [{ toPlace: [{ x: 1, y: 64, z: 0, useOne: true }] }] }); this.entity.position = { x: goal.x, y: goal.y, z: goal.z }; this.emit('move'); }, setGoal() {} }; } clearControlStates() {} quit() { this.emit('end'); } }
+  const client = new DoorClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear } }; client.emit('spawn'); const result = await adapter.navigate({ x: 2, y: 64, z: 0, range: 1 }); assert.deepEqual(result.position, { x: 2, y: 64, z: 0 }); await adapter.disconnect();
 });
 
 test('crafting executes every registry wood and stone tool material recipe', async () => {

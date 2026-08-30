@@ -12,9 +12,8 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
     if (!policy.enabled) throw new ValidationError(`Survival capability '${method}' is disabled by policy`);
     const operation = runtime.adapter?.[method];
     if (typeof operation !== 'function') throw new ValidationError(`Survival capability '${method}' is unavailable for bot '${runtime.bot.id}'`);
-    const result = await operation.call(runtime.adapter, input, context);
-    await publish(event, result, runtime);
-    return result;
+    try { const result = await operation.call(runtime.adapter, input, context); await publish(event, result, runtime); return result; }
+    catch (error) { await publish(survivalFailureEvent(event), { capability: method, code: error.code ?? 'CAPABILITY_UNAVAILABLE', error: error.message }, runtime); throw error; }
   };
 
   acquisition.registerSpecialSource({
@@ -52,7 +51,7 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
     interactEntity: (runtime, input, context) => invoke(runtime, 'interactEntity', input, context, 'minecraft.entity.interaction'),
     interactBlock: (runtime, input, context) => invoke(runtime, 'interactBlock', { ...input, cooldownMs: policy.interactionCooldownMs }, context, 'minecraft.block.interaction'),
     inspectArmor: (runtime, input, context) => invoke(runtime, 'inspectArmor', input, context, 'armor.inspected'),
-    equipArmor: (runtime, input, context) => invoke(runtime, 'equipArmor', input, context, 'armor.equipped'),
+    equipArmor: (runtime, input, context) => invoke(runtime, 'equipArmor', { ...armorPolicy(policy), ...input }, context, 'armor.equipped'),
     autoEquipArmor: (runtime, input, context) => invoke(runtime, 'autoEquipArmor', { ...armorPolicy(policy), ...input }, context, 'armor.equipped'),
     findSheep: (runtime, input, context) => invoke(runtime, 'findSheep', { maxDistance: policy.entitySearchDistance, ...input }, context, 'sheep.found'),
     shearSheep: (runtime, input, context) => invoke(runtime, 'shearSheep', input, context, 'sheep.sheared'),
@@ -81,3 +80,4 @@ export function normalizeSurvivalPolicy(input) {
 }
 
 function armorPolicy(policy) { return { preserveDurability: true, minimumDurability: policy.minimumDurabilityPercent, preferProtection: policy.preferProtection, preferDurability: policy.preferDurability, allowBindingCurse: policy.allowBindingCurse }; }
+function survivalFailureEvent(event) { if (event.startsWith('sleep.')) return 'sleep.failed'; if (event.startsWith('door.')) return 'door.interaction.failed'; if (event.startsWith('trapdoor.')) return 'trapdoor.interaction.failed'; return `${event}.failed`; }
