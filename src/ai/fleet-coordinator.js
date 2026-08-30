@@ -82,6 +82,8 @@ export class FleetCoordinator {
     if (!analysis.diggable) throw new ConflictError(`Block '${block}' is not diggable`);
     if (analysis.handMineable || !analysis.requiredTools.length) { visiting.delete(key); return { block, required: false, source: 'hand' }; }
     const existing = findInventoryItem(target.adapter.snapshot(), analysis.requiredTools); if (existing) { visiting.delete(key); return { block, required: true, tool: existing, source: 'inventory' }; }
+    const borrowed = await this.#borrowNearest(botId, analysis.requiredTools, 1);
+    if (borrowed) { visiting.delete(key); return { block, required: true, tool: borrowed.item, source: 'nearest-bot', donor: borrowed.donor, distance: borrowed.distance }; }
     if (this.acquisition) {
       try {
         const plan = await this.acquisition.acquire({ requesterBotId: botId, type: 'TOOL', category: 'TOOL', acceptedItems: analysis.requiredTools, minimumTier: 'WOODEN', count: 1, purpose: `prepare tool for ${block}` });
@@ -94,8 +96,6 @@ export class FleetCoordinator {
         this.logger?.warn?.('coordinator.acquisition.tool-fallback', { botId, block, error: error.message });
       }
     }
-    const borrowed = await this.#borrowNearest(botId, analysis.requiredTools, 1);
-    if (borrowed) { visiting.delete(key); return { block, required: true, tool: borrowed.item, source: 'nearest-bot', donor: borrowed.donor, distance: borrowed.distance }; }
     let lastError;
     for (const tool of [...analysis.requiredTools].sort(toolOrder)) {
       try { const preparation = await this.#prepareCraft(botId, tool, 1, visiting); await target.adapter.craftItem({ item: tool, count: 1 }); if (findInventoryItem(target.adapter.snapshot(), [tool])) { visiting.delete(key); return { block, required: true, tool, source: 'crafted', preparation }; } }

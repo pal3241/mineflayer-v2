@@ -15,6 +15,7 @@ Folder ini menyimpan satu catatan untuk setiap release atau update fitur MineHiv
 - [`0.7.1 — Intelligent Death Recovery`](0.7.1-intelligent-death-recovery.md)
 - [`0.7.2 — Universal Automatic Item Acquisition`](0.7.2-universal-automatic-item-acquisition.md)
 - [`0.7.3 Phase 1 — Helping: Survival Capability Completion`](0.7.3-helping-phase-1-survival-capability-completion.md)
+- [`0.7.3 Phase 2 — Helping: Output Ownership and Resource Handoff`](0.7.3-helping-phase-2-output-ownership.md)
 
 ## Daftar update fitur
 

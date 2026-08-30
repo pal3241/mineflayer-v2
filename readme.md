@@ -33,6 +33,7 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 | [0.7.1](updates/0.7.1-intelligent-death-recovery.md) | Intelligent Death Recovery | Implemented |
 | [0.7.2](updates/0.7.2-universal-automatic-item-acquisition.md) | Universal Automatic Item Acquisition | Implemented |
 | [0.7.3 Phase 1](updates/0.7.3-helping-phase-1-survival-capability-completion.md) | Helping — Survival Capability Completion | Implemented |
+| [0.7.3 Phase 2](updates/0.7.3-helping-phase-2-output-ownership.md) | Helping — Output Ownership and Resource Handoff | Implemented |
 | 0.8.0 | Territory Foundation | Planned |
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Setiap release baru memiliki satu catatan tersendiri di folder [`updates/`](updates/README.md).

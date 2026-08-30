@@ -37,6 +37,8 @@ import { createStructureObserver } from '../world/structure-observer.js';
 import { createLogisticsService } from '../logistics/logistics-service.js';
 import { createAcquisitionService } from '../logistics/acquisition/acquisition-service.js';
 import { createRecoveryJobService } from '../logistics/recovery/index.js';
+import { createFleetTransferService } from '../logistics/fleet-transfer-service.js';
+import { createHelpService } from '../help/index.js';
 import { createSurvivalService } from '../survival/index.js';
 import { createTaskReporter } from '../tasks/task-reporter.js';
 
@@ -63,7 +65,9 @@ export class Application {
     this.ml = createAdaptiveModel({ outcomeRepository: repository('ml-outcomes'), modelRepository: repository('ml-models'), events: this.events, minimumSamples: config.ml.minimumSamples });
     this.hive = createHiveService({ repositories: { messages: repository('hive-messages'), state: repository('hive-state'), locks: repository('hive-locks'), decisions: repository('hive-decisions') }, events: this.events, ml: this.ml, heartbeatTimeoutMs: config.hive.heartbeatTimeoutMs });
     this.logistics = createLogisticsService({ repositories: { storages: repository('logistics-storages'), reservations: repository('logistics-reservations'), transfers: repository('logistics-transfers') }, hive: this.hive, events: this.events });
-    this.acquisition = createAcquisitionService({ bots: this.bots, logistics: this.logistics, events: this.events, logger: this.logger, repository: repository('acquisition-requests'), config: config.acquisition ?? { enabled: true, maxDepth: 8, maxSubtasks: 32, maxAttempts: 3, maxDistance: 2000, storageFirst: true, allowFleet: true, allowCraft: true, allowSmelt: true, allowCollect: true, allowPartial: false, toolPreservation: true } });
+    this.fleetTransfer = createFleetTransferService({ events: this.events });
+    this.acquisition = createAcquisitionService({ bots: this.bots, logistics: this.logistics, events: this.events, logger: this.logger, repository: repository('acquisition-requests'), fleetTransfer: this.fleetTransfer, config: config.acquisition ?? { enabled: true, maxDepth: 8, maxSubtasks: 32, maxAttempts: 3, maxDistance: 2000, storageFirst: true, allowFleet: true, allowCraft: true, allowSmelt: true, allowCollect: true, allowPartial: false, toolPreservation: true } });
+    this.help = createHelpService({ repository: repository('help-sessions'), bots: this.bots, fleetTransfer: this.fleetTransfer, logistics: this.logistics, events: this.events });
     this.recovery = createRecoveryJobService({ repository: repository('recovery-jobs'), events: this.events, config: config.recovery ?? { enabled: true, maxAttempts: 3, minScore: 40, optionalScore: 20, urgentScore: 70, despawnTicks: 6000, safetyMarginTicks: 600, maxDistance: 2000, dangerLimit: 0.75 } });
     this.survival = createSurvivalService({ acquisition: this.acquisition, events: this.events, logger: this.logger, config: config.survival ?? defaultSurvivalSettings() });
     this.llm = new LlmGateway(config.llm ?? { provider: 'none' }, this.logger); this.coordinator = new FleetCoordinator({ gateway: this.llm, bots: this.bots, goals: this.goals, memory: this.worldMemory, semanticMemory: this.semanticMemory, discovery: this.discovery, logistics: this.logistics, acquisition: this.acquisition, ml: this.ml, hive: this.hive, events: this.events, logger: this.logger, maxQueuePerBot: config.tasks?.maxQueuePerBot ?? 100 });
@@ -74,10 +78,10 @@ export class Application {
     this.botProfiles = new BotProfileManager({ repository: repository('bots'), botManager: this.bots });
     this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, coordinator: this.coordinator, config: config.commands ?? { enabled: false, admins: [] }, logger: this.logger });
     this.taskReporter = createTaskReporter({ events: this.events, bots: this.bots, logger: this.logger });
-    this.events.subscribe('bot.death', async event => { const affected = await this.acquisition.handleBotDeath(event.payload.botId); if (affected.length) await this.events.publish('acquisition.recovery.required', { botId: event.payload.botId, requestIds: affected.map(request => request.id) }, { source: 'acquisition', correlationId: event.payload.botId }); });
+    this.events.subscribe('bot.death', async event => { const affected = await this.acquisition.handleBotDeath(event.payload.botId); const helpSessions = await this.help.handleBotDeath(event.payload.botId); if (affected.length) await this.events.publish('acquisition.recovery.required', { botId: event.payload.botId, requestIds: affected.map(request => request.id) }, { source: 'acquisition', correlationId: event.payload.botId }); if (helpSessions.length) await this.events.publish('help.recovery.required', { botId: event.payload.botId, sessionIds: helpSessions.map(session => session.id) }, { source: 'help', correlationId: event.payload.botId }); });
     this.bots.onCreated(runtime => { this.chatCommands.attach(runtime); this.structureObserver.attach(runtime); this.survival.attach(runtime); });
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
-    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, acquisition: this.acquisition, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
+    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
     this.health.register('application', async () => ({ status: ['READY', 'RUNNING'].includes(this.state) ? 'HEALTHY' : 'DEGRADED' }), { critical: true });
     this.health.register('bots', async () => ({ status: this.bots.list().some(bot => ['FAILED', 'DEGRADED'].includes(bot.status)) ? 'DEGRADED' : 'HEALTHY' }));
     this.health.register('database', async () => this.database?.health() ?? { status: 'HEALTHY', driver: config.profile === 'test' ? 'memory' : 'json' }, { critical: true });
@@ -90,6 +94,7 @@ export class Application {
     this.health.register('acquisition', async () => { const status = this.acquisition.status(); return { status: status.enabled ? 'HEALTHY' : 'DISABLED', activeRequests: status.activeRequests, maxDepth: status.maxDepth, maxSubtasks: status.maxSubtasks }; });
     this.health.register('recovery', async () => { const jobs = await this.recovery.list({ statuses: ['PENDING', 'EVALUATING', 'ASSIGNED', 'TRAVELLING', 'SEARCHING', 'COLLECTING', 'VERIFYING', 'REASSIGN_REQUIRED'] }); return { status: jobs.length ? 'DEGRADED' : 'HEALTHY', activeJobs: jobs.length, jobs }; });
     this.health.register('survival', async () => this.survival.status());
+    this.health.register('help', async () => this.help.status());
     this.health.register('taskQueue', async () => { const tasks = this.executor.status(); const coordinator = this.coordinator.status(); const saturation = Math.max(tasks.saturation, coordinator.saturation); return { status: saturation >= 0.8 ? 'DEGRADED' : 'HEALTHY', saturation, tasks, coordinator: { queuedOperations: coordinator.queuedOperations, maximumDepth: coordinator.maximumDepth, maxQueuePerBot: coordinator.maxQueuePerBot } }; });
   }
 
@@ -156,7 +161,7 @@ export class Application {
     return normalized;
   }
   configureSurvival(input) { return this.survival.configure(input); }
-  status() { return { name: 'MineHive', version: '0.7.3', phase: 'Helping Phase 1', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
+  status() { return { name: 'MineHive', version: '0.7.3', phase: 'Helping Phase 2', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
 }
 
 function portAvailable(port) {

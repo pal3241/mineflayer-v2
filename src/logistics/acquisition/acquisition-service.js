@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ConflictError, ValidationError } from '../../core/errors.js';
+import { createFleetTransferService } from '../fleet-transfer-service.js';
 
 const DEFAULT_CONFIG = Object.freeze({
   enabled: true,
@@ -16,11 +17,12 @@ const DEFAULT_CONFIG = Object.freeze({
   toolPreservation: true
 });
 
-export function createAcquisitionService({ bots, logistics, events, logger, repository = null, config = {} } = {}) {
+export function createAcquisitionService({ bots, logistics, events, logger, repository = null, config = {}, fleetTransfer = null } = {}) {
   const settings = normalizeConfig({ ...DEFAULT_CONFIG, ...config });
   const records = new Map();
   const flights = new Map();
   const specialSources = new Map();
+  const transferService = fleetTransfer ?? createFleetTransferService({ events });
   let taskRunner = null;
   let initialized = false;
   let persistenceTail = Promise.resolve();
@@ -262,7 +264,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       return await complete(plan, request, { execution: result }, events, save);
     }
     if (plan.status === 'FLEET_DONOR_SELECTED') {
-      const result = await transferFromFleet(runtime, bots.get(plan.donorId), plan.item, plan.count);
+      const result = await transferService.transfer({ receiver: runtime, donor: bots.get(plan.donorId), item: plan.item, count: plan.count });
       return await complete(plan, request, { execution: result }, events, save);
     }
     if (plan.status === 'CRAFT_READY') {
@@ -410,18 +412,6 @@ function verifyAcquired(runtime, name, count) {
   if (itemTotal(runtime, name) < count) throw new ConflictError(`Acquisition verification failed for '${name}': expected ${count}, found ${itemTotal(runtime, name)}`);
 }
 
-async function transferFromFleet(target, donor, item, count) {
-  if (!donor || donor.id === target.id) throw new ConflictError('Fleet acquisition donor is unavailable');
-  const targetSnapshot = target.adapter.snapshot(); const donorSnapshot = donor.adapter.snapshot();
-  if (targetSnapshot.dimension !== donorSnapshot.dimension) throw new ConflictError('Fleet acquisition requires the same dimension');
-  const targetOptions = target.options ?? {}; const donorOptions = donor.options ?? {};
-  if (String(targetOptions.host ?? 'localhost').toLowerCase() !== String(donorOptions.host ?? 'localhost').toLowerCase() || Number(targetOptions.port ?? 25565) !== Number(donorOptions.port ?? 25565)) throw new ConflictError('Fleet acquisition requires the same server');
-  const available = itemTotal(donor, item); if (available < count) throw new ConflictError(`Fleet donor '${donor.id}' has only ${available} '${item}'`);
-  const targetBefore = itemTotal(target, item); const meeting = meetingPoint(targetSnapshot.position, donorSnapshot.position); await Promise.all([target.adapter.smartMove({ ...meeting, range: 2 }), donor.adapter.smartMove({ ...meeting, range: 2 })]); await donor.adapter.dropItem({ item, count }); await target.adapter.pickupItem({ item, count });
-  if (itemTotal(donor, item) !== available - count || itemTotal(target, item) !== targetBefore + count) throw new ConflictError(`Fleet acquisition verification failed for '${item}'`);
-  return { donorId: donor.id, item, count, meeting, verified: true };
-}
-
 function sameScope(left, right) {
   const leftOptions = left.options ?? {}; const rightOptions = right.options ?? {};
   return String(leftOptions.host ?? 'localhost').toLowerCase() === String(rightOptions.host ?? 'localhost').toLowerCase()
@@ -429,10 +419,6 @@ function sameScope(left, right) {
     && left.runtime?.dimension === right.runtime?.dimension;
 }
 
-function meetingPoint(left, right) {
-  if (!left || !right || ![left.x, left.y, left.z, right.x, right.y, right.z].every(Number.isFinite)) throw new ConflictError('Fleet acquisition requires finite bot positions');
-  return { x: Math.round((left.x + right.x) / 2), y: Math.ceil(Math.max(left.y, right.y)), z: Math.round((left.z + right.z) / 2) };
-}
 
 function normalizeConfig(input = {}) {
   const config = { ...DEFAULT_CONFIG, ...input };
