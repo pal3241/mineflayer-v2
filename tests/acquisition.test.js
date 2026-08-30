@@ -167,3 +167,18 @@ test('smelting acquires input and fuel before executing the smelt task', async (
   const result = await service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'iron_ingot', count: 1 });
   assert.equal(result.status, 'COMPLETED'); assert.equal(smelted, true); assert.deepEqual(collected, [{ block: 'iron_ore', count: 1 }, { block: 'coal_ore', count: 1 }]);
 });
+
+test('identical concurrent acquisitions share one execution', async () => {
+  const items = []; let executions = 0;
+  const bot = { id: 'bot-a', status: 'READY', options: { host: 'localhost', port: 25565 }, adapter: {
+    snapshot: () => ({ inventorySummary: items, dimension: 'overworld' }),
+    findSourceBlocks: async () => ['stone'],
+    collect: async ({ count }) => { executions++; await new Promise(resolve => setTimeout(resolve, 5)); items.push({ name: 'stone', count }); return { count }; }
+  } };
+  const service = createAcquisitionService({ bots: { list: () => [bot], get: () => bot }, logistics: { stock: async () => [] }, events: { publish: async () => {} } });
+  const [first, second] = await Promise.all([
+    service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'stone', count: 1 }),
+    service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'stone', count: 1 })
+  ]);
+  assert.equal(executions, 1); assert.equal(first.requestId, second.requestId); assert.equal(first.status, 'COMPLETED');
+});

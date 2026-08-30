@@ -19,6 +19,7 @@ const DEFAULT_CONFIG = Object.freeze({
 export function createAcquisitionService({ bots, logistics, events, logger, config = {} } = {}) {
   const settings = normalizeConfig({ ...DEFAULT_CONFIG, ...config });
   const records = new Map();
+  const flights = new Map();
   let taskRunner = null;
 
   const record = requirement => {
@@ -203,6 +204,18 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
   };
 
   const acquire = async (input, depth = 0, budget = { count: 0 }) => {
+    if (depth === 0) {
+      const key = acquisitionKey(input);
+      const existing = flights.get(key);
+      if (existing) return existing;
+      const operation = acquireInternal(input, depth, budget).finally(() => flights.delete(key));
+      flights.set(key, operation);
+      return operation;
+    }
+    return acquireInternal(input, depth, budget);
+  };
+
+  const acquireInternal = async (input, depth = 0, budget = { count: 0 }) => {
     if (depth > settings.maxDepth) throw new ConflictError(`Acquisition exceeded maxDepth (${settings.maxDepth})`);
     if (++budget.count > settings.maxSubtasks) throw new ConflictError(`Acquisition exceeded maxSubtasks (${settings.maxSubtasks})`);
     const plan = await resolve(input);
@@ -298,6 +311,10 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     clear: () => { records.clear(); return true; },
     normalizeRequirement
   });
+}
+
+function acquisitionKey(input = {}) {
+  return [input.requesterBotId, input.type, input.item ?? input.category, input.count ?? 1, input.minimumTier ?? ''].join(':').toLowerCase();
 }
 
 async function runAdapter(taskRunner, runtime, capability, input, fallback) {
