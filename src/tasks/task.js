@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ValidationError } from '../core/errors.js';
 
-export const TaskStatus = Object.freeze({ PENDING: 'PENDING', READY: 'READY', ASSIGNED: 'ASSIGNED', RUNNING: 'RUNNING', COMPLETED: 'COMPLETED', FAILED: 'FAILED', CANCELLED: 'CANCELLED', BLOCKED: 'BLOCKED' });
+export const TaskStatus = Object.freeze({ PENDING: 'PENDING', READY: 'READY', ASSIGNED: 'ASSIGNED', RUNNING: 'RUNNING', COLLABORATIVE: 'COLLABORATIVE', COMPLETED: 'COMPLETED', FAILED: 'FAILED', CANCELLED: 'CANCELLED', BLOCKED: 'BLOCKED' });
 
 export class Task {
   constructor({ id = randomUUID(), goalId, type, input = {}, requiredCapabilities = [], dependencies = [], priority = 50, retries = 2, timeout = 30_000, verify, reportLifecycle }) {

@@ -96,12 +96,16 @@ export class ApiServer {
         if (req.method === 'GET' && url.pathname === '/api/v1/logistics/timeline') return send(200, { data: await this.application.logistics.timeline({ limit: Number(url.searchParams.get('limit') ?? 100) }) });
         if (req.method === 'GET' && url.pathname === '/api/v1/logistics/locks') return send(200, { data: await this.application.logistics.locks() });
         if (req.method === 'GET' && url.pathname === '/api/v1/help/status') return send(200, { data: await this.application.help.status() });
+        if (req.method === 'POST' && url.pathname === '/api/v1/help/request') return send(200, { data: await this.application.helpCommands.requestHelp(await body(req)) });
         if (req.method === 'GET' && url.pathname === '/api/v1/help/sessions') return send(200, { data: await this.application.help.list() });
         if (req.method === 'POST' && url.pathname === '/api/v1/help/sessions') return send(201, { data: await this.application.help.create(await body(req)) });
         if (parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'help' && parts[3] === 'sessions' && parts[4]) {
           if (req.method === 'GET' && parts.length === 5) return send(200, { data: await this.application.help.get(parts[4]) });
           if (req.method === 'POST' && parts[5] === 'collected') return send(200, { data: await this.application.help.recordCollected({ sessionId: parts[4], ...(await body(req)) }) });
           if (req.method === 'POST' && parts[5] === 'execute') return send(200, { data: await this.application.help.executeShare({ sessionId: parts[4], ...(await body(req)) }) });
+          if (req.method === 'POST' && parts[5] === 'join') return send(200, { data: await this.application.helpCommands.joinSession({ sessionId: parts[4], ...(await body(req)) }) });
+          if (req.method === 'POST' && parts[5] === 'join-many') return send(200, { data: await this.application.helpCommands.joinManySession({ sessionId: parts[4], ...(await body(req)) }) });
+          if (req.method === 'POST' && parts[5] === 'leave') return send(200, { data: await this.application.help.leave({ sessionId: parts[4], ...(await body(req)) }) });
           if (req.method === 'POST' && parts[5] === 'handoff') return send(200, { data: await this.application.help.handoff({ sessionId: parts[4], ...(await body(req)) }) });
           if (req.method === 'POST' && parts[5] === 'recovery') return send(200, { data: await this.application.help.reconcileRecovery({ sessionId: parts[4], ...(await body(req)) }) });
         }

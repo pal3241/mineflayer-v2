@@ -1,8 +1,8 @@
-const HELP = 'commands: status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
+const HELP = 'commands: help <owner>, add helper <bot...>, stop help, helpers, help status, status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
 
 export class ChatCommandController {
-  constructor({ goalService, executor, capabilities, coordinator, config, logger }) {
-    this.goals = goalService; this.executor = executor; this.capabilities = capabilities; this.coordinator = coordinator; this.config = config; this.logger = logger;
+  constructor({ goalService, executor, capabilities, coordinator, helpCommands, config, logger }) {
+    this.goals = goalService; this.executor = executor; this.capabilities = capabilities; this.coordinator = coordinator; this.helpCommands = helpCommands; this.config = config; this.logger = logger;
   }
   attach(runtime) {
     if (!this.config.enabled) return () => {};
@@ -21,7 +21,13 @@ export class ChatCommandController {
       return;
     }
     try {
+      if (command === 'help' && args[0] === 'status') return this.#reply(runtime, await this.helpCommands.status({ botId: runtime.bot.id }));
+      if (command === 'help' && args[0]) { await this.helpCommands.requestHelp({ helperBotId: runtime.bot.id, ownerBotId: args[0] }); return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: args[0] })); }
       if (command === 'help') return this.#reply(runtime, `use !${alias} <command>, !${className || 'class'} <command>, or !global <command>. ${HELP}`);
+      if (command === 'add' && args[0] === 'helper') { await this.helpCommands.addHelpers({ ownerBotId: runtime.bot.id, helperBotIds: args.slice(1) }); return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: runtime.bot.id })); }
+      if (command === 'remove' && args[0] === 'helper') { await this.helpCommands.removeHelper({ ownerBotId: runtime.bot.id, helperBotId: args[1] }); return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: runtime.bot.id })); }
+      if (command === 'stop' && args[0] === 'help') { await this.helpCommands.stopHelping({ botId: runtime.bot.id }); return this.#reply(runtime, 'help stopped'); }
+      if (command === 'helpers') return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: runtime.bot.id }));
       if (['ai', 'collect', 'craft', 'smelt', 'cook', 'masak', 'lebur', 'survey', 'scan', 'jelajah', 'register_chest', 'daftar_chest', 'store', 'simpan', 'retrieve', 'withdraw', 'ambil_chest', 'stock', 'stok', 'farm', 'farming', 'deforest', 'reforest', 'guard', 'combat', 'meat', 'remember', 'place'].includes(command)) {
         const targetSelector = selector === 'global' ? 'global' : selector === className ? `class:${className}` : `bot:${alias}`; const request = command === 'ai' ? args.join(' ') : [command, ...args].join(' ');
         if (!this.coordinator.shouldHandle(runtime.bot.id, targetSelector)) return;

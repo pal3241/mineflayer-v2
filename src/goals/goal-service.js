@@ -62,5 +62,10 @@ export class GoalService {
     if (graph.complete()) { this.metrics.increment('goals.completed'); await this.events.publish('goal.completed', goal.toDTO(), { source: 'goal-service', correlationId: goal.id }); }
     return task.toDTO();
   }
+  async transitionTaskToCollaborative(taskId, helpSessionId) {
+    const task = this.task(taskId); if ([TaskStatus.COMPLETED, TaskStatus.CANCELLED, TaskStatus.FAILED].includes(task.status)) throw new ConflictError(`Task '${taskId}' cannot enter collaborative mode from ${task.status}`, { taskId, status: task.status });
+    if ([TaskStatus.ASSIGNED, TaskStatus.RUNNING].includes(task.status)) this.executor.cancel(task.id, `Task delegated to help session '${helpSessionId}'`);
+    task.update(TaskStatus.COLLABORATIVE, { helpSessionId }); this.scheduler.release(task); await this.events.publish('task.collaborative', task.toDTO(), { source: 'goal-service', correlationId: task.goalId }); return task.toDTO();
+  }
   async stop() { await Promise.allSettled([...this.#goals.values()].filter(goal => goal.status === GoalStatus.ACTIVE).map(goal => this.cancel(goal.id, 'Application shutdown'))); }
 }

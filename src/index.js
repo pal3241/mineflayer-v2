@@ -29,6 +29,6 @@ export { createDiscoveryService } from './world/discovery-service.js';
 export { createStructureObserver } from './world/structure-observer.js';
 export { createLogisticsService } from './logistics/logistics-service.js';
 export { createFleetTransferService } from './logistics/fleet-transfer-service.js';
-export { createHelpService } from './help/index.js';
+export { createHelpCommandService, createHelpService } from './help/index.js';
 export { createSurvivalService, normalizeSurvivalPolicy, SurvivalCapabilityError } from './survival/index.js';
 export { createTaskReporter } from './tasks/task-reporter.js';
