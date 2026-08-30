@@ -22,7 +22,7 @@ test('acquisition marks craft-ready requirements when the recipe has no missing 
     options: { host: 'localhost', port: 25565 },
     adapter: {
       snapshot: () => ({ inventorySummary: [{ name: 'planks', count: 1 }] }),
-      craftRequirements: async () => ({ missing: [], steps: ['craft'] })
+      craftRequirements: async () => ({ craftable: true, missing: [], steps: ['craft'] })
     }
   };
   const bots = { list: () => [bot], get: () => bot };

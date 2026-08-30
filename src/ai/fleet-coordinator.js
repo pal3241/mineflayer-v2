@@ -84,11 +84,11 @@ export class FleetCoordinator {
     const existing = findInventoryItem(target.adapter.snapshot(), analysis.requiredTools); if (existing) { visiting.delete(key); return { block, required: true, tool: existing, source: 'inventory' }; }
     if (this.acquisition) {
       try {
-        const plan = await this.acquisition.request({ requesterBotId: botId, type: 'TOOL', category: 'TOOL', acceptedItems: analysis.requiredTools, minimumTier: 'WOODEN', count: 1, purpose: `prepare tool for ${block}` });
-        if (plan.status === 'SATISFIED' || plan.status === 'CRAFT_READY') {
+        const plan = await this.acquisition.acquire({ requesterBotId: botId, type: 'TOOL', category: 'TOOL', acceptedItems: analysis.requiredTools, minimumTier: 'WOODEN', count: 1, purpose: `prepare tool for ${block}` });
+        if (plan.status === 'COMPLETED') {
           const tool = findInventoryItem(target.adapter.snapshot(), analysis.requiredTools) ?? analysis.requiredTools[0];
           visiting.delete(key);
-          return { block, required: true, tool, source: plan.status === 'SATISFIED' ? 'acquisition-inventory' : 'acquisition-craft', plan };
+          return { block, required: true, tool, source: 'acquisition', plan };
         }
       } catch (error) {
         this.logger?.warn?.('coordinator.acquisition.tool-fallback', { botId, block, error: error.message });
@@ -114,9 +114,9 @@ export class FleetCoordinator {
     for (const missing of plan.missing) {
       if (this.acquisition) {
         try {
-          const result = await this.acquisition.request({ requesterBotId: botId, type: 'ITEM', item: missing.name, count: missing.count, purpose: `craft ${item}` });
+          const result = await this.acquisition.acquire({ requesterBotId: botId, type: 'ITEM', item: missing.name, count: missing.count, purpose: `craft ${item}` });
           acquisitions.push({ item: missing.name, count: missing.count, acquisitionResult: result });
-          if (result.status === 'SATISFIED') continue;
+          if (result.status === 'COMPLETED') continue;
         } catch (error) {
           this.logger?.warn?.('coordinator.acquisition.craft-fallback', { botId, item, missing: missing.name, error: error.message });
         }

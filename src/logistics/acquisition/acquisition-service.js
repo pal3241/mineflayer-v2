@@ -133,7 +133,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
 
     if (settings.allowCraft && requirement.type === 'ITEM') {
       const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item: requirement.item, count: requirement.count }) : null;
-      if (recipe && recipe.craftable !== false) {
+      if (recipe?.craftable === true) {
         if (recipe.missing?.length === 0) {
           request.status = 'CRAFT_READY';
           request.updatedAt = new Date().toISOString();
@@ -179,6 +179,53 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     throw new ConflictError(`Unable to satisfy acquisition requirement for '${requirement.type === 'ITEM' ? requirement.item : requirement.category}'`);
   };
 
+  const acquire = async (input, depth = 0) => {
+    if (depth > settings.maxDepth) throw new ConflictError(`Acquisition exceeded maxDepth (${settings.maxDepth})`);
+    const plan = await resolve(input);
+    const runtime = bots.get(plan.requirement.requesterBotId);
+    if (plan.status === 'SATISFIED') return { ...plan, status: 'COMPLETED' };
+    if (plan.status === 'STORAGE_FOUND') {
+      if (!logistics?.retrieve) throw new ConflictError('Storage acquisition executor is unavailable');
+      const result = await logistics.retrieve({ runtime, storageName: plan.storage, item: plan.item, count: plan.requirement.count });
+      verifyAcquired(runtime, plan.item, plan.requirement.count);
+      return { ...plan, status: 'COMPLETED', execution: result };
+    }
+    if (plan.status === 'FLEET_DONOR_SELECTED') {
+      const result = await transferFromFleet(runtime, bots.get(plan.donorId), plan.item, plan.requirement.count);
+      return { ...plan, status: 'COMPLETED', execution: result };
+    }
+    if (plan.status === 'CRAFT_READY') {
+      const result = await runtime.adapter.craftItem({ item: plan.requirement.item, count: plan.requirement.count });
+      verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
+      return { ...plan, status: 'COMPLETED', execution: result };
+    }
+    if (plan.status === 'CRAFT_PLAN_CREATED') {
+      if (plan.subrequests.length > settings.maxSubtasks) throw new ConflictError(`Acquisition plan exceeds maxSubtasks (${settings.maxSubtasks})`);
+      const executions = [];
+      for (const subrequest of plan.subrequests) executions.push(await acquire(subrequest, depth + 1));
+      const result = await runtime.adapter.craftItem({ item: plan.requirement.item, count: plan.requirement.count });
+      verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
+      return { ...plan, status: 'COMPLETED', execution: { dependencies: executions, craft: result } };
+    }
+    if (plan.status === 'COLLECTION_PLANNED') {
+      let collected = 0;
+      for (const block of plan.blocks) {
+        if (collected >= plan.requirement.count) break;
+        const before = itemTotal(runtime, plan.requirement.item);
+        await runtime.adapter.collect({ block, count: plan.requirement.count - collected, maxDistance: settings.maxDistance });
+        collected += Math.max(0, itemTotal(runtime, plan.requirement.item) - before);
+      }
+      verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
+      return { ...plan, status: 'COMPLETED', execution: { collected } };
+    }
+    if (plan.status === 'SMELT_PLAN_CREATED') {
+      const result = await runtime.adapter.smeltItem({ item: plan.requirement.item, count: plan.requirement.count, fuel: plan.formula.fuel?.name });
+      verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
+      return { ...plan, status: 'COMPLETED', execution: result };
+    }
+    throw new ConflictError(`Acquisition plan '${plan.status}' cannot be executed`);
+  };
+
   const status = () => ({
     enabled: settings.enabled,
     totalRequests: records.size,
@@ -205,6 +252,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     status,
     resolve,
     request: resolve,
+    acquire,
     list: () => [...records.values()],
     clear: () => { records.clear(); return true; },
     normalizeRequirement
@@ -224,6 +272,26 @@ function aggregateInventory(items = []) {
 function toolTier(name) {
   const material = String(name).toLowerCase().split('_', 1)[0];
   return { wooden: 1, golden: 2, stone: 3, iron: 4, diamond: 5, netherite: 6 }[material] ?? 0;
+}
+
+function itemTotal(runtime, name) {
+  return aggregateInventory(runtime.adapter?.snapshot?.().inventorySummary ?? [])[String(name).toLowerCase()] ?? 0;
+}
+
+function verifyAcquired(runtime, name, count) {
+  if (itemTotal(runtime, name) < count) throw new ConflictError(`Acquisition verification failed for '${name}': expected ${count}, found ${itemTotal(runtime, name)}`);
+}
+
+async function transferFromFleet(target, donor, item, count) {
+  if (!donor || donor.id === target.id) throw new ConflictError('Fleet acquisition donor is unavailable');
+  const targetSnapshot = target.adapter.snapshot(); const donorSnapshot = donor.adapter.snapshot();
+  if (targetSnapshot.dimension !== donorSnapshot.dimension) throw new ConflictError('Fleet acquisition requires the same dimension');
+  const targetOptions = target.options ?? {}; const donorOptions = donor.options ?? {};
+  if (String(targetOptions.host ?? 'localhost').toLowerCase() !== String(donorOptions.host ?? 'localhost').toLowerCase() || Number(targetOptions.port ?? 25565) !== Number(donorOptions.port ?? 25565)) throw new ConflictError('Fleet acquisition requires the same server');
+  const available = itemTotal(donor, item); if (available < count) throw new ConflictError(`Fleet donor '${donor.id}' has only ${available} '${item}'`);
+  const targetBefore = itemTotal(target, item); await donor.adapter.dropItem({ item, count }); await target.adapter.pickupItem({ item, count });
+  if (itemTotal(donor, item) !== available - count || itemTotal(target, item) !== targetBefore + count) throw new ConflictError(`Fleet acquisition verification failed for '${item}'`);
+  return { donorId: donor.id, item, count, verified: true };
 }
 
 function normalizeConfig(input = {}) {
