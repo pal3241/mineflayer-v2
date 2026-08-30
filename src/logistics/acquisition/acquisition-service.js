@@ -27,9 +27,11 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     const requester = candidateBots.find(bot => bot.id === normalized.requesterBotId) ?? null;
     if (!requester) throw new ValidationError(`Acquisition requesterBotId '${normalized.requesterBotId}' was not found in the active bot fleet`);
     if (normalized.type === 'TOOL' && normalized.count !== 1) throw new ValidationError('Tool acquisition requires an exact count of 1');
-    if (normalized.type === 'TOOL') normalized.acceptedItems = normalized.acceptedItems.filter(item => toolTier(item) >= toolTier(normalized.minimumTier));
+    if (normalized.type === 'TOOL') {
+      normalized.acceptedItems = normalized.acceptedItems.filter(item => toolTier(item) >= toolTier(normalized.minimumTier));
+      if (settings.toolPreservation) normalized.acceptedItems.sort((left, right) => toolTier(left) - toolTier(right) || left.localeCompare(right));
+    }
     if (normalized.type === 'TOOL' && !normalized.acceptedItems.length) throw new ValidationError(`No accepted tool meets minimum tier '${normalized.minimumTier}'`);
-    if (normalized.count > settings.maxSubtasks) throw new ValidationError(`Acquisition count ${normalized.count} exceeds the runtime maxSubtasks limit of ${settings.maxSubtasks}`);
     const id = normalized.id ?? randomUUID();
     normalized.id = id;
     const existing = records.get(id);
@@ -72,6 +74,8 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
 
     const inventory = runtime.adapter?.snapshot?.().inventorySummary ?? [];
     const inventoryTotals = aggregateInventory(inventory);
+    const available = requirement.type === 'ITEM' ? inventoryTotals[requirement.item] ?? 0 : requirement.acceptedItems.reduce((total, item) => total + (inventoryTotals[item] ?? 0), 0);
+    const shortage = Math.max(0, requirement.count - available);
     const hasExact = requirement.type === 'ITEM'
       ? (inventoryTotals[requirement.item] ?? 0) >= requirement.count
       : requirement.acceptedItems.some(name => (inventoryTotals[name] ?? 0) > 0);
@@ -89,7 +93,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
       const match = stock.find(storage => {
         const totals = aggregateInventory(storage.availableInventory ?? []);
         return requirement.type === 'ITEM'
-          ? (totals[requirement.item] ?? 0) >= requirement.count
+          ? (totals[requirement.item] ?? 0) >= shortage
           : requirement.acceptedItems.some(name => (totals[name] ?? 0) > 0);
       });
       if (match) {
@@ -99,8 +103,8 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
         request.status = 'STORAGE_FOUND';
         request.updatedAt = new Date().toISOString();
         request.trace.push({ at: request.updatedAt, step: 'storage-resolved', detail: `${match.name}:${item}` });
-        events?.publish?.('acquisition.storage.reserved', { requestId: request.id, storage: match.name, item }, { source: 'acquisition' });
-        return { requestId: request.id, status: 'STORAGE_FOUND', source: 'storage', storage: match.name, item, requirement };
+        events?.publish?.('acquisition.storage.planned', { requestId: request.id, storage: match.name, item, count: shortage }, { source: 'acquisition' });
+        return { requestId: request.id, status: 'STORAGE_FOUND', source: 'storage', storage: match.name, item, count: shortage, requirement };
       }
       return null;
     };
@@ -110,20 +114,21 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     }
 
     if (settings.allowFleet) {
-      const donors = candidateBots.filter(bot => bot.id !== target.id && bot.status === 'READY');
+      const donors = candidateBots.filter(bot => bot.id !== target.id && bot.status === 'READY' && sameScope(bot, target) && !(bot.runtime?.activeTasks?.length));
       const donor = donors.find(bot => {
-        const snapshot = bot.runtime?.inventorySummary ?? [];
+        const snapshot = botInventory(bot);
         const totals = aggregateInventory(snapshot);
         return requirement.type === 'ITEM'
-          ? (totals[requirement.item] ?? 0) >= requirement.count
+          ? (totals[requirement.item] ?? 0) >= shortage
           : requirement.acceptedItems.some(name => (totals[name] ?? 0) > 0);
       });
       if (donor) {
         request.status = 'FLEET_DONOR_SELECTED';
         request.updatedAt = new Date().toISOString();
         request.trace.push({ at: request.updatedAt, step: 'fleet-transfer', detail: `${donor.id}` });
-        events?.publish?.('acquisition.fleet.transferred', { requestId: request.id, donorId: donor.id, requirement }, { source: 'acquisition' });
-        return { requestId: request.id, status: 'FLEET_DONOR_SELECTED', source: 'fleet', donorId: donor.id, requirement };
+        const item = requirement.type === 'ITEM' ? requirement.item : requirement.acceptedItems.find(name => (aggregateInventory(botInventory(donor))[name] ?? 0) > 0);
+        events?.publish?.('acquisition.fleet.planned', { requestId: request.id, donorId: donor.id, item, count: shortage }, { source: 'acquisition' });
+        return { requestId: request.id, status: 'FLEET_DONOR_SELECTED', source: 'fleet', donorId: donor.id, item, count: shortage, requirement };
       }
     }
 
@@ -133,32 +138,49 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     }
 
     if (settings.allowCraft && requirement.type === 'ITEM') {
-      const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item: requirement.item, count: requirement.count }) : null;
+      const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item: requirement.item, count: shortage }) : null;
       if (recipe?.craftable === true) {
         if (recipe.missing?.length === 0) {
           request.status = 'CRAFT_READY';
           request.updatedAt = new Date().toISOString();
           request.trace.push({ at: request.updatedAt, step: 'craft-ready', detail: `${requirement.item}:${requirement.count}` });
           await events?.publish?.('acquisition.craft.ready', { requestId: request.id, requirement, recipe }, { source: 'acquisition' });
-          return { requestId: request.id, status: 'CRAFT_READY', source: 'craft', requirement, recipe };
+          return { requestId: request.id, status: 'CRAFT_READY', source: 'craft', item: requirement.item, count: shortage, requirement, recipe };
         }
         const subrequests = recipe.missing.map(ingredient => ({ requesterBotId: target.id, type: 'ITEM', item: ingredient.name, count: ingredient.count, purpose: `craft ${requirement.item}`, priority: requirement.priority, consume: true }));
         request.status = 'CRAFT_PLAN_CREATED';
         request.updatedAt = new Date().toISOString();
         request.trace.push({ at: request.updatedAt, step: 'craft-plan', detail: recipe.missing.map(item => `${item.name}:${item.count}`).join(', ') });
         await events?.publish?.('acquisition.craft.planned', { requestId: request.id, requirement, subrequests }, { source: 'acquisition' });
-        return { requestId: request.id, status: 'CRAFT_PLAN_CREATED', source: 'craft', requirement, subrequests };
+        return { requestId: request.id, status: 'CRAFT_PLAN_CREATED', source: 'craft', item: requirement.item, count: shortage, requirement, subrequests };
+      }
+    }
+
+    if (settings.allowCraft && requirement.type === 'TOOL') {
+      for (const item of requirement.acceptedItems) {
+        const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item, count: 1 }) : null;
+        if (recipe?.craftable === true && recipe.missing?.length === 0) {
+          request.status = 'CRAFT_READY';
+          request.updatedAt = new Date().toISOString();
+          return { requestId: request.id, status: 'CRAFT_READY', source: 'craft', item, count: 1, requirement, recipe };
+        }
+        if (recipe?.craftable === true) {
+          const subrequests = recipe.missing.map(ingredient => ({ requesterBotId: target.id, type: 'ITEM', item: ingredient.name, count: ingredient.count, purpose: `craft ${item}`, priority: requirement.priority, consume: true }));
+          request.status = 'CRAFT_PLAN_CREATED';
+          request.updatedAt = new Date().toISOString();
+          return { requestId: request.id, status: 'CRAFT_PLAN_CREATED', source: 'craft', item, count: 1, requirement, subrequests };
+        }
       }
     }
 
     if (settings.allowSmelt && requirement.type === 'ITEM') {
-      const formula = runtime.adapter?.smeltRequirements ? await runtime.adapter.smeltRequirements({ item: requirement.item, count: requirement.count }) : null;
+      const formula = runtime.adapter?.smeltRequirements ? await runtime.adapter.smeltRequirements({ item: requirement.item, count: shortage }) : null;
       if (formula) {
         request.status = 'SMELT_PLAN_CREATED';
         request.updatedAt = new Date().toISOString();
         request.trace.push({ at: request.updatedAt, step: 'smelt-plan', detail: `${formula.input.name}:${formula.input.count}` });
         events?.publish?.('acquisition.production.planned', { requestId: request.id, requirement, formula }, { source: 'acquisition' });
-        return { requestId: request.id, status: 'SMELT_PLAN_CREATED', source: 'smelt', requirement, formula };
+        return { requestId: request.id, status: 'SMELT_PLAN_CREATED', source: 'smelt', count: shortage, requirement, formula };
       }
     }
 
@@ -169,7 +191,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
         request.updatedAt = new Date().toISOString();
         request.trace.push({ at: request.updatedAt, step: 'collect-plan', detail: blocks.slice(0, 3).join(', ') });
         events?.publish?.('acquisition.collection.planned', { requestId: request.id, requirement, blocks }, { source: 'acquisition' });
-        return { requestId: request.id, status: 'COLLECTION_PLANNED', source: 'collect', requirement, blocks };;
+        return { requestId: request.id, status: 'COLLECTION_PLANNED', source: 'collect', count: shortage, requirement, blocks };;
       }
     }
 
@@ -180,49 +202,62 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     throw new ConflictError(`Unable to satisfy acquisition requirement for '${requirement.type === 'ITEM' ? requirement.item : requirement.category}'`);
   };
 
-  const acquire = async (input, depth = 0) => {
+  const acquire = async (input, depth = 0, budget = { count: 0 }) => {
     if (depth > settings.maxDepth) throw new ConflictError(`Acquisition exceeded maxDepth (${settings.maxDepth})`);
+    if (++budget.count > settings.maxSubtasks) throw new ConflictError(`Acquisition exceeded maxSubtasks (${settings.maxSubtasks})`);
     const plan = await resolve(input);
+    const request = records.get(plan.requestId);
     const runtime = bots.get(plan.requirement.requesterBotId);
-    if (plan.status === 'SATISFIED') return { ...plan, status: 'COMPLETED' };
+    if (plan.status === 'SATISFIED') return await complete(plan, request, {}, events);
     if (plan.status === 'STORAGE_FOUND') {
       if (!logistics?.retrieve) throw new ConflictError('Storage acquisition executor is unavailable');
-      const result = await logistics.retrieve({ runtime, storageName: plan.storage, item: plan.item, count: plan.requirement.count });
+      const result = await logistics.retrieve({ runtime, storageName: plan.storage, item: plan.item, count: plan.count });
       verifyAcquired(runtime, plan.item, plan.requirement.count);
-      return { ...plan, status: 'COMPLETED', execution: result };
+      return await complete(plan, request, { execution: result }, events);
     }
     if (plan.status === 'FLEET_DONOR_SELECTED') {
-      const result = await transferFromFleet(runtime, bots.get(plan.donorId), plan.item, plan.requirement.count);
-      return { ...plan, status: 'COMPLETED', execution: result };
+      const result = await transferFromFleet(runtime, bots.get(plan.donorId), plan.item, plan.count);
+      return await complete(plan, request, { execution: result }, events);
     }
     if (plan.status === 'CRAFT_READY') {
-      const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item: plan.requirement.item, count: plan.requirement.count }, () => runtime.adapter.craftItem({ item: plan.requirement.item, count: plan.requirement.count }));
-      verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
-      return { ...plan, status: 'COMPLETED', execution: result };
+      const item = plan.item ?? plan.requirement.item;
+      const result = await runBatches(taskRunner, runtime, 'minecraft.crafting', item, plan.count ?? plan.requirement.count, (count) => runtime.adapter.craftItem({ item, count }));
+      verifyAcquired(runtime, item, plan.requirement.count);
+      return await complete(plan, request, { execution: result }, events);
     }
     if (plan.status === 'CRAFT_PLAN_CREATED') {
-      if (plan.subrequests.length > settings.maxSubtasks) throw new ConflictError(`Acquisition plan exceeds maxSubtasks (${settings.maxSubtasks})`);
       const executions = [];
-      for (const subrequest of plan.subrequests) executions.push(await acquire(subrequest, depth + 1));
-      const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item: plan.requirement.item, count: plan.requirement.count }, () => runtime.adapter.craftItem({ item: plan.requirement.item, count: plan.requirement.count }));
-      verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
-      return { ...plan, status: 'COMPLETED', execution: { dependencies: executions, craft: result } };
+      for (const subrequest of plan.subrequests) executions.push(await acquire(subrequest, depth + 1, budget));
+      const item = plan.item ?? plan.requirement.item;
+      const result = await runBatches(taskRunner, runtime, 'minecraft.crafting', item, plan.count ?? plan.requirement.count, (count) => runtime.adapter.craftItem({ item, count }));
+      verifyAcquired(runtime, item, plan.requirement.count);
+      return await complete(plan, request, { execution: { dependencies: executions, craft: result } }, events);
     }
     if (plan.status === 'COLLECTION_PLANNED') {
       let collected = 0;
       for (const block of plan.blocks) {
         if (collected >= plan.requirement.count) break;
         const before = itemTotal(runtime, plan.requirement.item);
-        await runAdapter(taskRunner, runtime, 'minecraft.collection', { block, count: plan.requirement.count - collected, maxDistance: settings.maxDistance }, () => runtime.adapter.collect({ block, count: plan.requirement.count - collected, maxDistance: settings.maxDistance }));
+        try {
+          await runBatches(taskRunner, runtime, 'minecraft.collection', block, (plan.count ?? plan.requirement.count) - collected, (count) => runtime.adapter.collect({ block, count, maxDistance: settings.maxDistance }));
+        } catch (error) {
+          request?.trace.push({ at: new Date().toISOString(), step: 'collect-source-failed', detail: `${block}: ${error.message}` });
+          continue;
+        }
         collected += Math.max(0, itemTotal(runtime, plan.requirement.item) - before);
       }
+      if (settings.allowPartial && itemTotal(runtime, plan.requirement.item) < plan.requirement.count) {
+        const remaining = plan.requirement.count - itemTotal(runtime, plan.requirement.item);
+        if (request) { request.status = 'PARTIAL'; request.updatedAt = new Date().toISOString(); request.trace.push({ at: request.updatedAt, step: 'partial', detail: `${remaining} remaining` }); }
+        return { ...plan, status: 'PARTIAL', collected, remaining };
+      }
       verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
-      return { ...plan, status: 'COMPLETED', execution: { collected } };
+      return await complete(plan, request, { execution: { collected } }, events);
     }
     if (plan.status === 'SMELT_PLAN_CREATED') {
-      const result = await runAdapter(taskRunner, runtime, 'minecraft.smelting', { item: plan.requirement.item, count: plan.requirement.count, fuel: plan.formula.fuel?.name }, () => runtime.adapter.smeltItem({ item: plan.requirement.item, count: plan.requirement.count, fuel: plan.formula.fuel?.name }));
+      const result = await runBatches(taskRunner, runtime, 'minecraft.smelting', plan.requirement.item, plan.count ?? plan.requirement.count, (count) => runtime.adapter.smeltItem({ item: plan.requirement.item, count, fuel: plan.formula.fuel?.name }));
       verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
-      return { ...plan, status: 'COMPLETED', execution: result };
+      return await complete(plan, request, { execution: result }, events);
     }
     throw new ConflictError(`Acquisition plan '${plan.status}' cannot be executed`);
   };
@@ -231,8 +266,9 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     enabled: settings.enabled,
     totalRequests: records.size,
     activeRequests: [...records.values()].filter(request => ['PENDING', 'RESOLVING'].includes(request.status)).length,
-    completedRequests: [...records.values()].filter(request => ['SATISFIED', 'CRAFT_READY'].includes(request.status)).length,
+    completedRequests: [...records.values()].filter(request => request.status === 'COMPLETED').length,
     failedRequests: [...records.values()].filter(request => request.status === 'FAILED').length,
+    partialRequests: [...records.values()].filter(request => request.status === 'PARTIAL').length,
     maxDepth: settings.maxDepth,
     maxSubtasks: settings.maxSubtasks,
     maxAttempts: settings.maxAttempts,
@@ -265,12 +301,27 @@ async function runAdapter(taskRunner, runtime, capability, input, fallback) {
   return taskRunner ? taskRunner({ runtime, capability, input }) : fallback();
 }
 
+async function runBatches(taskRunner, runtime, capability, item, count, fallback) {
+  const results = [];
+  for (let remaining = count; remaining > 0; remaining -= Math.min(64, remaining)) {
+    const batch = Math.min(64, remaining);
+    results.push(await runAdapter(taskRunner, runtime, capability, { item, count: batch }, () => fallback(batch)));
+  }
+  return results.length === 1 ? results[0] : results;
+}
+
+async function complete(plan, request, patch = {}, events) {
+  if (request) { request.status = 'COMPLETED'; request.updatedAt = new Date().toISOString(); request.trace.push({ at: request.updatedAt, step: 'completed', detail: plan.source }); }
+  await events?.publish?.('acquisition.completed', { requestId: plan.requestId, source: plan.source, item: plan.item ?? plan.requirement.item, count: plan.count ?? plan.requirement.count }, { source: 'acquisition' });
+  return { ...plan, ...patch, status: 'COMPLETED' };
+}
+
 function aggregateInventory(items = []) {
   return (Array.isArray(items) ? items : []).reduce((totals, entry) => {
     if (!entry || !entry.name) return totals;
     const name = String(entry.name).trim().toLowerCase();
     if (!name) return totals;
-    totals[name] = (totals[name] ?? 0) + Number(entry.count ?? entry.available ?? 0);
+    totals[name] = (totals[name] ?? 0) + Number(entry.available ?? entry.count ?? 0);
     return totals;
   }, {});
 }
@@ -278,6 +329,10 @@ function aggregateInventory(items = []) {
 function toolTier(name) {
   const material = String(name).toLowerCase().split('_', 1)[0];
   return { wooden: 1, golden: 2, stone: 3, iron: 4, diamond: 5, netherite: 6 }[material] ?? 0;
+}
+
+function botInventory(bot) {
+  return bot.runtime?.inventorySummary ?? bot.adapter?.snapshot?.().inventorySummary ?? [];
 }
 
 function itemTotal(runtime, name) {
@@ -295,9 +350,21 @@ async function transferFromFleet(target, donor, item, count) {
   const targetOptions = target.options ?? {}; const donorOptions = donor.options ?? {};
   if (String(targetOptions.host ?? 'localhost').toLowerCase() !== String(donorOptions.host ?? 'localhost').toLowerCase() || Number(targetOptions.port ?? 25565) !== Number(donorOptions.port ?? 25565)) throw new ConflictError('Fleet acquisition requires the same server');
   const available = itemTotal(donor, item); if (available < count) throw new ConflictError(`Fleet donor '${donor.id}' has only ${available} '${item}'`);
-  const targetBefore = itemTotal(target, item); await donor.adapter.dropItem({ item, count }); await target.adapter.pickupItem({ item, count });
+  const targetBefore = itemTotal(target, item); const meeting = meetingPoint(targetSnapshot.position, donorSnapshot.position); await Promise.all([target.adapter.smartMove({ ...meeting, range: 2 }), donor.adapter.smartMove({ ...meeting, range: 2 })]); await donor.adapter.dropItem({ item, count }); await target.adapter.pickupItem({ item, count });
   if (itemTotal(donor, item) !== available - count || itemTotal(target, item) !== targetBefore + count) throw new ConflictError(`Fleet acquisition verification failed for '${item}'`);
-  return { donorId: donor.id, item, count, verified: true };
+  return { donorId: donor.id, item, count, meeting, verified: true };
+}
+
+function sameScope(left, right) {
+  const leftOptions = left.options ?? {}; const rightOptions = right.options ?? {};
+  return String(leftOptions.host ?? 'localhost').toLowerCase() === String(rightOptions.host ?? 'localhost').toLowerCase()
+    && Number(leftOptions.port ?? 25565) === Number(rightOptions.port ?? 25565)
+    && left.runtime?.dimension === right.runtime?.dimension;
+}
+
+function meetingPoint(left, right) {
+  if (!left || !right || ![left.x, left.y, left.z, right.x, right.y, right.z].every(Number.isFinite)) throw new ConflictError('Fleet acquisition requires finite bot positions');
+  return { x: Math.round((left.x + right.x) / 2), y: Math.ceil(Math.max(left.y, right.y)), z: Math.round((left.z + right.z) / 2) };
 }
 
 function normalizeConfig(input = {}) {
