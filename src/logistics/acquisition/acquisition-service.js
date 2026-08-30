@@ -175,7 +175,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
 
     if (settings.allowSmelt && requirement.type === 'ITEM') {
       const formula = runtime.adapter?.smeltRequirements ? await runtime.adapter.smeltRequirements({ item: requirement.item, count: shortage }) : null;
-      if (formula) {
+      if (formula && (!formula.item || formula.item === requirement.item) && formula.input?.name !== requirement.item) {
         request.status = 'SMELT_PLAN_CREATED';
         request.updatedAt = new Date().toISOString();
         request.trace.push({ at: request.updatedAt, step: 'smelt-plan', detail: `${formula.input.name}:${formula.input.count}` });
@@ -221,7 +221,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     }
     if (plan.status === 'CRAFT_READY') {
       const item = plan.item ?? plan.requirement.item;
-      const result = await runBatches(taskRunner, runtime, 'minecraft.crafting', item, plan.count ?? plan.requirement.count, (count) => runtime.adapter.craftItem({ item, count }));
+      const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item, count: plan.count ?? plan.requirement.count }, () => runtime.adapter.craftItem({ item, count: plan.count ?? plan.requirement.count }));
       verifyAcquired(runtime, item, plan.requirement.count);
       return await complete(plan, request, { execution: result }, events);
     }
@@ -229,7 +229,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
       const executions = [];
       for (const subrequest of plan.subrequests) executions.push(await acquire(subrequest, depth + 1, budget));
       const item = plan.item ?? plan.requirement.item;
-      const result = await runBatches(taskRunner, runtime, 'minecraft.crafting', item, plan.count ?? plan.requirement.count, (count) => runtime.adapter.craftItem({ item, count }));
+      const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item, count: plan.count ?? plan.requirement.count }, () => runtime.adapter.craftItem({ item, count: plan.count ?? plan.requirement.count }));
       verifyAcquired(runtime, item, plan.requirement.count);
       return await complete(plan, request, { execution: { dependencies: executions, craft: result } }, events);
     }
@@ -239,7 +239,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
         if (collected >= plan.requirement.count) break;
         const before = itemTotal(runtime, plan.requirement.item);
         try {
-          await runBatches(taskRunner, runtime, 'minecraft.collection', block, (plan.count ?? plan.requirement.count) - collected, (count) => runtime.adapter.collect({ block, count, maxDistance: settings.maxDistance }));
+          await runBatches(taskRunner, runtime, 'minecraft.collection', { block, maxDistance: settings.maxDistance }, (plan.count ?? plan.requirement.count) - collected, (count) => runtime.adapter.collect({ block, count, maxDistance: settings.maxDistance }));
         } catch (error) {
           request?.trace.push({ at: new Date().toISOString(), step: 'collect-source-failed', detail: `${block}: ${error.message}` });
           continue;
@@ -255,9 +255,12 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
       return await complete(plan, request, { execution: { collected } }, events);
     }
     if (plan.status === 'SMELT_PLAN_CREATED') {
-      const result = await runBatches(taskRunner, runtime, 'minecraft.smelting', plan.requirement.item, plan.count ?? plan.requirement.count, (count) => runtime.adapter.smeltItem({ item: plan.requirement.item, count, fuel: plan.formula.fuel?.name }));
+      const count = plan.count ?? plan.requirement.count;
+      const input = await acquire({ requesterBotId: runtime.id, type: 'ITEM', item: plan.formula.input.name, count: plan.formula.input.count }, depth + 1, budget);
+      const fuel = await acquire({ requesterBotId: runtime.id, type: 'ITEM', item: plan.formula.fuel.name, count: plan.formula.fuel.count }, depth + 1, budget);
+      const result = await runBatches(taskRunner, runtime, 'minecraft.smelting', { item: plan.requirement.item, fuel: plan.formula.fuel.name }, count, (batch) => runtime.adapter.smeltItem({ item: plan.requirement.item, count: batch, fuel: plan.formula.fuel.name }));
       verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
-      return await complete(plan, request, { execution: result }, events);
+      return await complete(plan, request, { execution: { input, fuel, smelt: result } }, events);
     }
     throw new ConflictError(`Acquisition plan '${plan.status}' cannot be executed`);
   };
@@ -301,11 +304,11 @@ async function runAdapter(taskRunner, runtime, capability, input, fallback) {
   return taskRunner ? taskRunner({ runtime, capability, input }) : fallback();
 }
 
-async function runBatches(taskRunner, runtime, capability, item, count, fallback) {
+async function runBatches(taskRunner, runtime, capability, payload, count, fallback) {
   const results = [];
   for (let remaining = count; remaining > 0; remaining -= Math.min(64, remaining)) {
     const batch = Math.min(64, remaining);
-    results.push(await runAdapter(taskRunner, runtime, capability, { item, count: batch }, () => fallback(batch)));
+    results.push(await runAdapter(taskRunner, runtime, capability, { ...payload, count: batch }, () => fallback(batch)));
   }
   return results.length === 1 ? results[0] : results;
 }

@@ -202,8 +202,9 @@ export class MineflayerAdapter extends EventEmitter {
   }
   async stopCombat() { this.combatAbort?.abort(); this.combatAbort = null; if (this.combatState.mode !== 'OFF') this.combatState = { mode: 'OFF', status: 'IDLE', stoppedAt: new Date().toISOString() }; return { ...this.combatState }; }
   async craftItem({ item, count = 1 } = {}) {
-    const bot = this.#ready('crafting'); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1));
-    await this.#ensureCrafted(item, amount, new Set(), 0); return { item, count: inventoryCount(bot, item), inventory: this.snapshot().inventorySummary };
+    const bot = this.#ready('crafting'); const amount = Number.parseInt(count, 10); if (!Number.isInteger(amount) || amount < 1 || amount > 10_000) throw new ValidationError('Crafting count must be an integer between 1 and 10000');
+    while (inventoryCount(bot, item) < amount) { const targetCount = Math.min(amount, inventoryCount(bot, item) + 64); await this.#ensureCrafted(item, targetCount, new Set(), 0); }
+    return { item, count: inventoryCount(bot, item), inventory: this.snapshot().inventorySummary };
   }
   async #ensureCrafted(name, requiredCount, visiting, depth) {
     const bot = this.#ready('crafting'); if (inventoryCount(bot, name) >= requiredCount) return;

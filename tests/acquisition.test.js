@@ -140,3 +140,30 @@ test('allowPartial records the collected amount and remaining shortage', async (
   const result = await service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'stone', count: 5 });
   assert.equal(result.status, 'PARTIAL'); assert.equal(result.collected, 2); assert.equal(result.remaining, 3); assert.equal(service.status().partialRequests, 1);
 });
+
+test('collection task runner receives block instead of item', async () => {
+  const calls = []; const items = [];
+  const bot = { id: 'bot-a', status: 'READY', options: { host: 'localhost', port: 25565 }, adapter: {
+    snapshot: () => ({ inventorySummary: items, dimension: 'overworld' }),
+    findSourceBlocks: async () => ['oak_log'],
+    collect: async input => { calls.push(input); items.push({ name: 'oak_log', count: input.count }); return input; }
+  } };
+  const service = createAcquisitionService({ bots: { list: () => [bot], get: () => bot }, logistics: { stock: async () => [] }, events: { publish: async () => {} } });
+  service.configureTaskRunner(async ({ capability, input, runtime }) => { assert.equal(capability, 'minecraft.collection'); assert.equal(input.block, 'oak_log'); assert.equal(input.item, undefined); return runtime.adapter.collect(input); });
+  await service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'oak_log', count: 1 });
+  assert.equal(calls[0].block, 'oak_log');
+});
+
+test('smelting acquires input and fuel before executing the smelt task', async () => {
+  const items = []; const collected = []; let smelted = false;
+  const bot = { id: 'bot-a', status: 'READY', options: { host: 'localhost', port: 25565 }, adapter: {
+    snapshot: () => ({ inventorySummary: items, dimension: 'overworld' }),
+    findSourceBlocks: async ({ item }) => item === 'raw_iron' ? ['iron_ore'] : item === 'coal' ? ['coal_ore'] : [],
+    collect: async ({ block, count }) => { collected.push({ block, count }); items.push({ name: block === 'iron_ore' ? 'raw_iron' : 'coal', count }); },
+    smeltRequirements: async ({ item }) => item === 'iron_ingot' ? ({ item, input: { name: 'raw_iron', count: 1 }, fuel: { name: 'coal', count: 1 }, furnace: true }) : null,
+    smeltItem: async ({ item, count }) => { smelted = true; items.push({ name: item, count }); return { item, count }; }
+  } };
+  const service = createAcquisitionService({ bots: { list: () => [bot], get: () => bot }, logistics: { stock: async () => [] }, events: { publish: async () => {} } });
+  const result = await service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'iron_ingot', count: 1 });
+  assert.equal(result.status, 'COMPLETED'); assert.equal(smelted, true); assert.deepEqual(collected, [{ block: 'iron_ore', count: 1 }, { block: 'coal_ore', count: 1 }]);
+});
