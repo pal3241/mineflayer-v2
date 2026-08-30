@@ -246,6 +246,25 @@
           <div id="autonomyObjectives" class="timeline"></div>
         </section>
 
+        <section class="panel">
+          <div class="panel-title"><div><p class="eyebrow">ITEM ACQUISITION</p><h2>Universal automatic item acquisition</h2></div><span id="acquisitionSettingStatus" class="badge">—</span></div>
+          <form id="acquisitionSettingsForm" class="form-grid">
+            <label class="check"><input id="acquisitionEnabled" type="checkbox"><span>Aktifkan item acquisition</span></label>
+            <label>Max depth<input id="acquisitionMaxDepth" type="number" min="1" max="32" step="1" required></label>
+            <label>Max subtasks<input id="acquisitionMaxSubtasks" type="number" min="1" max="256" step="1" required></label>
+            <label>Max attempts<input id="acquisitionMaxAttempts" type="number" min="1" max="10" step="1" required></label>
+            <label>Max distance (blocks)<input id="acquisitionMaxDistance" type="number" min="16" step="1" required></label>
+            <label class="check"><input id="acquisitionStorageFirst" type="checkbox"><span>Prioritaskan storage dulu</span></label>
+            <label class="check"><input id="acquisitionAllowFleet" type="checkbox"><span>Izinkan pinjam antar bot</span></label>
+            <label class="check"><input id="acquisitionAllowCraft" type="checkbox"><span>Izinkan craft</span></label>
+            <label class="check"><input id="acquisitionAllowSmelt" type="checkbox"><span>Izinkan smelt</span></label>
+            <label class="check"><input id="acquisitionAllowCollect" type="checkbox"><span>Izinkan collect</span></label>
+            <label class="check"><input id="acquisitionAllowPartial" type="checkbox"><span>Izinkan partial fulfillment</span></label>
+            <label class="check"><input id="acquisitionToolPreservation" type="checkbox"><span>Jaga tool yang dipakai</span></label>
+            <button class="button primary full" type="submit">Apply acquisition settings</button>
+          </form>
+        </section>
+
         <section class="panel full settings-log-panel">
           <div class="panel-title"><div><p class="eyebrow">OBSERVABILITY</p><h2>Runtime logs</h2></div><button id="refreshRuntimeLogs" class="icon-button">Refresh</button></div>
           <form id="logSettingsForm" class="inline-form settings-log-controls"><select id="logLevel"><option value="debug">Debug</option><option value="info">Info</option><option value="warn">Warn</option><option value="error">Error</option><option value="silent">Silent</option></select><button class="button secondary" type="submit">Set log level</button></form>

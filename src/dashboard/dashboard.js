@@ -39,10 +39,25 @@ function render() {
   renderCameras(); bindDynamic();
 }
 function renderSettings() {
-  if (!state.settings) return; const llm = state.settings.llm; const autonomy = state.settings.autonomy;
+  if (!state.settings) return; const llm = state.settings.llm; const autonomy = state.settings.autonomy; const acquisition = state.settings.acquisition ?? {};
   hydrateFormOnce($('#llmSettingsForm'), () => { $('#llmProvider').value = llm.provider ?? 'none'; $('#openRouterModel').value = llm.openrouter.model; $('#openRouterEndpoint').value = llm.openrouter.endpoint; $('#nvidiaNimModel').value = llm.nvidia.model; $('#nvidiaNimEndpoint').value = llm.nvidia.endpoint; });
   $('#llmSettingStatus').textContent = llm.status?.enabled ? `${llm.status.provider} · ${llm.status.model}` : 'disabled'; const keySummary = provider => provider.configuredKeys.map((configured, index) => `#${index + 1} ${configured ? 'configured' : 'empty'}`).join(' · '); $('#keyStatus').textContent = `OpenRouter: ${keySummary(llm.openrouter)}. NVIDIA: ${keySummary(llm.nvidia)}. Mengisi key baru hanya mengganti pool provider tersebut.`;
   hydrateCleanForm($('#logSettingsForm'), () => { $('#logLevel').value = state.settings.log.level; }); hydrateCleanForm($('#autonomySettingsForm'), () => { $('#autonomyEnabled').checked = autonomy.status === 'ACTIVE'; $('#autonomyInterval').value = autonomy.intervalMs; $('#autonomyBudget').value = autonomy.maxActionsPerHour; }); $('#autonomySettingStatus').textContent = autonomy.status;
+  hydrateCleanForm($('#acquisitionSettingsForm'), () => {
+    $('#acquisitionEnabled').checked = Boolean(acquisition.enabled);
+    $('#acquisitionMaxDepth').value = acquisition.maxDepth ?? 8;
+    $('#acquisitionMaxSubtasks').value = acquisition.maxSubtasks ?? 32;
+    $('#acquisitionMaxAttempts').value = acquisition.maxAttempts ?? 3;
+    $('#acquisitionMaxDistance').value = acquisition.maxDistance ?? 2000;
+    $('#acquisitionStorageFirst').checked = Boolean(acquisition.storageFirst);
+    $('#acquisitionAllowFleet').checked = Boolean(acquisition.allowFleet);
+    $('#acquisitionAllowCraft').checked = Boolean(acquisition.allowCraft);
+    $('#acquisitionAllowSmelt').checked = Boolean(acquisition.allowSmelt);
+    $('#acquisitionAllowCollect').checked = Boolean(acquisition.allowCollect);
+    $('#acquisitionAllowPartial').checked = Boolean(acquisition.allowPartial);
+    $('#acquisitionToolPreservation').checked = Boolean(acquisition.toolPreservation);
+  });
+  $('#acquisitionSettingStatus').textContent = acquisition.enabled ? 'ENABLED' : 'DISABLED';
   $('#autonomyObjectives').innerHTML = state.autonomyObjectives.length ? state.autonomyObjectives.map(objective => `<div class="goal-row"><div><b>${escapeHtml(objective.text)}</b><small>${escapeHtml(objective.selector)} · runs ${objective.runs} · success ${objective.successes} · failed ${objective.failures}</small></div><button class="button danger" data-remove-objective="${escapeHtml(objective.id)}">Remove</button></div>`).join('') : empty('No autonomous objectives');
 }
 function replaceOptions(select, html) { const selected = select.value; select.innerHTML = html; if ([...select.options].some(option => option.value === selected)) select.value = selected; }
@@ -92,6 +107,7 @@ $('#llmSettingsForm').onsubmit = async event => { event.preventDefault(); const 
 $('#autonomySettingsForm').onsubmit = async event => { event.preventDefault(); const input = { enabled: $('#autonomyEnabled').checked, intervalMs: Number($('#autonomyInterval').value), maxActionsPerHour: Number($('#autonomyBudget').value) }; try { await api('/api/v1/settings/autonomy', { method: 'PATCH', body: JSON.stringify(input) }); markClean(event.target); toast('Autonomy settings applied'); await refresh(); } catch (error) { toast(error.message, true); } };
 $('#autonomyObjectiveForm').onsubmit = async event => { event.preventDefault(); const input = { text: $('#autonomyObjective').value.trim(), selector: $('#autonomySelector').value.trim() }; try { await api('/api/v1/autonomy/objectives', { method: 'POST', body: JSON.stringify(input) }); $('#autonomyObjective').value = ''; toast('Autonomy objective added'); await refresh(); } catch (error) { toast(error.message, true); } };
 $('#logSettingsForm').onsubmit = async event => { event.preventDefault(); try { await api('/api/v1/settings/log', { method: 'PATCH', body: JSON.stringify({ level: $('#logLevel').value }) }); markClean(event.target); toast('Runtime log level applied'); await refresh(); await loadRuntimeLogs(); } catch (error) { toast(error.message, true); } };
+$('#acquisitionSettingsForm').onsubmit = async event => { event.preventDefault(); const input = { enabled: $('#acquisitionEnabled').checked, maxDepth: Number($('#acquisitionMaxDepth').value), maxSubtasks: Number($('#acquisitionMaxSubtasks').value), maxAttempts: Number($('#acquisitionMaxAttempts').value), maxDistance: Number($('#acquisitionMaxDistance').value), storageFirst: $('#acquisitionStorageFirst').checked, allowFleet: $('#acquisitionAllowFleet').checked, allowCraft: $('#acquisitionAllowCraft').checked, allowSmelt: $('#acquisitionAllowSmelt').checked, allowCollect: $('#acquisitionAllowCollect').checked, allowPartial: $('#acquisitionAllowPartial').checked, toolPreservation: $('#acquisitionToolPreservation').checked }; try { await api('/api/v1/settings/acquisition', { method: 'PATCH', body: JSON.stringify(input) }); markClean(event.target); toast('Acquisition settings applied'); await refresh(); } catch (error) { toast(error.message, true); } };
 $('#memorySettingsForm').onsubmit = async event => { event.preventDefault(); const input = { maxRecords: Number($('#memoryMaxRecords').value), shortTermMaxRecords: Number($('#memoryShortLimit').value), shortTermTtlMs: Number($('#memoryShortTtl').value), promotionAccesses: Number($('#memoryPromotionAccesses').value), promotionImportance: Number($('#memoryPromotionImportance').value), consolidationIntervalMs: Number($('#memoryConsolidationInterval').value) }; try { await api('/api/v1/settings/memory', { method: 'PATCH', body: JSON.stringify(input) }); markClean(event.target); toast('Memory runtime settings applied'); await loadMemory(); } catch (error) { toast(error.message, true); } };
 $('#recoverySettingsForm').onsubmit = async event => { event.preventDefault(); const input = { enabled: $('#recoveryEnabled').checked, maxAttempts: Number($('#recoveryMaxAttempts').value), minScore: Number($('#recoveryMinScore').value), optionalScore: Number($('#recoveryOptionalScore').value), urgentScore: Number($('#recoveryUrgentScore').value), despawnTicks: Number($('#recoveryDespawnTicks').value), safetyMarginTicks: Number($('#recoverySafetyMarginTicks').value), maxDistance: Number($('#recoveryMaxDistance').value), dangerLimit: Number($('#recoveryDangerLimit').value) }; try { await api('/api/v1/settings/recovery', { method: 'PATCH', body: JSON.stringify(input) }); markClean(event.target); toast('Death recovery settings applied'); await loadRecovery(); } catch (error) { toast(error.message, true); } };
 $('#commandForm').onsubmit = async event => { event.preventDefault(); await executeCommand($('#commandBot').value, $('#commandInput').value); };
@@ -220,6 +236,6 @@ async function deleteMemoryRecord(category, id, button) { const record = state.m
 function formatMemoryDate(value) { if (!value) return 'never'; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : 'invalid timestamp'; }
 function formatDuration(milliseconds) { const seconds = Math.round(Number(milliseconds) / 1000); return seconds >= 60 ? `${Math.round(seconds / 60)} min` : `${seconds} sec`; }
 
-[$('#llmSettingsForm'), $('#autonomySettingsForm'), $('#logSettingsForm'), $('#memorySettingsForm'), $('#recoverySettingsForm')].forEach(trackDirty);
+[$('#llmSettingsForm'), $('#autonomySettingsForm'), $('#acquisitionSettingsForm'), $('#logSettingsForm'), $('#memorySettingsForm'), $('#recoverySettingsForm')].forEach(trackDirty);
 document.addEventListener('visibilitychange', () => { if (document.hidden) { clearTimeout(state.polling.timer); clearTimeout(state.recovery.timer); } else { void refresh(); if (recoveryViewActive()) void loadRecovery(); } });
 void refresh();
