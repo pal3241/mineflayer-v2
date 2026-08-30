@@ -20,6 +20,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
   const settings = normalizeConfig({ ...DEFAULT_CONFIG, ...config });
   const records = new Map();
   const flights = new Map();
+  const specialSources = new Map();
   let taskRunner = null;
   let initialized = false;
   let persistenceTail = Promise.resolve();
@@ -67,6 +68,13 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
     Object.assign(settings, normalizeConfig({ ...settings, ...input }));
     logger?.info?.('acquisition.settings.configured', { settings: structuredClone(settings) });
     return structuredClone(settings);
+  };
+
+  const registerSpecialSource = source => {
+    const normalized = normalizeSpecialSource(source);
+    if (specialSources.has(normalized.name)) throw new ConflictError(`Acquisition special source '${normalized.name}' is already registered`);
+    specialSources.set(normalized.name, normalized);
+    return normalized.name;
   };
 
   const resolve = async input => {
@@ -196,6 +204,20 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       }
     }
 
+    if (requirement.type === 'ITEM') {
+      const special = [...specialSources.values()].find(source => source.matches(requirement.item));
+      if (special) {
+        const declaredDependencies = special.dependencies({ item: requirement.item, count: shortage });
+        if (!Array.isArray(declaredDependencies)) throw new ValidationError(`Acquisition special source '${special.name}' dependencies must return an array`);
+        const dependencies = declaredDependencies.map(dependency => normalizeRequirement({ ...dependency, requesterBotId: target.id, purpose: `special source ${special.name} for ${requirement.item}`, priority: requirement.priority }));
+        request.status = 'SPECIAL_SOURCE_PLANNED';
+        request.updatedAt = new Date().toISOString();
+        request.trace.push({ at: request.updatedAt, step: 'special-source-plan', detail: `${special.name}:${requirement.item}:${shortage}` });
+        await events?.publish?.('acquisition.special.planned', { requestId: request.id, requirement, source: special.name, dependencies }, { source: 'acquisition' });
+        return { requestId: request.id, status: 'SPECIAL_SOURCE_PLANNED', source: 'special', specialSource: special.name, item: requirement.item, count: shortage, requirement, dependencies };
+      }
+    }
+
     if (settings.allowCollect && requirement.type === 'ITEM') {
       const blocks = runtime.adapter?.findSourceBlocks ? await runtime.adapter.findSourceBlocks({ item: requirement.item }) : [];
       if (blocks.length) {
@@ -286,6 +308,16 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
       return await complete(plan, request, { execution: { input, fuel, smelt: result } }, events, save);
     }
+    if (plan.status === 'SPECIAL_SOURCE_PLANNED') {
+      const source = specialSources.get(plan.specialSource);
+      if (!source) throw new ConflictError(`Acquisition special source '${plan.specialSource}' is unavailable`);
+      const dependencies = [];
+      for (const dependency of plan.dependencies) dependencies.push(await acquire(dependency, depth + 1, budget));
+      const execution = await runAdapter(taskRunner, runtime, source.capability, { item: plan.item, count: plan.count }, () => source.execute({ runtime, item: plan.item, count: plan.count, context: {} }));
+      verifyAcquired(runtime, plan.item, plan.requirement.count);
+      await events?.publish?.('acquisition.special.completed', { requestId: plan.requestId, source: source.name, item: plan.item, count: plan.count }, { source: 'acquisition' });
+      return await complete(plan, request, { execution: { dependencies, special: execution } }, events, save);
+    }
     throw new ConflictError(`Acquisition plan '${plan.status}' cannot be executed`);
   };
 
@@ -313,6 +345,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
   return Object.freeze({
     settings: () => structuredClone(settings),
     configure,
+    registerSpecialSource,
     configureTaskRunner: runner => { if (runner !== null && typeof runner !== 'function') throw new ValidationError('Acquisition task runner must be a function or null'); taskRunner = runner; },
     initialize: async () => { if (initialized || !repository?.list) return records.size; for (const request of await repository.list()) records.set(request.id, request); initialized = true; return records.size; },
     handleBotDeath: async botId => { const affected = []; for (const request of records.values()) if (request.requesterBotId === botId && !['COMPLETED', 'FAILED', 'PARTIAL'].includes(request.status)) { request.status = 'RECOVERY_REQUIRED'; request.updatedAt = new Date().toISOString(); request.trace.push({ at: request.updatedAt, step: 'recovery-required', detail: `bot ${botId} died` }); await save(request); affected.push(structuredClone(request)); } return affected; },
@@ -416,6 +449,16 @@ function normalizeConfig(input = {}) {
   if (typeof config.allowPartial !== 'boolean') throw new ValidationError('Acquisition allowPartial must be a boolean');
   if (typeof config.toolPreservation !== 'boolean') throw new ValidationError('Acquisition toolPreservation must be a boolean');
   return config;
+}
+
+function normalizeSpecialSource(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ValidationError('Acquisition special source must be an object');
+  const name = String(input.name ?? '').trim().toLowerCase();
+  const capability = String(input.capability ?? '').trim();
+  if (!/^[a-z0-9-]{1,64}$/.test(name)) throw new ValidationError('Acquisition special source name must contain 1-64 safe characters');
+  if (!/^minecraft\.[a-z0-9.-]{1,80}$/.test(capability)) throw new ValidationError(`Acquisition special source '${name}' requires a valid Minecraft capability`);
+  if (typeof input.matches !== 'function' || typeof input.dependencies !== 'function' || typeof input.execute !== 'function') throw new ValidationError(`Acquisition special source '${name}' requires matches, dependencies, and execute functions`);
+  return Object.freeze({ name, capability, matches: input.matches, dependencies: input.dependencies, execute: input.execute });
 }
 
 function normalizeRequirement(requirement) {

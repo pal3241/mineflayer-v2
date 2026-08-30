@@ -1,6 +1,6 @@
 # Panduan Penggunaan MineHive
 
-Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.6.0. MineHive membutuhkan Node.js 22 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
+Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.7.3 Phase 1. MineHive membutuhkan Node.js 22 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
 
 ## 1. Persiapan
 
@@ -386,6 +386,48 @@ Output LLM hanya boleh menghasilkan intent terstruktur yang telah diizinkan. LLM
 ```
 
 Command ini menghentikan pathfinding, pengumpulan block, dan task aktif milik bot.
+
+### Survival capability 0.7.3 Phase 1
+
+Bot mengevaluasi armor setelah spawn dan hanya memasang upgrade yang lolos policy durability serta curse. Wool dan milk terhubung ke Acquisition: permintaan `white_wool` akan menyiapkan shears lalu mencari sheep, sedangkan `milk_bucket` akan menyiapkan bucket lalu mencari cow. Kedua operasi memverifikasi delta inventory.
+
+Policy permanen dapat diatur melalui `.env`:
+
+```env
+MINEHIVE_SURVIVAL_ENABLED=true
+MINEHIVE_AUTO_ARMOR_ENABLED=true
+MINEHIVE_ARMOR_MINIMUM_DURABILITY_PERCENT=10
+MINEHIVE_ARMOR_ALLOW_BINDING_CURSE=false
+MINEHIVE_SURVIVAL_ALLOW_ANIMAL_KILL=false
+MINEHIVE_MINIMUM_SHEEP_RESERVE=2
+MINEHIVE_MINIMUM_COW_RESERVE=2
+MINEHIVE_INTERACTION_COOLDOWN_MS=500
+MINEHIVE_ENTITY_SEARCH_DISTANCE=48
+```
+
+Capability survival dapat dipanggil sebagai action API, misalnya:
+
+```powershell
+$headers = @{ Authorization = 'Bearer ganti-dengan-token-rahasia' }
+
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:3000/api/v1/bots/BOT_ID/actions/armor `
+  -Headers $headers -ContentType application/json -Body '{}'
+
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:3000/api/v1/bots/BOT_ID/actions/wool `
+  -Headers $headers -ContentType application/json `
+  -Body '{"item":"white_wool","count":3}'
+
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:3000/api/v1/bots/BOT_ID/actions/open_door `
+  -Headers $headers -ContentType application/json `
+  -Body '{"position":{"x":10,"y":64,"z":20}}'
+```
+
+Action lain yang tersedia adalah `equip`, `unequip`, `use_item`, `interact_entity`, `interact_block`, `shear`, `milk`, `sleep`, `wake`, `close_door`, `open_trapdoor`, dan `close_trapdoor`. Semua action masuk Goal/TaskExecutor dan menerima cancellation dari task context.
+
+Policy runtime dapat diubah melalui `PATCH /api/v1/settings/survival`. Nilai aktif juga tersedia pada `GET /api/v1/settings` dan snapshot dashboard.
 
 ## 6. Menggunakan REST API
 
