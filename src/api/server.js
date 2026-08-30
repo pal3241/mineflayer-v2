@@ -43,8 +43,10 @@ export class ApiServer {
         if (req.method === 'GET' && url.pathname === '/api/v1/settings/log-files') return send(200, { data: this.application.logStore?.list() ?? [] });
         if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'settings' && parts[3] === 'log-files' && parts[4]) { if (!this.application.logStore) throw new ValidationError('Saved logs are disabled in the test profile'); return send(200, { data: this.application.logStore.read(decodeURIComponent(parts[4]), Number(url.searchParams.get('limit') ?? 1000)) }); }
         if (req.method === 'PATCH' && url.pathname === '/api/v1/settings/autonomy') return send(200, { data: this.application.autonomy.configure(await body(req)) });
+        if (req.method === 'PATCH' && url.pathname === '/api/v1/settings/recovery') return send(200, { data: await this.application.configureRecovery(await body(req)) });
         if (req.method === 'PATCH' && url.pathname === '/api/v1/settings/memory') return send(200, { data: await this.application.configureMemory(await body(req)) });
         if (req.method === 'POST' && url.pathname === '/api/v1/settings/reset') return send(200, { data: await this.application.resetRuntimeSettings() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/recovery/dashboard') return send(200, { data: await recoveryDashboard(this.application) });
         if (req.method === 'GET' && url.pathname === '/api/v1/metrics') return send(200, this.application.metrics.snapshot());
         if (req.method === 'GET' && url.pathname === '/api/v1/bots') return send(200, { data: this.application.bots.list() });
         if (req.method === 'POST' && url.pathname === '/api/v1/bots') return send(201, { data: await this.application.botProfiles.create(await body(req)) });
@@ -142,6 +144,35 @@ export class ApiServer {
 function consumeRequest(clients, address, limit) { const now = Date.now(); const previous = clients.get(address); const current = !previous || previous.resetAt <= now ? { count: 1, resetAt: now + 60_000 } : { count: previous.count + 1, resetAt: previous.resetAt }; clients.set(address, current); return { allowed: current.count <= limit, limit, remaining: Math.max(0, limit - current.count), resetAt: current.resetAt }; }
 function cleanupClients(clients, lastCleanup) { const now = Date.now(); if (now - lastCleanup < 60_000) return lastCleanup; for (const [key, value] of clients) if (value.resetAt <= now) clients.delete(key); return now; }
 function processDiagnostics() { const memory = process.memoryUsage(); return { uptimeSeconds: Math.floor(process.uptime()), rssMb: Math.round(memory.rss / 1_048_576), heapUsedMb: Math.round(memory.heapUsed / 1_048_576) }; }
+
+async function recoveryDashboard(application) {
+  const settings = application.recovery.settings();
+  const jobs = await application.recovery.list({});
+  const activeJobs = jobs.filter(job => !['RECOVERED', 'PARTIAL_RECONCILED', 'FAILED', 'EXPIRED_RECONCILED', 'CANCELLED', 'UNRECOVERABLE'].includes(job.status));
+  const totalRecovered = jobs.filter(job => job.status === 'RECOVERED').reduce((sum, job) => sum + sumItemCounts(job.items), 0);
+  const permanentLoss = jobs.filter(job => ['FAILED', 'UNRECOVERABLE', 'EXPIRED_RECONCILED'].includes(job.status)).reduce((sum, job) => sum + sumItemCounts(job.items), 0);
+  const ignoredJunk = jobs.reduce((sum, job) => sum + job.items.filter(item => item.decision === 'IGNORE').reduce((total, item) => total + item.count, 0), 0);
+  const successRate = jobs.length ? (jobs.filter(job => ['RECOVERED', 'PARTIAL_RECONCILED'].includes(job.status)).length / jobs.length) : 0;
+  const timeline = jobs.flatMap(job => (job.lifecycle ?? []).map(entry => ({ ...entry, jobId: job.id, botId: job.deadBotId, event: entry.state, at: entry.at, item: job.items[0]?.name ?? null, count: job.items.reduce((total, item) => total + item.count, 0) })));
+  return {
+    metrics: {
+      activeJobs: activeJobs.length,
+      urgentRecoveries: activeJobs.filter(job => job.recoveryScore >= settings.urgentScore || job.despawn?.status === 'URGENT').length,
+      recoveredItems: totalRecovered,
+      permanentLoss,
+      ignoredJunk,
+      successRate
+    },
+    jobs: activeJobs.slice().sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt)),
+    timeline: timeline.sort((left, right) => Date.parse(right.at) - Date.parse(left.at)).slice(0, 100),
+    settings,
+    status: activeJobs.length ? { status: 'ACTIVE', activeJobs: activeJobs.length } : 'IDLE'
+  };
+}
+
+function sumItemCounts(items) {
+  return Array.isArray(items) ? items.reduce((sum, item) => sum + (Number(item?.count ?? 0) || 0), 0) : 0;
+}
 
 async function memoryDashboard(application, searchParams) {
   const category = searchParams.get('category') ?? 'all'; if (!['all', 'world', 'semantic'].includes(category)) throw new ValidationError("Memory category must be 'all', 'world', or 'semantic'");

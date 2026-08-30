@@ -135,11 +135,11 @@
           <div class="panel-title"><div><p class="eyebrow">RUNTIME POLICY</p><h2>Recovery settings</h2></div><span id="recoverySettingStatus" class="badge">—</span></div>
           <form id="recoverySettingsForm" class="form-grid">
             <label class="check"><input id="recoveryEnabled" type="checkbox"><span>Aktifkan death recovery</span></label>
-            <label>Max attempts<input id="recoveryMaxAttempts" type="number" min="1" max="10" step="1" required></label>
+            <label>Max attempts<input id="recoveryMaxAttempts" type="number" min="1" max="20" step="1" required></label>
             <label>Minimum score<input id="recoveryMinScore" type="number" min="0" max="100" step="1" required></label>
             <label>Optional score<input id="recoveryOptionalScore" type="number" min="0" max="100" step="1" required></label>
             <label>Urgent score<input id="recoveryUrgentScore" type="number" min="0" max="100" step="1" required></label>
-            <label>Item despawn (ticks)<input id="recoveryDespawnTicks" type="number" min="1200" max="72000" step="20" required></label>
+            <label>Item despawn (ticks)<input id="recoveryDespawnTicks" type="number" min="1" step="20" required></label>
             <label>Safety margin (ticks)<input id="recoverySafetyMarginTicks" type="number" min="0" step="20" required></label>
             <label>Max distance (blocks)<input id="recoveryMaxDistance" type="number" min="1" step="1" required></label>
             <label>Danger limit<input id="recoveryDangerLimit" type="number" min="0" max="1" step="0.01" required></label>

@@ -12,6 +12,7 @@ Folder ini menyimpan satu catatan untuk setiap release atau update fitur MineHiv
 ## Daftar release
 
 - [`0.7.0 — Logistik Foundation`](0.7.0-logistik-foundation.md)
+- [`0.7.1 — Intelligent Death Recovery`](0.7.1-intelligent-death-recovery.md)
 
 ## Daftar update fitur
 

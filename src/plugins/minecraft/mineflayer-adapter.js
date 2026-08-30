@@ -257,7 +257,7 @@ export class MineflayerAdapter extends EventEmitter {
     const bot = this.client;
     return { connection: this.status, position: bot?.entity?.position ? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z } : null,
       health: bot?.health ?? null, food: bot?.food ?? null, alive: this.alive, dimension: bot?.game?.dimension ?? null,
-      inventorySummary: bot?.inventory?.items?.().map(item => ({ name: item.name, count: item.count, customName: recoveryCustomName(item), enchanted: recoveryEnchanted(item) })) ?? [], plugins: { ...this.pluginStatus },
+      inventorySummary: bot?.inventory?.items?.().map(item => ({ name: item.name, count: item.count })) ?? [], plugins: { ...this.pluginStatus },
       camera: { active: Boolean(bot?.viewer), port: this.viewerPort ?? null, mode: this.viewerMode ?? null, version: bot?.version ?? null, renderVersion: this.viewerRenderVersion ?? null, versionSupported: this.viewerVersionSupported ?? null }, combat: { ...this.combatState }, timestamp: new Date().toISOString() };
   }
 

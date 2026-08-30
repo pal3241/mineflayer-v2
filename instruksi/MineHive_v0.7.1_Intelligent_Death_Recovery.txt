@@ -1,0 +1,2140 @@
+MINEHIVE v0.7.1 — INTELLIGENT DEATH RECOVERY
+OFFLINE IMPLEMENTATION PLAN
+============================================================
+
+Project:
+MineHive / mineflayer-v2
+
+Target Version:
+0.7.1
+
+Tema:
+Intelligent Death Recovery
+Automatic Item Death Recovery
+Item Recovery Value Evaluator
+
+============================================================
+1. TUJUAN 0.7.1
+============================================================
+
+MineHive 0.7.1 berfokus pada recovery item ketika bot mati.
+
+Sistem tidak boleh langsung mengambil semua item yang jatuh.
+
+MineHive harus dapat menjawab:
+
+"Apakah item ini layak diambil kembali?"
+
+Contoh:
+
+Bot mati membawa:
+- diamond x8
+- iron_ingot x64
+- oak_log x32
+- dirt x64
+- rotten_flesh x12
+
+Hasil evaluasi:
+
+diamond x8
+=> REQUIRED
+
+iron_ingot x64
+=> REQUIRED
+
+oak_log x32
+=> OPTIONAL
+
+dirt x64
+=> IGNORE
+
+rotten_flesh x12
+=> IGNORE
+
+Recovery bot cukup memprioritaskan item yang benar-benar bernilai.
+
+============================================================
+2. FLOW UTAMA
+============================================================
+
+BOT DEATH
+    |
+    v
+Capture Death Information
+    |
+    v
+Create Death Manifest
+    |
+    v
+Create DEATH_DROP Memory
+    |
+    v
+Check Active Logistics Transfer
+    |
+    v
+Evaluate Dropped Items
+    |
+    +-----------------------------+
+    |                             |
+    v                             v
+Worth Recovering?               NO
+    |                             |
+   YES                            v
+    |                       Record / Ignore Loss
+    v                             |
+Create Recovery Job              v
+    |                       Cleanup Recovery Memory
+    v
+Select Recovery Bot
+    |
+    v
+Navigate To Death Location
+    |
+    v
+Search Dropped Items
+    |
+    v
+Collect REQUIRED
+    |
+    v
+Collect OPTIONAL If Cheap
+    |
+    v
+Verify Recovered Items
+    |
+    +-------------+-------------+
+    |             |             |
+    v             v             v
+ FULL          PARTIAL        EXPIRED
+    |             |             |
+    v             v             v
+Resume        Reconcile      Record Loss
+Transfer        Loss
+    |             |             |
+    +-------------+-------------+
+                  |
+                  v
+Delete DEATH_DROP Memory
+                  |
+                  v
+Store Small DEATH_EPISODE
+
+============================================================
+3. DEATH MANIFEST
+============================================================
+
+Saat bot mati, sistem membuat Death Manifest.
+
+Contoh:
+
+{
+  "id": "death-9182",
+
+  "botId": "courier-2",
+
+  "worldKey": "localhost:25565",
+  "dimension": "overworld",
+
+  "position": {
+    "x": 421,
+    "y": 64,
+    "z": -92
+  },
+
+  "items": [
+    {
+      "name": "diamond",
+      "count": 8
+    },
+    {
+      "name": "iron_ingot",
+      "count": 64
+    },
+    {
+      "name": "dirt",
+      "count": 64
+    }
+  ],
+
+  "relatedTransferId": "transfer-182",
+
+  "status": "DETECTED",
+
+  "createdAt": "..."
+}
+
+============================================================
+4. SUMBER DATA INVENTORY
+============================================================
+
+Jangan hanya mengambil inventory setelah bot sudah mati.
+
+Gunakan:
+
+1. Last Known Inventory Snapshot
+2. Active Logistics Transfer Manifest
+3. Runtime Inventory State
+4. Event inventory terakhir sebelum death jika tersedia
+
+Contoh:
+
+Last Known Inventory:
+
+diamond x8
+iron_ingot x64
+dirt x64
+
+Active transfer:
+
+iron_ingot x64
+
+Maka sistem tahu:
+
+iron_ingot
+=> logistics cargo
+
+diamond
+=> valuable item
+
+dirt
+=> kemungkinan junk
+
+============================================================
+5. DEATH DROP MEMORY
+============================================================
+
+Ketika bot mati, buat temporary short-term memory:
+
+type:
+DEATH_DROP
+
+Contoh:
+
+{
+  "type": "DEATH_DROP",
+
+  "memoryType": "SHORT_TERM",
+
+  "deadBotId": "courier-2",
+
+  "worldKey": "localhost:25565",
+  "dimension": "overworld",
+
+  "position": {
+    "x": 421,
+    "y": 64,
+    "z": -92
+  },
+
+  "relatedTransferId": "transfer-182",
+
+  "assignedBotId": null,
+
+  "status": "PENDING",
+
+  "despawnBudgetTicks": 6000,
+  "estimatedLoadedTicks": 0,
+
+  "recoveryAttempts": 0,
+
+  "createdAt": "..."
+}
+
+DEATH_DROP bersifat operational memory.
+
+Memory ini dihapus jika recovery sudah:
+- selesai
+- gagal permanen
+- item sudah dipastikan despawn
+- hasil partial sudah direkonsiliasi
+
+============================================================
+6. ITEM DESPAWN
+============================================================
+
+Default dropped item Minecraft memiliki umur sekitar:
+
+6000 game ticks
+≈ 5 menit
+
+PENTING:
+
+Jangan hanya memakai:
+
+Date.now() - deathTime > 5 menit
+
+untuk membatalkan recovery.
+
+Timer item bergantung pada chunk / entity ticking.
+
+Jika chunk unload, timer item dapat berhenti.
+
+Karena itu konsep yang digunakan:
+
+DESPAWN BUDGET
+
+despawnBudgetTicks = 6000
+
+estimatedLoadedTicks = perkiraan tick saat death chunk aktif
+
+remainingTicks =
+despawnBudgetTicks - estimatedLoadedTicks
+
+============================================================
+7. CONTOH DESPAWN BUDGET
+============================================================
+
+Bot mati.
+
+Initial:
+
+despawnBudgetTicks = 6000
+
+Death chunk loaded selama:
+
+1200 ticks
+
+Remaining:
+
+4800 ticks
+
+Kemudian chunk unload selama 10 menit.
+
+Remaining tetap diperkirakan:
+
+4800 ticks
+
+Ketika recovery bot mendekat dan chunk loaded kembali:
+
+timer kembali berjalan.
+
+============================================================
+8. RECOVERY URGENCY
+============================================================
+
+Recovery Scheduler menggunakan:
+
+remainingDespawnTicks
+
+Contoh:
+
+Death A:
+remaining = 700 ticks
+
+Death B:
+remaining = 3200 ticks
+
+Death C:
+remaining = 5200 ticks
+
+Priority:
+
+1. Death A
+2. Death B
+3. Death C
+
+============================================================
+9. CHUNK UNLOAD BEHAVIOR
+============================================================
+
+Jika death chunk diperkirakan unload:
+
+status:
+
+TIMER_PAUSED_ESTIMATED
+
+Tidak perlu mengirim bot yang tidak berguna ke lokasi.
+
+Karena bot yang mendekati area bisa membuat chunk aktif kembali.
+
+Flow:
+
+DEATH_DROP
+    |
+    v
+Is Chunk Active?
+   / \
+ YES  NO
+ |     |
+ v     v
+URGENT TIMER_PAUSED
+ |     |
+ v     v
+Recover Plan First
+
+============================================================
+10. ITEM RECOVERY VALUE EVALUATOR
+============================================================
+
+Subsystem:
+
+ItemRecoveryValueEvaluator
+
+Tujuan:
+
+Menentukan apakah item:
+- REQUIRED
+- OPTIONAL
+- IGNORE
+
+============================================================
+11. TIGA KELAS RECOVERY
+============================================================
+
+REQUIRED
+--------
+
+Item harus dicari.
+
+Recovery belum dianggap selesai jika item REQUIRED belum terverifikasi.
+
+Contoh:
+- diamond
+- netherite
+- enchanted gear
+- important logistics cargo
+- task critical material
+
+
+OPTIONAL
+--------
+
+Ambil hanya jika:
+- dekat
+- inventory masih cukup
+- tidak menambah risiko besar
+
+Contoh:
+- wood
+- coal
+- food berlebih
+- common resources
+
+
+IGNORE
+------
+
+Tidak perlu dicari.
+
+Contoh default:
+- dirt
+- rotten_flesh
+- junk
+- low-value item
+
+============================================================
+12. BASE ITEM PRIORITY
+============================================================
+
+CRITICAL
+- diamond
+- netherite_ingot
+- diamond equipment
+- enchanted equipment
+- elytra
+- rare / unique item
+- valuable shulker box
+
+HIGH
+- iron_ingot
+- gold_ingot
+- diamond_ore
+- redstone
+- lapis
+- valuable tools
+
+NORMAL
+- logs
+- food
+- coal
+- building material
+
+LOW
+- cobblestone
+- stone
+- seeds
+
+TRASH
+- dirt
+- rotten_flesh
+- poisonous_potato
+- junk items
+
+CATATAN:
+
+Base priority hanyalah nilai dasar.
+
+Final value harus dinamis.
+
+============================================================
+13. DYNAMIC ITEM VALUE
+============================================================
+
+Nilai item dapat berubah berdasarkan kondisi MineHive.
+
+RecoveryValue dapat menggunakan:
+
+BaseValue
++
+Scarcity
++
+CurrentDemand
++
+TaskImportance
++
+ReplacementCost
++
+StrategicValue
++
+Quantity
++
+UniqueItemValue
+
+============================================================
+14. CONTOH DYNAMIC VALUE
+============================================================
+
+Dirt biasanya:
+
+TRASH
+
+Tetapi jika current goal:
+
+Build terrain platform
+
+Required dirt:
+
+4000
+
+Current total dirt:
+
+12
+
+Maka dirt dapat berubah menjadi:
+
+NORMAL
+atau
+HIGH
+
+Contoh lain:
+
+bread biasanya:
+
+NORMAL
+
+Tetapi jika:
+
+Fleet Food:
+CRITICAL
+
+Bread remaining:
+8
+
+maka:
+
+bread
+=> HIGH / CRITICAL
+
+============================================================
+15. TASK IMPORTANCE
+============================================================
+
+Item dapat menjadi penting karena current task.
+
+Contoh:
+
+Goal:
+
+Build Warehouse
+
+Bot membawa:
+
+oak_planks x256
+
+Global Value:
+
+NORMAL
+
+Task Value:
+
+CRITICAL
+
+Maka:
+
+oak_planks x256
+=> REQUIRED
+
+============================================================
+16. LOGISTICS CARGO
+============================================================
+
+Jika item adalah bagian dari active logistics transfer:
+
+item mendapat bonus priority.
+
+Contoh:
+
+Transfer:
+
+warehouse-main
+->
+workshop-east
+
+iron_ingot x64
+
+Courier mati.
+
+Maka:
+
+iron_ingot x64
+=> REQUIRED
+
+walaupun stock iron global masih banyak.
+
+Karena item tersebut sedang berada dalam transaksi aktif.
+
+============================================================
+17. UNIQUE ITEM
+============================================================
+
+Item unik sebaiknya hampir selalu REQUIRED.
+
+Contoh:
+
+{
+  "name": "diamond_pickaxe",
+  "customName": "Miner Alpha",
+  "enchanted": true
+}
+
+Decision:
+
+REQUIRED
+
+============================================================
+18. RECOVERY VALUE VS COST
+============================================================
+
+Tidak cukup hanya menentukan nilai item.
+
+Sistem juga menghitung cost.
+
+RecoveryValue:
+
+BaseValue
++ Scarcity
++ Demand
++ TaskImportance
++ ReplacementCost
++ StrategicValue
++ UniqueValue
+
+
+RecoveryCost:
+
+TravelDistance
++ Danger
++ TimePressure
++ BotWorkload
++ RecoveryRisk
+
+
+Final:
+
+RecoveryScore =
+RecoveryValue - RecoveryCost
+
+============================================================
+19. CONTOH RECOVERY SCORE
+============================================================
+
+Kasus A:
+
+diamond x5
+distance = 500 blocks
+danger = medium
+
+RecoveryValue = 95
+RecoveryCost = 35
+
+RecoveryScore = 60
+
+Decision:
+
+RECOVER
+
+
+Kasus B:
+
+dirt x32
+distance = 500 blocks
+danger = medium
+
+RecoveryValue = 5
+RecoveryCost = 35
+
+RecoveryScore = -30
+
+Decision:
+
+IGNORE
+
+============================================================
+20. SCORE THRESHOLD
+============================================================
+
+Contoh:
+
+0 - 19
+IGNORE
+
+20 - 39
+OPTIONAL
+
+40 - 69
+RECOVER
+
+70 - 100
+URGENT_RECOVERY
+
+Nilai harus configurable.
+
+============================================================
+21. CONTOH DEATH EVALUATION
+============================================================
+
+Bot mati membawa:
+
+diamond x4
+iron_ingot x32
+oak_log x32
+dirt x64
+rotten_flesh x12
+
+Evaluator:
+
+diamond x4
+score = 95
+=> REQUIRED
+
+iron_ingot x32
+score = 75
+=> REQUIRED
+
+oak_log x32
+score = 35
+=> OPTIONAL
+
+dirt x64
+score = 5
+=> IGNORE
+
+rotten_flesh x12
+score = 2
+=> IGNORE
+
+============================================================
+22. DEATH MANIFEST SETELAH EVALUATION
+============================================================
+
+{
+  "type": "DEATH_DROP",
+
+  "botId": "miner-2",
+
+  "items": [
+    {
+      "name": "diamond",
+      "count": 8,
+      "basePriority": "CRITICAL",
+      "dynamicScore": 96,
+      "decision": "REQUIRED"
+    },
+
+    {
+      "name": "iron_ingot",
+      "count": 32,
+      "basePriority": "HIGH",
+      "dynamicScore": 72,
+      "decision": "REQUIRED"
+    },
+
+    {
+      "name": "oak_log",
+      "count": 32,
+      "basePriority": "NORMAL",
+      "dynamicScore": 35,
+      "decision": "OPTIONAL"
+    },
+
+    {
+      "name": "dirt",
+      "count": 64,
+      "basePriority": "TRASH",
+      "dynamicScore": 4,
+      "decision": "IGNORE"
+    }
+  ],
+
+  "recoveryScore": 87,
+
+  "decision": "RECOVER"
+}
+
+============================================================
+23. JIKA SEMUA ITEM SAMPAH
+============================================================
+
+Contoh:
+
+dirt x64
+rotten_flesh x32
+
+Evaluator:
+
+all items = IGNORE
+
+Maka:
+
+Bot Death
+    |
+    v
+Death Manifest
+    |
+    v
+No Valuable Item
+    |
+    v
+NO RECOVERY JOB
+    |
+    v
+Cleanup Operational Memory
+
+Death history tetap boleh disimpan.
+
+============================================================
+24. RECOVERY STATE MACHINE
+============================================================
+
+DETECTED
+    |
+    v
+PENDING
+    |
+    v
+EVALUATING
+    |
+    v
+ASSIGNED
+    |
+    v
+TRAVELLING
+    |
+    v
+SEARCHING
+    |
+    v
+COLLECTING
+    |
+    v
+VERIFYING
+    |
+    +----------------------------+
+    |             |              |
+    v             v              v
+RECOVERED      PARTIAL         FAILED
+
+Additional States:
+
+EXPIRED
+CANCELLED
+UNRECOVERABLE
+REASSIGN_REQUIRED
+
+============================================================
+25. RECOVERY FAILURE CODES
+============================================================
+
+Suggested:
+
+ITEMS_DESPAWNED
+AREA_UNREACHABLE
+DANGER_TOO_HIGH
+RECOVERY_BOT_DIED
+RECOVERY_TIMEOUT
+PARTIAL_RECOVERY
+ITEMS_MISSING
+UNKNOWN_DEATH_LOCATION
+DIMENSION_UNAVAILABLE
+PATHFINDER_FAILED
+INVENTORY_FULL
+MAX_RECOVERY_ATTEMPTS
+VOID_DEATH
+LAVA_LOSS
+FIRE_LOSS
+RECOVERY_NOT_WORTH_COST
+
+============================================================
+26. RECOVERY BOT SELECTOR
+============================================================
+
+Jangan selalu pakai bot yang mati.
+
+RecoveryBotScore dapat menggunakan:
+
+distance
+health
+food
+free inventory space
+equipment
+availability
+current workload
+danger
+remaining despawn ticks
+
+Contoh:
+
+miner-1:
+distance 40
+health 20
+free slots 10
+
+courier-1:
+distance 25
+health 20
+free slots 1
+
+scout-1:
+distance 80
+health 18
+free slots 20
+
+Walaupun courier paling dekat,
+miner atau scout bisa lebih layak.
+
+============================================================
+27. ORIGINAL BOT BOLEH MENGAMBIL ITEM
+============================================================
+
+Bot yang mati boleh melakukan recovery sendiri setelah respawn.
+
+Contoh:
+
+courier-2 respawn:
+80 blocks dari death point
+
+scout-1:
+300 blocks
+
+Maka:
+
+courier-2
+boleh dipilih.
+
+Tetapi jika:
+
+courier-2:
+800 blocks
+
+scout-1:
+120 blocks
+
+Maka:
+
+scout-1
+lebih efisien.
+
+============================================================
+28. ITEM PICKUP PRIORITY
+============================================================
+
+Ketika sampai lokasi:
+
+1. Cari REQUIRED
+2. Collect REQUIRED
+3. Verify REQUIRED
+4. Jika inventory cukup:
+   collect OPTIONAL
+5. IGNORE tidak perlu dicari
+
+Contoh:
+
+REQUIRED:
+diamond x4
+iron x32
+
+OPTIONAL:
+oak_log x32
+
+IGNORE:
+dirt x64
+
+Recovery dianggap sukses ketika:
+
+diamond dan iron terverifikasi.
+
+Dirt tidak perlu ditemukan.
+
+============================================================
+29. FULL RECOVERY
+============================================================
+
+Expected:
+
+diamond x8
+iron_ingot x64
+
+Recovered:
+
+diamond x8
+iron_ingot x64
+
+Result:
+
+RECOVERED
+
+Kemudian:
+
+- update transfer
+- resume transfer jika diperlukan
+- cleanup DEATH_DROP
+- store DEATH_EPISODE
+
+============================================================
+30. PARTIAL RECOVERY
+============================================================
+
+Expected:
+
+diamond x4
+iron_ingot x64
+
+Recovered:
+
+diamond x4
+iron_ingot x59
+
+Result:
+
+PARTIAL_RECOVERY
+
+Reconciliation:
+
+expected iron:
+64
+
+recovered:
+59
+
+lost:
+5
+
+Ledger harus mencatat:
+
+iron_ingot x5
+PERMANENT_LOSS
+
+============================================================
+31. VERIFICATION
+============================================================
+
+Jangan menganggap sukses hanya karena bot tiba di lokasi.
+
+Gunakan inventory delta.
+
+Contoh:
+
+Before:
+
+diamond = 0
+
+Expected:
+
+diamond = 8
+
+After:
+
+diamond = 8
+
+Verified:
+
+true
+
+============================================================
+32. ACTIVE LOGISTICS TRANSFER
+============================================================
+
+Jika bot mati ketika melakukan transfer:
+
+ACTIVE
+    |
+    v
+IN_TRANSFER
+    |
+    v
+BOT_DEATH
+    |
+    v
+RECOVERY_REQUIRED
+    |
+    v
+RECOVERING
+    |
+    +----------------+
+    |                |
+    v                v
+RECOVERED         FAILED
+    |                |
+    v                v
+Resume Transfer   Reconcile Loss
+
+Reservation TIDAK boleh langsung:
+
+RELEASED
+
+Karena cargo mungkin masih berada sebagai dropped item.
+
+============================================================
+33. TRANSFER TAKEOVER
+============================================================
+
+Bot lain dapat mengambil alih transfer.
+
+Contoh:
+
+courier-2
+
+warehouse-main
+    |
+    v
+iron x64
+    |
+    v
+DEAD
+
+scout-1
+    |
+    v
+recover iron x64
+    |
+    v
+continue delivery
+    |
+    v
+workshop
+
+Record:
+
+originalBotId:
+courier-2
+
+recoveryBotId:
+scout-1
+
+relatedTransferId:
+transfer-182
+
+============================================================
+34. RECOVERY MEMORY CLEANUP
+============================================================
+
+DEATH_DROP dihapus setelah:
+
+RECOVERED
+
+atau:
+
+PARTIAL_RECONCILED
+
+atau:
+
+EXPIRED_RECONCILED
+
+Tujuan:
+
+short-term memory tidak penuh oleh job lama.
+
+============================================================
+35. DEATH EPISODE
+============================================================
+
+Jangan menghapus semua informasi tentang kematian.
+
+Simpan summary kecil:
+
+{
+  "type": "DEATH_EPISODE",
+
+  "botId": "courier-2",
+
+  "position": {
+    "x": 421,
+    "y": 64,
+    "z": -92
+  },
+
+  "cause": "zombie",
+
+  "recovery": "SUCCESS",
+
+  "recoveredItems": 96,
+
+  "ignoredItems": [
+    "dirt"
+  ],
+
+  "createdAt": "..."
+}
+
+Ini dapat digunakan oleh Territory System nanti.
+
+============================================================
+36. HUBUNGAN KE TERRITORY 0.8.0
+============================================================
+
+Contoh:
+
+courier-2 mati di area A
+miner-1 mati di area A
+scout-1 diserang di area A
+
+Maka:
+
+dangerScore(area A)
+meningkat.
+
+Nantinya Territory System dapat menandai:
+
+DANGER_ZONE
+
+Jadi Death Recovery juga menghasilkan knowledge.
+
+============================================================
+37. KEEP INVENTORY
+============================================================
+
+Jika server menggunakan:
+
+keepInventory = true
+
+maka death recovery tidak dibutuhkan.
+
+Flow:
+
+BOT_DEATH
+    |
+    v
+Keep Inventory?
+   |
+  YES
+   |
+   v
+Skip Item Recovery
+
+Tetapi Death Episode tetap dapat dibuat.
+
+============================================================
+38. VOID / LAVA / FIRE
+============================================================
+
+Beberapa kematian bisa membuat item tidak layak dicari.
+
+VOID:
+
+Jika item dipastikan jatuh ke void:
+
+UNRECOVERABLE
+
+LAVA / FIRE:
+
+Jika dropped item dipastikan hancur:
+
+record:
+
+PERMANENT_LOSS
+
+Jangan terus mengirim recovery bot.
+
+============================================================
+39. MAX RECOVERY ATTEMPTS
+============================================================
+
+Recovery harus bounded.
+
+Contoh config:
+
+MINEHIVE_MAX_RECOVERY_ATTEMPTS=3
+
+Jangan sampai:
+
+bot A mati
+   |
+bot B recover
+   |
+bot B mati
+   |
+bot C recover
+   |
+bot C mati
+   |
+...
+
+tanpa batas.
+
+============================================================
+40. RECOVERY BOT MATI
+============================================================
+
+Jika recovery bot mati:
+
+RECOVERY_BOT_DIED
+    |
+    v
+attempt += 1
+    |
+    v
+Update Death Data
+    |
+    v
+Re-evaluate Items
+    |
+    v
+Recalculate Urgency
+    |
+    v
+Reassign
+
+Jika:
+
+attempt >= maxAttempts
+
+Result:
+
+MAX_RECOVERY_ATTEMPTS
+
+Recovery dihentikan.
+
+============================================================
+41. DANGER-AWARE RECOVERY
+============================================================
+
+Barang mahal tidak selalu harus direcover.
+
+Contoh:
+
+diamond x2
+
+Location:
+lava cave
+
+RecoveryValue:
+90
+
+RecoveryCost:
+100
+
+Final:
+
+-10
+
+Possible Decision:
+
+DO_NOT_RECOVER
+
+atau:
+
+WAIT_FOR_BETTER_EQUIPMENT
+
+============================================================
+42. LLM ROLE
+============================================================
+
+LLM tidak perlu dipanggil setiap bot mati.
+
+Default:
+
+Deterministic Evaluator
+
+Input:
+
+- item base value
+- current stock
+- active goal
+- scarcity
+- logistics transfer
+- distance
+- danger
+- recovery bot availability
+- despawn budget
+
+LLM hanya untuk decision strategic atau ambigu.
+
+Contoh:
+
+Dropped:
+
+20 stacks quartz
+
+Distance:
+1800 blocks
+
+Current Goal:
+Nether Megabase
+
+LLM dapat memberi strategic recommendation.
+
+Final decision tetap melewati:
+
+Safety Validator
++
+Recovery Evaluator
+
+============================================================
+43. CONFIG YANG DISARANKAN
+============================================================
+
+MINEHIVE_DEATH_RECOVERY_ENABLED=true
+
+MINEHIVE_MAX_RECOVERY_ATTEMPTS=3
+
+MINEHIVE_RECOVERY_MIN_SCORE=40
+
+MINEHIVE_RECOVERY_OPTIONAL_SCORE=20
+
+MINEHIVE_RECOVERY_URGENT_SCORE=70
+
+MINEHIVE_RECOVERY_ITEM_DESPAWN_TICKS=6000
+
+MINEHIVE_RECOVERY_SAFETY_MARGIN_TICKS=600
+
+MINEHIVE_RECOVERY_MAX_DISTANCE=2000
+
+MINEHIVE_RECOVERY_DANGER_LIMIT=0.75
+
+============================================================
+44. STRUKTUR FILE YANG DISARANKAN
+============================================================
+
+src/logistics/recovery/
+├── death-detector.js
+├── death-manifest.js
+├── recovery-memory.js
+├── item-value-evaluator.js
+├── recovery-scheduler.js
+├── recovery-bot-selector.js
+├── recovery-executor.js
+├── recovery-verifier.js
+├── recovery-reconciler.js
+└── recovery-errors.js
+
+Karena fitur masih merupakan bagian Logistics,
+lebih baik berada di:
+
+src/logistics/recovery/
+
+daripada subsystem root baru.
+
+============================================================
+45. STRUKTUR TEST
+============================================================
+
+tests/logistics/recovery/
+├── death-detection.test.js
+├── death-manifest.test.js
+├── item-value.test.js
+├── dynamic-value.test.js
+├── recovery-score.test.js
+├── scheduler.test.js
+├── bot-selector.test.js
+├── despawn-budget.test.js
+├── chunk-unload.test.js
+├── full-recovery.test.js
+├── partial-recovery.test.js
+├── ignored-items.test.js
+├── transfer-takeover.test.js
+├── recovery-bot-death.test.js
+├── max-attempts.test.js
+└── recovery-reconciliation.test.js
+
+============================================================
+46. TEST CASE 1 — DIAMOND + DIRT
+============================================================
+
+Input:
+
+diamond x8
+dirt x64
+
+Expected:
+
+diamond:
+REQUIRED
+
+dirt:
+IGNORE
+
+Recovery Job:
+YES
+
+============================================================
+47. TEST CASE 2 — SEMUA SAMPAH
+============================================================
+
+Input:
+
+dirt x64
+rotten_flesh x32
+
+Expected:
+
+Recovery Job:
+NO
+
+Operational death memory:
+cleaned
+
+Death episode:
+stored
+
+============================================================
+48. TEST CASE 3 — FOOD CRITICAL
+============================================================
+
+Input:
+
+bread x64
+
+Fleet Food:
+CRITICAL
+
+Expected:
+
+bread value meningkat
+
+Decision:
+REQUIRED / RECOVER
+
+============================================================
+49. TEST CASE 4 — TASK CRITICAL
+============================================================
+
+Input:
+
+oak_planks x256
+
+Active Goal:
+
+build warehouse
+
+Expected:
+
+oak_planks:
+REQUIRED
+
+============================================================
+50. TEST CASE 5 — CHUNK UNLOAD
+============================================================
+
+Bot mati.
+
+Chunk unload setelah 1 menit.
+
+10 menit wall-clock berlalu.
+
+Expected:
+
+Recovery tidak otomatis dibatalkan
+hanya karena lebih dari 5 menit wall-clock.
+
+============================================================
+51. TEST CASE 6 — FULL RECOVERY
+============================================================
+
+Expected:
+
+diamond x8
+
+Recovered:
+
+diamond x8
+
+Result:
+
+RECOVERED
+
+DEATH_DROP:
+removed
+
+============================================================
+52. TEST CASE 7 — PARTIAL RECOVERY
+============================================================
+
+Expected:
+
+iron_ingot x64
+
+Recovered:
+
+iron_ingot x59
+
+Result:
+
+PARTIAL_RECOVERY
+
+Lost:
+
+iron_ingot x5
+
+============================================================
+53. TEST CASE 8 — MAX ATTEMPTS
+============================================================
+
+Recovery bot gagal / mati sebanyak 3 kali.
+
+Expected:
+
+MAX_RECOVERY_ATTEMPTS
+
+Recovery stopped.
+
+============================================================
+54. TEST CASE 9 — ACTIVE TRANSFER
+============================================================
+
+Bot mati saat logistics transfer.
+
+Expected:
+
+Reservation status:
+
+RECOVERY_REQUIRED
+
+Bukan:
+
+RELEASED
+
+============================================================
+55. TEST CASE 10 — OPTIONAL TIDAK DITEMUKAN
+============================================================
+
+Expected:
+
+REQUIRED:
+diamond x4
+
+OPTIONAL:
+oak_log x32
+
+Recovered:
+
+diamond x4
+
+oak_log tidak ditemukan.
+
+Expected Result:
+
+RECOVERED
+
+OPTIONAL tidak boleh menghalangi completion.
+
+============================================================
+56. DASHBOARD
+============================================================
+
+Tambahkan panel:
+
+DEATH RECOVERY
+
+Metrics:
+
+Active Recovery Jobs
+Urgent Recoveries
+Recovered Items
+Permanent Loss
+Ignored Junk
+Recovery Success Rate
+
+Contoh:
+
+Recovery #182
+
+Dead Bot:
+courier-2
+
+Location:
+421, 64, -92
+
+REQUIRED:
+diamond x8
+iron_ingot x64
+
+OPTIONAL:
+oak_log x32
+
+IGNORE:
+dirt x64
+
+Assigned Bot:
+scout-1
+
+Status:
+TRAVELLING
+
+Estimated Despawn Budget:
+72%
+
+============================================================
+57. RECOVERY TIMELINE
+============================================================
+
+Contoh:
+
+21:14:02 courier-2 died
+
+21:14:02 DEATH_DROP created
+
+21:14:03 diamond x8 -> REQUIRED
+
+21:14:03 dirt x64 -> IGNORE
+
+21:14:04 recovery job created
+
+21:14:05 scout-1 assigned
+
+21:14:07 scout-1 travelling
+
+21:14:32 search started
+
+21:14:35 diamond x8 collected
+
+21:14:37 iron x64 collected
+
+21:14:38 recovery verified
+
+21:14:39 transfer resumed
+
+21:14:40 DEATH_DROP removed
+
+============================================================
+58. EVENTS
+============================================================
+
+logistics.recovery.detected
+
+logistics.recovery.manifest.created
+
+logistics.recovery.evaluated
+
+logistics.recovery.job.created
+
+logistics.recovery.assigned
+
+logistics.recovery.started
+
+logistics.recovery.item.required
+
+logistics.recovery.item.optional
+
+logistics.recovery.item.ignored
+
+logistics.recovery.collecting
+
+logistics.recovery.verified
+
+logistics.recovery.partial
+
+logistics.recovery.expired
+
+logistics.recovery.failed
+
+logistics.recovery.completed
+
+logistics.recovery.reassigned
+
+============================================================
+59. IMPLEMENTATION PHASE 1
+============================================================
+
+DEATH DETECTION
+
+[ ] Listen bot death event
+
+[ ] Capture death position
+
+[ ] Capture dimension
+
+[ ] Capture world/server
+
+[ ] Capture last inventory snapshot
+
+[ ] Detect active logistics transfer
+
+============================================================
+60. IMPLEMENTATION PHASE 2
+============================================================
+
+DEATH MANIFEST
+
+[ ] Create schema
+
+[ ] Validate values
+
+[ ] Add id
+
+[ ] Add timestamps
+
+[ ] Add related transfer id
+
+[ ] Persist temporary record
+
+============================================================
+61. IMPLEMENTATION PHASE 3
+============================================================
+
+ITEM VALUE EVALUATOR
+
+[ ] Base item value
+
+[ ] REQUIRED
+
+[ ] OPTIONAL
+
+[ ] IGNORE
+
+[ ] Scarcity modifier
+
+[ ] Demand modifier
+
+[ ] Task importance
+
+[ ] Logistics cargo modifier
+
+[ ] Unique item modifier
+
+[ ] Recovery cost
+
+[ ] Recovery score
+
+============================================================
+62. IMPLEMENTATION PHASE 4
+============================================================
+
+RECOVERY SCHEDULER
+
+[ ] Recovery priority queue
+
+[ ] Despawn budget
+
+[ ] Urgency score
+
+[ ] Retry
+
+[ ] Cancellation
+
+[ ] Max attempts
+
+============================================================
+63. IMPLEMENTATION PHASE 5
+============================================================
+
+RECOVERY BOT SELECTOR
+
+[ ] Distance
+
+[ ] Health
+
+[ ] Food
+
+[ ] Free inventory
+
+[ ] Equipment
+
+[ ] Workload
+
+[ ] Role
+
+[ ] Danger
+
+============================================================
+64. IMPLEMENTATION PHASE 6
+============================================================
+
+RECOVERY EXECUTOR
+
+[ ] Navigate to death location
+
+[ ] Search dropped item entities
+
+[ ] Match item type
+
+[ ] Collect REQUIRED first
+
+[ ] Collect OPTIONAL if cheap
+
+[ ] Ignore junk
+
+[ ] Stop if unsafe
+
+============================================================
+65. IMPLEMENTATION PHASE 7
+============================================================
+
+VERIFICATION
+
+[ ] Before inventory snapshot
+
+[ ] After inventory snapshot
+
+[ ] Inventory delta
+
+[ ] Required item verification
+
+[ ] Full recovery
+
+[ ] Partial recovery
+
+============================================================
+66. IMPLEMENTATION PHASE 8
+============================================================
+
+LOGISTICS RECONCILIATION
+
+[ ] Mark transfer RECOVERY_REQUIRED
+
+[ ] Keep reservation protected
+
+[ ] Update recovered cargo
+
+[ ] Update lost cargo
+
+[ ] Transfer takeover
+
+[ ] Resume transfer
+
+[ ] Permanent loss record
+
+============================================================
+67. IMPLEMENTATION PHASE 9
+============================================================
+
+MEMORY CLEANUP
+
+[ ] Delete DEATH_DROP after completion
+
+[ ] Delete DEATH_DROP after reconciled failure
+
+[ ] Store DEATH_EPISODE
+
+[ ] Preserve cause
+
+[ ] Preserve danger location
+
+[ ] Preserve recovery outcome
+
+============================================================
+68. IMPLEMENTATION PHASE 10
+============================================================
+
+DASHBOARD + TESTS
+
+[ ] Recovery dashboard panel
+
+[ ] Active jobs
+
+[ ] Item classification
+
+[ ] Despawn urgency
+
+[ ] Recovery timeline
+
+[ ] Permanent loss metrics
+
+[ ] Failure visualization
+
+[ ] Automated tests
+
+============================================================
+69. DEFINITION OF DONE
+============================================================
+
+0.7.1 selesai jika:
+
+[ ] Bot death reliably detected
+
+[ ] Death location tersimpan
+
+[ ] Inventory snapshot tersimpan
+
+[ ] Active logistics cargo dikenali
+
+[ ] DEATH_DROP dibuat
+
+[ ] Item dapat diklasifikasi
+
+[ ] Junk tidak membuat recovery mission
+
+[ ] Valuable item membuat recovery mission
+
+[ ] Dynamic stock/demand dapat mengubah item value
+
+[ ] Task-critical item dapat menjadi REQUIRED
+
+[ ] Recovery scheduler bekerja
+
+[ ] Recovery bot dipilih otomatis
+
+[ ] Bot mati dapat mengambil barang sendiri jika paling cocok
+
+[ ] Despawn tidak hanya dihitung dari 5 menit wall-clock
+
+[ ] REQUIRED diverifikasi
+
+[ ] OPTIONAL tidak menghambat completion
+
+[ ] IGNORE tidak dicari
+
+[ ] Full recovery tercatat
+
+[ ] Partial recovery tercatat
+
+[ ] Permanent loss tercatat
+
+[ ] Reservation tidak double-spent
+
+[ ] Transfer takeover bekerja
+
+[ ] Recovery punya max attempts
+
+[ ] Recovery bot death dapat direassign
+
+[ ] Temporary memory dibersihkan
+
+[ ] Death episode disimpan
+
+[ ] Dashboard dapat melihat recovery
+
+[ ] Automated tests lulus
+
+============================================================
+70. ROADMAP HUBUNGAN
+============================================================
+
+0.7.0
+LOGISTICS FOUNDATION
+
+MineHive:
+mampu melakukan transaksi item secara aman.
+
+
+0.7.1
+INTELLIGENT DEATH RECOVERY
+
+MineHive:
+mampu memulihkan resource setelah kegagalan
+dan menentukan apakah resource tersebut layak diselamatkan.
+
+
+0.7.2
+AUTOMATIC ITEM SUPPLY
+
+MineHive:
+mampu menentukan sendiri kapan item perlu disuplai.
+
+
+0.7.3
+SMART LOGISTICS
+
+MineHive:
+mampu melakukan route optimization,
+warehouse policy,
+rebalancing,
+forecasting,
+dan strategic logistics planning.
+
+
+0.8.0
+TERRITORY SYSTEM
+
+MineHive:
+mampu memahami region,
+danger,
+resource zone,
+route,
+dan expansion.
+
+
+Future Memory System:
+
+Death Episode dapat menjadi salah satu sumber
+episodic/shared memory.
+
+============================================================
+71. PRINSIP ARSITEKTUR
+============================================================
+
+1.
+LLM tidak mengontrol Mineflayer secara langsung.
+
+2.
+Death recovery deterministic secara default.
+
+3.
+Tidak setiap death membutuhkan recovery.
+
+4.
+Tidak setiap item layak direcover.
+
+5.
+Item value harus dynamic.
+
+6.
+Current demand harus mempengaruhi value.
+
+7.
+Current task harus mempengaruhi value.
+
+8.
+Logistics cargo harus mendapat prioritas.
+
+9.
+Recovery cost harus diperhitungkan.
+
+10.
+Danger dapat membatalkan recovery.
+
+11.
+Recovery harus bounded.
+
+12.
+Tidak boleh terjadi infinite recovery loop.
+
+13.
+Reservation tidak dilepas sampai cargo benar-benar
+dipastikan recovered atau lost.
+
+14.
+Recovery harus terverifikasi dengan inventory delta.
+
+15.
+Temporary DEATH_DROP memory harus dibersihkan.
+
+16.
+Death history tetap dipertahankan sebagai experience.
+
+17.
+Dropped item lifetime tidak boleh ditentukan hanya
+dengan wall-clock 5 menit.
+
+18.
+Chunk activity sebaiknya dipertimbangkan.
+
+19.
+Recovery system harus menjadi failsafe untuk
+Automatic Item Supply.
+
+20.
+Core tetap tidak boleh menerima raw Mineflayer client.
+
+============================================================
+END OF DOCUMENT
+============================================================

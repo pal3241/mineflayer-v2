@@ -30,7 +30,7 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 | 0.5.0 | Shared world memory, natural chat, farming, forestry, dan combat states | Implemented |
 | 0.6.0 | Semantic memory, adaptive ML, HiveMind lanjutan, SQLite production, dan safe autonomy | Implemented |
 | [0.7.0](updates/0.7.0-logistik-foundation.md) | Logistics Foundation | Implemented |
-| 0.7.1 | Advanced Logistics | Planned |
+| [0.7.1](updates/0.7.1-intelligent-death-recovery.md) | Intelligent Death Recovery | Implemented |
 | 0.8.0 | Territory Foundation | Planned |
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Setiap release baru memiliki satu catatan tersendiri di folder [`updates/`](updates/README.md).
