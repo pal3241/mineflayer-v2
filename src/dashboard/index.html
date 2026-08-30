@@ -17,6 +17,7 @@
       <button class="nav" data-view="cameras">◉ <span>Live Cameras</span></button>
       <button class="nav" data-view="commands">⌁ <span>Command Center</span></button>
       <button class="nav" data-view="logistics">▦ <span>Logistics</span></button>
+      <button class="nav" data-view="recovery">✚ <span>Recovery</span></button>
       <button class="nav" data-view="memory">◫ <span>Memory</span></button>
       <button class="nav" data-view="admins">♙ <span>Admins</span></button>
       <button class="nav" data-view="settings">⚙ <span>Settings</span></button>
@@ -112,6 +113,44 @@
         <section class="panel full"><div class="panel-title"><div><p class="eyebrow">AUDIT</p><h2>Transactional transfers</h2></div></div><div id="logisticsTransfers" class="timeline"></div></section>
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">DEVELOPER</p><h2>Lifecycle timeline</h2></div></div><div id="logisticsTimeline" class="timeline"></div></section>
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">HIVEMIND</p><h2>Active storage locks</h2></div></div><div id="logisticsLocks" class="timeline"></div></section>
+      </div>
+    </section>
+
+    <section id="recovery" class="view">
+      <div class="panel-title"><div><p class="eyebrow">INTELLIGENT DEATH RECOVERY</p><h2>Death recovery control</h2></div><div class="recovery-toolbar"><span id="recoverySystemStatus" class="badge">—</span><button id="refreshRecovery" class="button secondary" type="button">Refresh recovery</button></div></div>
+      <div class="stats compact-stats recovery-stats">
+        <article><span>ACTIVE JOBS</span><strong id="recoveryActiveJobs">0</strong><small>recovery in progress</small></article>
+        <article><span>URGENT</span><strong id="recoveryUrgentRecoveries">0</strong><small>low despawn budget</small></article>
+        <article><span>RECOVERED</span><strong id="recoveryRecoveredItems">0</strong><small>verified items</small></article>
+        <article><span>PERMANENT LOSS</span><strong id="recoveryPermanentLoss">0</strong><small>unrecoverable items</small></article>
+        <article><span>IGNORED JUNK</span><strong id="recoveryIgnoredJunk">0</strong><small>items intentionally skipped</small></article>
+        <article><span>SUCCESS RATE</span><strong id="recoverySuccessRate">0%</strong><small>completed recoveries</small></article>
+      </div>
+      <div class="recovery-layout">
+        <section class="panel recovery-jobs-panel">
+          <div class="panel-title"><div><p class="eyebrow">ACTIVE OPERATIONS</p><h2>Recovery jobs</h2></div><span id="recoveryJobCount" class="badge">0 jobs</span></div>
+          <div id="recoveryJobs" class="recovery-job-grid"><span class="hint">Open this tab to load recovery jobs.</span></div>
+        </section>
+        <section class="panel recovery-settings-panel">
+          <div class="panel-title"><div><p class="eyebrow">RUNTIME POLICY</p><h2>Recovery settings</h2></div><span id="recoverySettingStatus" class="badge">—</span></div>
+          <form id="recoverySettingsForm" class="form-grid">
+            <label class="check"><input id="recoveryEnabled" type="checkbox"><span>Aktifkan death recovery</span></label>
+            <label>Max attempts<input id="recoveryMaxAttempts" type="number" min="1" max="10" step="1" required></label>
+            <label>Minimum score<input id="recoveryMinScore" type="number" min="0" max="100" step="1" required></label>
+            <label>Optional score<input id="recoveryOptionalScore" type="number" min="0" max="100" step="1" required></label>
+            <label>Urgent score<input id="recoveryUrgentScore" type="number" min="0" max="100" step="1" required></label>
+            <label>Item despawn (ticks)<input id="recoveryDespawnTicks" type="number" min="1200" max="72000" step="20" required></label>
+            <label>Safety margin (ticks)<input id="recoverySafetyMarginTicks" type="number" min="0" step="20" required></label>
+            <label>Max distance (blocks)<input id="recoveryMaxDistance" type="number" min="1" step="1" required></label>
+            <label>Danger limit<input id="recoveryDangerLimit" type="number" min="0" max="1" step="0.01" required></label>
+            <button class="button primary full" type="submit">Apply recovery settings</button>
+          </form>
+          <p class="hint">Perubahan berlaku selama runtime. Draft yang sedang diketik tidak ditimpa oleh refresh dashboard.</p>
+        </section>
+        <section class="panel full recovery-timeline-panel">
+          <div class="panel-title"><div><p class="eyebrow">AUDIT TRAIL</p><h2>Recovery timeline</h2></div></div>
+          <div id="recoveryTimeline" class="recovery-timeline"><span class="hint">No recovery events loaded.</span></div>
+        </section>
       </div>
     </section>
 

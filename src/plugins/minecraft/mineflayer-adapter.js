@@ -25,17 +25,19 @@ const SURVEY_MARKERS = Object.freeze([
 ]);
 
 export class MineflayerAdapter extends EventEmitter {
-  constructor({ factory, plugins = true, autoEat = {} } = {}) { super(); this.factory = factory; this.plugins = plugins; this.autoEatConfig = { enabled: true, minHunger: 15, ...autoEat }; this.client = null; this.status = 'DISCONNECTED'; this.pluginStatus = {}; this.homes = new Map(); this.combatState = { mode: 'OFF', status: 'IDLE' }; }
+  constructor({ factory, plugins = true, autoEat = {} } = {}) { super(); this.factory = factory; this.plugins = plugins; this.autoEatConfig = { enabled: true, minHunger: 15, ...autoEat }; this.client = null; this.status = 'DISCONNECTED'; this.pluginStatus = {}; this.homes = new Map(); this.combatState = { mode: 'OFF', status: 'IDLE' }; this.lastAliveState = null; this.alive = false; }
 
   async connect(options) {
     if (this.client) return;
     const factory = this.factory ?? (await import('mineflayer')).createBot;
-    this.status = 'CONNECTING';
+    this.status = 'CONNECTING'; this.lastAliveState = null; this.alive = false;
     this.client = factory(options);
     if (this.plugins) await this.#loadPlugins();
-    for (const name of ['login', 'spawn', 'end', 'kicked', 'error', 'health', 'move', 'death', 'chat', 'whisper']) this.client.on(name, (...args) => this.emit(name, ...args));
-    this.client.once('spawn', () => { this.status = 'READY'; void this.#configureMovement().catch(error => { this.status = 'DEGRADED'; this.emit('pluginError', { plugin: 'movement', error }); }); });
-    this.client.once('end', () => { this.status = 'DISCONNECTED'; this.client = null; });
+    for (const name of ['login', 'spawn', 'end', 'kicked', 'error', 'health', 'move', 'chat', 'whisper']) this.client.on(name, (...args) => this.emit(name, ...args));
+    this.client.on('health', () => this.#captureAliveState()); this.client.on('move', () => this.#captureAliveState()); this.client.inventory?.on?.('updateSlot', () => this.#captureAliveState());
+    this.client.on('death', () => { const state = this.lastAliveState ?? recoveryState(this.client); this.alive = false; this.emit('death', { ...state, cause: deathCause(this.client), keepInventory: keepInventoryState(this.client), detectedAt: new Date().toISOString() }); });
+    this.client.on('spawn', () => { this.status = 'READY'; this.alive = true; this.#captureAliveState(); void this.#configureMovement().catch(error => { this.status = 'DEGRADED'; this.emit('pluginError', { plugin: 'movement', error }); }); });
+    this.client.once('end', () => { this.status = 'DISCONNECTED'; this.alive = false; this.lastAliveState = null; this.client = null; });
   }
 
   async #loadPlugins() {
@@ -59,6 +61,7 @@ export class MineflayerAdapter extends EventEmitter {
   }
 
   #ready(capability) { if (!this.client || this.status !== 'READY') throw new ValidationError(`Cannot use '${capability}' while bot is ${this.status}`); return this.client; }
+  #captureAliveState() { if (!this.client || Number(this.client.health ?? 20) <= 0) return; this.lastAliveState = recoveryState(this.client); }
   #abort(signal, action) { if (!signal) return () => {}; const handler = () => action(); if (signal.aborted) handler(); else signal.addEventListener('abort', handler, { once: true }); return () => signal.removeEventListener('abort', handler); }
 
   async chat(message) { const bot = this.#ready('chat'); bot.chat(String(message).slice(0, 240)); return { sent: true }; }
@@ -225,12 +228,15 @@ export class MineflayerAdapter extends EventEmitter {
     while (Date.now() - started < timeout) {
       if (signal?.aborted) throw signal.reason ?? new ValidationError('Item pickup cancelled');
       if (inventoryCount(bot, item) >= expected) return { item, count: inventoryCount(bot, item) - initialCount, collected: true };
-      const entity = bot.nearestEntity(candidate => candidate.name === 'item' && candidate.getDroppedItem?.()?.name === item);
-      if (entity?.position) await this.navigate({ x: entity.position.x, y: entity.position.y, z: entity.position.z, range: 1 }, { signal }).catch(() => {});
+      const entity = bot.nearestEntity(candidate => isDroppedItemEntity(candidate) && candidate.getDroppedItem?.()?.name === item);
+      if (entity?.position) await this.navigate({ x: entity.position.x, y: entity.position.y, z: entity.position.z, range: 1 }, { signal });
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    throw new ValidationError(`Dropped item '${item}' was not found`);
+    const collected = inventoryCount(bot, item) - initialCount; throw new ValidationError(`Dropped item '${item}' pickup timed out: collected ${collected} of ${expected - initialCount}`, { item, expected: expected - initialCount, collected, timeoutMs: timeout });
   }
+  findDroppedItems({ position, radius, names }) { const bot = this.#ready('death-recovery-search'); const target = validRecoveryPosition(position); const maximumDistance = boundedDistance(radius, 1, 64, 'Recovery search radius'); const acceptedNames = new Set(validateRecoveryNames(names)); return Object.values(bot.entities ?? {}).filter(entity => isDroppedItemEntity(entity) && entity.position && distance3(entity.position, target) <= maximumDistance).map(entity => { const dropped = entity.getDroppedItem(); return { entityId: String(entity.id), item: String(dropped.name), count: Number(dropped.count ?? 1), position: validRecoveryPosition(entity.position), distance: distance3(entity.position, target) }; }).filter(entity => !acceptedNames.size || acceptedNames.has(entity.item)).sort((left, right) => left.distance - right.distance || left.entityId.localeCompare(right.entityId)); }
+  async collectDroppedItem({ entityId, item, count, timeoutMs, position, radius }, { signal } = {}) { const bot = this.#ready('death-recovery-collection'); const requested = Math.max(1, Number.parseInt(count, 10) || 1); const timeout = boundedTimeout(timeoutMs, 250, 60_000, 'Recovery pickup timeout'); const target = validRecoveryPosition(position); const maximumDistance = boundedDistance(radius, 1, 64, 'Recovery search radius'); const before = inventoryCount(bot, item); const started = Date.now(); while (Date.now() - started < timeout) { if (signal?.aborted) throw signal.reason ?? new ValidationError('Recovery pickup cancelled'); const delta = inventoryCount(bot, item) - before; if (delta >= requested) return { item, requested, collected: delta, verified: true }; const candidates = this.findDroppedItems({ position: target, radius: maximumDistance, names: [item] }); const entity = candidates.find(candidate => candidate.entityId === String(entityId)) ?? candidates[0]; if (!entity) { await delay(100); continue; } await this.navigate({ ...entity.position, range: 1 }, { signal }); await delay(100); } const collected = inventoryCount(bot, item) - before; throw new ValidationError(`Recovery pickup timed out for '${item}': collected ${collected} of ${requested}`, { item, requested, collected, timeoutMs: timeout, position: target }); }
+  recoveryContext({ position }) { const bot = this.#ready('death-recovery-context'); const target = validRecoveryPosition(position); const chunkActive = Boolean(bot.world?.getColumnAt?.(target) ?? bot.blockAt?.(target)); const hostile = Object.values(bot.entities ?? {}).filter(entity => entity.type === 'mob' && HOSTILE_MOBS.has(entity.name) && entity.position && distance3(entity.position, target) <= 24).length; const danger = Math.min(1, hostile / 8); const occupiedSlots = bot.inventory?.items?.().length ?? 0; return { chunkActive, danger, freeSlots: Math.max(0, 36 - occupiedSlots), keepInventory: keepInventoryState(bot), serverAgeTicks: Number(bot.time?.age ?? 0), position: target }; }
   async stopActions() { const bot = this.client; if (!bot) return; await this.stopCombat(); bot.pathfinder?.setGoal(null); await bot.collectBlock?.cancelTask?.(); bot.autoEat?.cancelEat?.(); bot.clearControlStates?.(); }
 
   async startViewer({ port = 3100, firstPerson = true, viewDistance = 6, mode = 'first_person' } = {}) {
@@ -250,16 +256,24 @@ export class MineflayerAdapter extends EventEmitter {
   snapshot() {
     const bot = this.client;
     return { connection: this.status, position: bot?.entity?.position ? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z } : null,
-      health: bot?.health ?? null, food: bot?.food ?? null, dimension: bot?.game?.dimension ?? null,
-      inventorySummary: bot?.inventory?.items?.().map(item => ({ name: item.name, count: item.count })) ?? [], plugins: { ...this.pluginStatus },
+      health: bot?.health ?? null, food: bot?.food ?? null, alive: this.alive, dimension: bot?.game?.dimension ?? null,
+      inventorySummary: bot?.inventory?.items?.().map(item => ({ name: item.name, count: item.count, customName: recoveryCustomName(item), enchanted: recoveryEnchanted(item) })) ?? [], plugins: { ...this.pluginStatus },
       camera: { active: Boolean(bot?.viewer), port: this.viewerPort ?? null, mode: this.viewerMode ?? null, version: bot?.version ?? null, renderVersion: this.viewerRenderVersion ?? null, versionSupported: this.viewerVersionSupported ?? null }, combat: { ...this.combatState }, timestamp: new Date().toISOString() };
   }
 
-  async disconnect(reason = 'MineHive shutdown') { if (!this.client) return; await this.stopViewer(); await this.stopActions(); this.client.quit?.(reason); }
+  async disconnect(reason = 'MineHive shutdown') { if (!this.client) return; this.alive = false; await this.stopViewer(); await this.stopActions(); this.client.quit?.(reason); }
   raw() { throw new ValidationError('Raw Mineflayer client access is forbidden outside adapter capabilities'); }
 }
 
 function inventoryCount(bot, name) { return bot.inventory?.items?.().filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0) ?? 0; }
+function recoveryState(bot) { const position = bot.entity?.position; return { position: position ? { x: Number(position.x), y: Number(position.y), z: Number(position.z) } : null, dimension: String(bot.game?.dimension ?? 'overworld'), inventory: (bot.inventory?.items?.() ?? []).filter(item => Number(item.count) > 0).map(item => ({ name: String(item.name), count: Number(item.count), customName: recoveryCustomName(item), enchanted: recoveryEnchanted(item) })), health: Number(bot.health ?? 0), food: Number(bot.food ?? 0), capturedAt: new Date().toISOString() }; }
+function recoveryCustomName(item) { const value = item.customName ?? item.nbt?.value?.display?.value?.Name?.value; return value ? String(value).slice(0, 160) : null; }
+function recoveryEnchanted(item) { return Boolean(item.enchants?.length || item.nbt?.value?.Enchantments?.value?.value?.length || item.nbt?.value?.ench?.value?.value?.length); }
+function keepInventoryState(bot) { const value = bot.game?.gameRules?.keepInventory ?? bot.game?.gamerules?.keepInventory; if (value === undefined || value === null) return 'UNKNOWN'; return value === true || String(value).toLowerCase() === 'true' ? 'ENABLED' : 'DISABLED'; }
+function deathCause(bot) { const value = bot.lastDamageCause ?? bot.entity?.lastDamageCause ?? 'unknown'; return String(value).slice(0, 80); }
+function validRecoveryPosition(position) { if (!position || ![position.x, position.y, position.z].every(value => Number.isFinite(Number(value)))) throw new ValidationError('Recovery context requires a finite position'); return { x: Number(position.x), y: Number(position.y), z: Number(position.z) }; }
+function validateRecoveryNames(names) { if (names === undefined) return []; if (!Array.isArray(names) || names.some(name => typeof name !== 'string' || !/^[a-z0-9_.:-]{1,128}$/.test(name))) throw new ValidationError('Recovery item names must be an array of valid registry names'); return [...new Set(names)]; }
+function isDroppedItemEntity(entity) { return (entity?.name === 'item' || entity?.name === 'item_stack') && typeof entity.getDroppedItem === 'function'; }
 function smeltingCount(value) { const count = Number(value); if (!Number.isInteger(count) || count < 1 || count > 64) throw new ValidationError('Smelting count must be an integer between 1 and 64'); return count; }
 function selectSmeltingFuel(bot, amount, preferred) { if (preferred && !SMELTING_FUELS[preferred]) throw new ValidationError(`Unsupported smelting fuel '${preferred}'`); const fuels = preferred ? [preferred] : Object.keys(SMELTING_FUELS); const available = fuels.find(name => inventoryCount(bot, name) >= Math.ceil(amount / SMELTING_FUELS[name])); const name = available ?? preferred ?? 'coal'; return { name, count: Math.ceil(amount / SMELTING_FUELS[name]) }; }
 function inventoryLedger(bot) { const ledger = new Map(); for (const item of bot.inventory?.items?.() ?? []) ledger.set(item.name, (ledger.get(item.name) ?? 0) + item.count); return ledger; }
@@ -298,6 +312,7 @@ function equipmentRank(name) { return ['wooden', 'golden', 'stone', 'iron', 'dia
 async function equipBestWeapon(bot) { const weapon = bestItem(bot, item => item.name.endsWith('_sword') || item.name.endsWith('_axe')); if (weapon) await bot.equip(weapon, 'hand'); }
 function distance3(left, right) { return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z); }
 function boundedDistance(value, minimum, maximum, field) { const number = Number(value); if (!Number.isFinite(number)) throw new ValidationError(`${field} must be numeric`); return Math.max(minimum, Math.min(maximum, number)); }
+function boundedTimeout(value, minimum, maximum, field) { const number = Number(value); if (!Number.isInteger(number) || number < minimum || number > maximum) throw new ValidationError(`${field} must be an integer between ${minimum} and ${maximum}`); return number; }
 function navigationGuard(bot, destination, range, stagnationMs) { let bestDistance = distance3(bot.entity.position, destination); let progressedAt = Date.now(); let stopped = false; let rejectGuard; const promise = new Promise((_resolve, reject) => { rejectGuard = reject; }); const onMove = () => { const current = distance3(bot.entity.position, destination); if (bestDistance - current >= 0.5) { bestDistance = current; progressedAt = Date.now(); } }; const onReset = reason => { if (['place_error', 'no_scaffolding_blocks'].includes(reason)) rejectGuard(new ValidationError(`Navigation route requires forbidden or failed block placement (${reason})`)); }; const onPath = result => { if (result.path?.some(node => node.toPlace?.some(block => !block.useOne))) rejectGuard(new ValidationError('Navigation route requires scaffolding, but automatic block placement is disabled')); }; const timer = setInterval(() => { if (distance3(bot.entity.position, destination) <= range + 1) return; if (Date.now() - progressedAt >= stagnationMs) rejectGuard(new ValidationError(`Navigation stalled for ${stagnationMs}ms at ${formatPosition(bot.entity.position)}`)); }, 1000); timer.unref?.(); bot.on('move', onMove); bot.on('path_reset', onReset); bot.on('path_update', onPath); return { promise, stop: () => { if (stopped) return; stopped = true; clearInterval(timer); bot.off('move', onMove); bot.off('path_reset', onReset); bot.off('path_update', onPath); } }; }
 function formatPosition(position) { return position ? `${Number(position.x).toFixed(1)},${Number(position.y).toFixed(1)},${Number(position.z).toFixed(1)}` : 'unknown'; }
 function uniqueDiscoveries(discoveries) { const seen = new Set(); return discoveries.filter(discovery => { const key = `${discovery.marker}:${discovery.position.x}:${discovery.position.y}:${discovery.position.z}`; if (seen.has(key)) return false; seen.add(key); return true; }); }

@@ -3,7 +3,7 @@ import { StateMachine } from '../orchestration/state-machine.js';
 export class BotRuntime {
   constructor({ bot, adapter, eventBus, logger, reconnect = {} }) {
     this.bot = bot; this.adapter = adapter; this.eventBus = eventBus; this.logger = logger;
-    this.reconnect = { enabled: true, maxAttempts: 5, delayMs: 3000, ...reconnect }; this.reconnectAttempts = 0; this.stopping = false;
+    this.reconnect = { enabled: true, maxAttempts: 5, delayMs: 3000, ...reconnect }; this.reconnectAttempts = 0; this.stopping = false; this.alive = false;
     this.transitionQueue = Promise.resolve();
     this.machine = new StateMachine({ initial: 'REGISTERED', eventBus, source: `bot:${bot.id}`, states: {
       REGISTERED: { on: { START: 'CONNECTING', STOP: 'OFFLINE' } },
@@ -17,12 +17,13 @@ export class BotRuntime {
       STOPPING: { on: { STOPPED: 'OFFLINE', FAIL: 'FAILED' } }, OFFLINE: { on: { START: 'CONNECTING' } }
     }});
     adapter.on('login', () => this.#enqueueTransition('CONNECTED'));
-    adapter.on('spawn', () => { this.reconnectAttempts = 0; this.#enqueueTransition('READY'); });
+    adapter.on('spawn', () => { this.reconnectAttempts = 0; this.alive = true; this.#enqueueTransition('READY'); });
+    adapter.on('death', () => { this.alive = false; });
     adapter.on('error', error => this.#fail(error));
     adapter.on('pluginError', failure => this.#fail(new Error(`Plugin '${failure.plugin}' failed: ${failure.error.message}`, { cause: failure.error })));
     adapter.on('combatError', error => this.#fail(error));
     adapter.on('kicked', reason => this.#fail(new Error(String(reason))));
-    adapter.on('end', reason => { if (this.stopping && this.machine.can('STOPPED')) this.#enqueueTransition('STOPPED'); else void this.#disconnected(reason); });
+    adapter.on('end', reason => { this.alive = false; if (this.stopping && this.machine.can('STOPPED')) this.#enqueueTransition('STOPPED'); else void this.#disconnected(reason); });
   }
 
   #enqueueTransition(event) {
@@ -43,5 +44,5 @@ export class BotRuntime {
   }
   async start(options) { this.stopping = false; this.options = options; await this.machine.transition('START'); this.bot.status = this.machine.state; try { await this.adapter.connect(options); } catch (error) { await this.#fail(error); throw error; } }
   async stop() { this.stopping = true; clearTimeout(this.reconnectTimer); if (this.machine.can('STOP')) await this.machine.transition('STOP'); try { await this.adapter.disconnect(); } catch (error) { await this.#fail(error); throw error; } if (this.machine.can('STOPPED')) await this.machine.transition('STOPPED'); this.bot.status = this.machine.state; }
-  snapshot() { return { ...this.bot.toDTO(), status: this.machine.state, runtime: this.adapter.snapshot() }; }
+  snapshot() { return { ...this.bot.toDTO(), status: this.machine.state, alive: this.alive, runtime: this.adapter.snapshot() }; }
 }

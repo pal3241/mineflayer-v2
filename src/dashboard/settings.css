@@ -67,6 +67,116 @@
   flex-wrap: wrap;
 }
 
+.recovery-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.recovery-stats {
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
+}
+
+.recovery-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, .55fr);
+  gap: 16px;
+}
+
+.recovery-job-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 11px;
+}
+
+.recovery-job-card {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #0c1511;
+}
+
+.recovery-job-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recovery-job-head h3 { margin: 5px 0 0; overflow-wrap: anywhere; }
+.recovery-job-card > time { display: block; margin-top: 12px; color: var(--muted); font-size: 10px; }
+
+.recovery-job-detail {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin: 14px 0;
+}
+
+.recovery-job-detail div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #101b15;
+}
+
+.recovery-job-detail dt { color: var(--muted); font-size: 10px; }
+.recovery-job-detail dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.recovery-budget { margin: 12px 0; }
+.recovery-budget > div:first-child { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 10px; }
+.recovery-budget > div:first-child b { color: var(--text); font-weight: 600; }
+
+.recovery-budget-track {
+  height: 7px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #26372e;
+}
+
+.recovery-budget-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--danger), var(--amber), var(--green)); }
+.recovery-item-groups { display: grid; gap: 7px; }
+
+.recovery-items {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: #101b15;
+}
+
+.recovery-items > b { display: block; margin-bottom: 5px; font-size: 10px; }
+.recovery-items > span { color: var(--muted); font-size: 11px; }
+.recovery-items.required { border-left-color: var(--danger); }
+.recovery-items.optional { border-left-color: var(--amber); }
+.recovery-items.ignored { border-left-color: var(--muted); }
+.recovery-items ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.recovery-items li { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }
+.recovery-items li span { min-width: 0; overflow-wrap: anywhere; }
+.recovery-items li small { flex: 0 0 auto; color: var(--muted); }
+
+.recovery-failure {
+  margin: 11px 0 0;
+  padding: 9px;
+  border: 1px solid #733;
+  border-radius: 8px;
+  color: #ffabab;
+  background: #2b1717;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.recovery-timeline { display: grid; gap: 7px; }
+.recovery-timeline-entry { display: grid; grid-template-columns: minmax(130px, auto) 1fr; gap: 13px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #0c1511; }
+.recovery-timeline-entry time { color: var(--muted); font-size: 10px; }
+.recovery-timeline-entry b,
+.recovery-timeline-entry small { display: block; overflow-wrap: anywhere; }
+.recovery-timeline-entry small { margin-top: 4px; color: var(--muted); }
+
 .llm-provider-block { padding: 12px 0 2px; border-top: 1px solid var(--line); }
 .llm-provider-block span { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
 
@@ -97,10 +207,16 @@
 @media (max-width: 1250px) {
   .memory-filter-form { grid-template-columns: repeat(3, 1fr); }
   .memory-stats { grid-template-columns: repeat(3, 1fr); }
+  .recovery-stats { grid-template-columns: repeat(3, 1fr); }
+  .recovery-layout { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 720px) {
   .memory-filter-form,
-  .memory-stats { grid-template-columns: 1fr; }
+  .memory-stats,
+  .recovery-stats,
+  .recovery-job-grid { grid-template-columns: 1fr; }
   .memory-list { grid-template-columns: 1fr; }
+  .recovery-job-detail { grid-template-columns: 1fr; }
+  .recovery-timeline-entry { grid-template-columns: 1fr; }
 }
