@@ -116,7 +116,7 @@ export class FleetCoordinator {
         try {
           const result = await this.acquisition.request({ requesterBotId: botId, type: 'ITEM', item: missing.name, count: missing.count, purpose: `craft ${item}` });
           acquisitions.push({ item: missing.name, count: missing.count, acquisitionResult: result });
-          continue;
+          if (result.status === 'SATISFIED') continue;
         } catch (error) {
           this.logger?.warn?.('coordinator.acquisition.craft-fallback', { botId, item, missing: missing.name, error: error.message });
         }

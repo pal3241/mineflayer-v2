@@ -26,8 +26,11 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     const requester = candidateBots.find(bot => bot.id === normalized.requesterBotId) ?? null;
     if (!requester) throw new ValidationError(`Acquisition requesterBotId '${normalized.requesterBotId}' was not found in the active bot fleet`);
     if (normalized.type === 'TOOL' && normalized.count !== 1) throw new ValidationError('Tool acquisition requires an exact count of 1');
+    if (normalized.type === 'TOOL') normalized.acceptedItems = normalized.acceptedItems.filter(item => toolTier(item) >= toolTier(normalized.minimumTier));
+    if (normalized.type === 'TOOL' && !normalized.acceptedItems.length) throw new ValidationError(`No accepted tool meets minimum tier '${normalized.minimumTier}'`);
     if (normalized.count > settings.maxSubtasks) throw new ValidationError(`Acquisition count ${normalized.count} exceeds the runtime maxSubtasks limit of ${settings.maxSubtasks}`);
-    const id = normalized.id;
+    const id = normalized.id ?? randomUUID();
+    normalized.id = id;
     const existing = records.get(id);
     if (existing) return existing;
     const request = {
@@ -58,6 +61,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     const candidateBots = bots?.list?.() ?? [];
     const target = candidateBots.find(bot => bot.id === request.requirement.requesterBotId);
     if (!target) throw new ValidationError('Acquisition requires at least one bot runtime');
+    if (request.attempts >= settings.maxAttempts) throw new ConflictError(`Acquisition request '${request.id}' exceeded maxAttempts (${settings.maxAttempts})`);
     const runtime = bots.get?.(target.id) ?? target;
     const requirement = request.requirement;
     request.attempts += 1;
@@ -78,7 +82,8 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
       return { requestId: request.id, status: 'SATISFIED', source: 'inventory', requirement, inventory: runtime.adapter?.snapshot?.().inventorySummary ?? [] };
     }
 
-    if (settings.storageFirst && logistics?.stock) {
+    const tryStorage = async () => {
+      if (!logistics?.stock) return null;
       const stock = await logistics.stock({ worldKey: `${String(runtime.options?.host ?? 'localhost').toLowerCase()}:${Number(runtime.options?.port ?? 25565)}`, dimension: runtime.adapter?.snapshot?.().dimension ?? 'overworld' });
       const match = stock.find(storage => {
         const totals = aggregateInventory(storage.availableInventory ?? []);
@@ -96,6 +101,11 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
         events?.publish?.('acquisition.storage.reserved', { requestId: request.id, storage: match.name, item }, { source: 'acquisition' });
         return { requestId: request.id, status: 'STORAGE_FOUND', source: 'storage', storage: match.name, item, requirement };
       }
+      return null;
+    };
+    if (settings.storageFirst) {
+      const storageResult = await tryStorage();
+      if (storageResult) return storageResult;
     }
 
     if (settings.allowFleet) {
@@ -116,9 +126,14 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
       }
     }
 
+    if (!settings.storageFirst) {
+      const storageResult = await tryStorage();
+      if (storageResult) return storageResult;
+    }
+
     if (settings.allowCraft && requirement.type === 'ITEM') {
       const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item: requirement.item, count: requirement.count }) : null;
-      if (recipe) {
+      if (recipe && recipe.craftable !== false) {
         if (recipe.missing?.length === 0) {
           request.status = 'CRAFT_READY';
           request.updatedAt = new Date().toISOString();
@@ -166,7 +181,10 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
 
   const status = () => ({
     enabled: settings.enabled,
-    activeRequests: records.size,
+    totalRequests: records.size,
+    activeRequests: [...records.values()].filter(request => ['PENDING', 'RESOLVING'].includes(request.status)).length,
+    completedRequests: [...records.values()].filter(request => ['SATISFIED', 'CRAFT_READY'].includes(request.status)).length,
+    failedRequests: [...records.values()].filter(request => request.status === 'FAILED').length,
     maxDepth: settings.maxDepth,
     maxSubtasks: settings.maxSubtasks,
     maxAttempts: settings.maxAttempts,
@@ -201,6 +219,11 @@ function aggregateInventory(items = []) {
     totals[name] = (totals[name] ?? 0) + Number(entry.count ?? entry.available ?? 0);
     return totals;
   }, {});
+}
+
+function toolTier(name) {
+  const material = String(name).toLowerCase().split('_', 1)[0];
+  return { wooden: 1, golden: 2, stone: 3, iron: 4, diamond: 5, netherite: 6 }[material] ?? 0;
 }
 
 function normalizeConfig(input = {}) {
@@ -243,6 +266,6 @@ function normalizeRequirement(requirement) {
   normalized.consume = Boolean(requirement.consume ?? true);
   normalized.purpose = String(requirement.purpose ?? 'general acquisition');
   if (normalized.type === 'TOOL' && (!Number.isInteger(normalized.count) || normalized.count !== 1)) throw new ValidationError('Tool acquisition requires an exact count of 1');
-  normalized.id = requirement.id ?? `${normalized.requesterBotId}:${normalized.type}:${normalized.type === 'ITEM' ? normalized.item : normalized.category}:${randomUUID()}`;
+  normalized.id = requirement.id ?? null;
   return normalized;
 }

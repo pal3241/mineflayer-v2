@@ -95,8 +95,10 @@ export class MineflayerAdapter extends EventEmitter {
   }
   async craftRequirements({ item, count = 1 }) {
     const bot = this.#ready('craft-planning'); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1)); const inventory = inventoryLedger(bot);
+    const definition = bot.registry?.itemsByName?.[item]; const recipes = definition ? bot.recipesAll(definition.id, null, true) ?? [] : [];
+    if (!recipes.length) return { item, count: amount, craftable: false, missing: [], steps: [], selectedRecipe: null, alternatives: [] };
     const plan = resolveCraftPlan(bot, item, amount, inventory, new Set(), 0); const alternatives = inspectRecipeAlternatives(bot, item, amount, inventory, plan.recipe);
-    return { item, count: amount, missing: missingList(plan.missing), steps: plan.steps, selectedRecipe: alternatives[0] ?? null, alternatives };
+    return { item, count: amount, craftable: true, missing: missingList(plan.missing), steps: plan.steps, selectedRecipe: alternatives[0] ?? null, alternatives };
   }
   async findSourceBlocks({ item }) {
     const bot = this.#ready('resource-analysis'); const definition = bot.registry?.itemsByName?.[item]; if (!definition) return [];
@@ -263,7 +265,7 @@ export class MineflayerAdapter extends EventEmitter {
   snapshot() {
     const bot = this.client;
     const inventory = (bot?.inventory?.items?.() ?? []).reduce((result, item) => {
-      if (!item || !item.name || Number(item.count) <= 0) return result;
+      if (!item || !item.name) return result;
       const name = String(item.name).toLowerCase();
       const existing = result.get(name);
       result.set(name, { name, count: (existing?.count ?? 0) + Number(item.count) });

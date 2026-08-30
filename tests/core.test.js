@@ -38,7 +38,7 @@ test('behavior tree sequence and selector are deterministic', async () => {
 
 test('application boots without Minecraft or API', async () => {
   const app = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent' } });
-  await app.start({ api: false }); assert.equal(app.state, 'RUNNING'); assert.equal((await app.health.check()).status, 'HEALTHY'); await app.stop(); assert.equal(app.state, 'STOPPED');
+  assert.equal(app.coordinator.acquisition, app.acquisition); await app.start({ api: false }); assert.equal(app.state, 'RUNNING'); assert.equal((await app.health.check()).status, 'HEALTHY'); await app.stop(); assert.equal(app.state, 'STOPPED');
 });
 
 test('configuration loads three keys for both supported LLM providers', () => {
