@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAcquisitionService } from '../src/logistics/acquisition/acquisition-service.js';
+import { MemoryRepository } from '../src/persistence/memory-repository.js';
 
 test('acquisition rejects an invalid requester instead of falling back to the first bot', async () => {
   const bots = {
@@ -181,4 +182,22 @@ test('identical concurrent acquisitions share one execution', async () => {
     service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'stone', count: 1 })
   ]);
   assert.equal(executions, 1); assert.equal(first.requestId, second.requestId); assert.equal(first.status, 'COMPLETED');
+});
+
+test('acquisition request records survive service reinitialization', async () => {
+  const repository = new MemoryRepository();
+  const bot = { id: 'bot-a', status: 'READY', options: { host: 'localhost', port: 25565 }, adapter: { snapshot: () => ({ inventorySummary: [{ name: 'stone', count: 1 }], dimension: 'overworld' }) } };
+  const bots = { list: () => [bot], get: () => bot };
+  const first = createAcquisitionService({ bots, repository, logistics: { stock: async () => [] }, events: { publish: async () => {} } });
+  const result = await first.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'stone', count: 1 });
+  const second = createAcquisitionService({ bots, repository, logistics: { stock: async () => [] }, events: { publish: async () => {} } });
+  assert.equal(await second.initialize(), 1); assert.equal(second.list()[0].id, result.requestId); assert.equal(second.list()[0].status, 'COMPLETED');
+});
+
+test('bot death marks unfinished acquisition requests for recovery', async () => {
+  const bot = { id: 'bot-a', status: 'READY', options: { host: 'localhost', port: 25565 }, adapter: { snapshot: () => ({ inventorySummary: [], dimension: 'overworld' }), findSourceBlocks: async () => ['stone'] } };
+  const service = createAcquisitionService({ bots: { list: () => [bot], get: () => bot }, logistics: { stock: async () => [] }, events: { publish: async () => {} } });
+  await service.request({ requesterBotId: 'bot-a', type: 'ITEM', item: 'stone', count: 1 });
+  const affected = await service.handleBotDeath('bot-a');
+  assert.equal(affected.length, 1); assert.equal(affected[0].status, 'RECOVERY_REQUIRED'); assert.equal(service.status().activeRequests, 0);
 });

@@ -21,6 +21,7 @@ export class BotRuntime {
     adapter.on('error', error => this.#fail(error));
     adapter.on('pluginError', failure => this.#fail(new Error(`Plugin '${failure.plugin}' failed: ${failure.error.message}`, { cause: failure.error })));
     adapter.on('combatError', error => this.#fail(error));
+    adapter.on('death', death => void this.eventBus?.publish('bot.death', { botId: this.bot.id, ...death }, { source: `bot:${this.bot.id}`, correlationId: this.bot.id }));
     adapter.on('kicked', reason => this.#fail(new Error(String(reason))));
     adapter.on('end', reason => { if (this.stopping && this.machine.can('STOPPED')) this.#enqueueTransition('STOPPED'); else void this.#disconnected(reason); });
   }
