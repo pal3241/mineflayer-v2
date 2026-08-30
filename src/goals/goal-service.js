@@ -53,5 +53,14 @@ export class GoalService {
     }
     goal.update(GoalStatus.CANCELLED); await this.events.publish('goal.cancelled', goal.toDTO(), { source: 'goal-service', correlationId: id }); return goal.toDTO();
   }
+  async completeExternalTask(taskId, result) {
+    const task = this.task(taskId); const goal = this.get(task.goalId); const graph = this.graph(task.goalId);
+    if (task.status === TaskStatus.COMPLETED) return task.toDTO();
+    if ([TaskStatus.CANCELLED, TaskStatus.FAILED].includes(task.status)) throw new ConflictError(`Task '${taskId}' cannot be externally completed from ${task.status}`, { taskId, status: task.status });
+    task.update(TaskStatus.COMPLETED, { result: structuredClone(result), error: null }); this.scheduler.release(task); this.metrics.increment('tasks.completed'); await this.events.publish('task.completed', task.toDTO(), { source: 'goal-service', correlationId: task.goalId });
+    graph.refresh(); const completed = graph.list().filter(entry => entry.status === TaskStatus.COMPLETED).length; const total = graph.list().length; goal.update(graph.complete() ? GoalStatus.COMPLETED : GoalStatus.ACTIVE, Math.round(completed / total * 100));
+    if (graph.complete()) { this.metrics.increment('goals.completed'); await this.events.publish('goal.completed', goal.toDTO(), { source: 'goal-service', correlationId: goal.id }); }
+    return task.toDTO();
+  }
   async stop() { await Promise.allSettled([...this.#goals.values()].filter(goal => goal.status === GoalStatus.ACTIVE).map(goal => this.cancel(goal.id, 'Application shutdown'))); }
 }

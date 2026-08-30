@@ -103,7 +103,7 @@ export class Application {
   async initialize() {
     if (this.state !== 'CREATED') return;
     this.state = 'BOOTSTRAPPING'; this.logger.info('application.bootstrapping'); this.state = 'INITIALIZING';
-    await this.admins.initialize(); this.restoredProfiles = await this.botProfiles.initialize(); await this.acquisition.initialize();
+    await this.admins.initialize(); this.restoredProfiles = await this.botProfiles.initialize(); await this.acquisition.initialize(); await this.help.initialize();
     await this.modules.run('initialize', this.context()); await this.plugins.run('initialize', this.context()); this.state = 'READY';
     await this.events.publish('application.ready', {}, { source: 'application' });
   }
