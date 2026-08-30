@@ -19,6 +19,7 @@ const DEFAULT_CONFIG = Object.freeze({
 export function createAcquisitionService({ bots, logistics, events, logger, config = {} } = {}) {
   const settings = normalizeConfig({ ...DEFAULT_CONFIG, ...config });
   const records = new Map();
+  let taskRunner = null;
 
   const record = requirement => {
     const normalized = normalizeRequirement(requirement);
@@ -195,7 +196,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
       return { ...plan, status: 'COMPLETED', execution: result };
     }
     if (plan.status === 'CRAFT_READY') {
-      const result = await runtime.adapter.craftItem({ item: plan.requirement.item, count: plan.requirement.count });
+      const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item: plan.requirement.item, count: plan.requirement.count }, () => runtime.adapter.craftItem({ item: plan.requirement.item, count: plan.requirement.count }));
       verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
       return { ...plan, status: 'COMPLETED', execution: result };
     }
@@ -203,7 +204,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
       if (plan.subrequests.length > settings.maxSubtasks) throw new ConflictError(`Acquisition plan exceeds maxSubtasks (${settings.maxSubtasks})`);
       const executions = [];
       for (const subrequest of plan.subrequests) executions.push(await acquire(subrequest, depth + 1));
-      const result = await runtime.adapter.craftItem({ item: plan.requirement.item, count: plan.requirement.count });
+      const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item: plan.requirement.item, count: plan.requirement.count }, () => runtime.adapter.craftItem({ item: plan.requirement.item, count: plan.requirement.count }));
       verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
       return { ...plan, status: 'COMPLETED', execution: { dependencies: executions, craft: result } };
     }
@@ -212,14 +213,14 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
       for (const block of plan.blocks) {
         if (collected >= plan.requirement.count) break;
         const before = itemTotal(runtime, plan.requirement.item);
-        await runtime.adapter.collect({ block, count: plan.requirement.count - collected, maxDistance: settings.maxDistance });
+        await runAdapter(taskRunner, runtime, 'minecraft.collection', { block, count: plan.requirement.count - collected, maxDistance: settings.maxDistance }, () => runtime.adapter.collect({ block, count: plan.requirement.count - collected, maxDistance: settings.maxDistance }));
         collected += Math.max(0, itemTotal(runtime, plan.requirement.item) - before);
       }
       verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
       return { ...plan, status: 'COMPLETED', execution: { collected } };
     }
     if (plan.status === 'SMELT_PLAN_CREATED') {
-      const result = await runtime.adapter.smeltItem({ item: plan.requirement.item, count: plan.requirement.count, fuel: plan.formula.fuel?.name });
+      const result = await runAdapter(taskRunner, runtime, 'minecraft.smelting', { item: plan.requirement.item, count: plan.requirement.count, fuel: plan.formula.fuel?.name }, () => runtime.adapter.smeltItem({ item: plan.requirement.item, count: plan.requirement.count, fuel: plan.formula.fuel?.name }));
       verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
       return { ...plan, status: 'COMPLETED', execution: result };
     }
@@ -249,6 +250,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
   return Object.freeze({
     settings: () => structuredClone(settings),
     configure,
+    configureTaskRunner: runner => { if (runner !== null && typeof runner !== 'function') throw new ValidationError('Acquisition task runner must be a function or null'); taskRunner = runner; },
     status,
     resolve,
     request: resolve,
@@ -257,6 +259,10 @@ export function createAcquisitionService({ bots, logistics, events, logger, conf
     clear: () => { records.clear(); return true; },
     normalizeRequirement
   });
+}
+
+async function runAdapter(taskRunner, runtime, capability, input, fallback) {
+  return taskRunner ? taskRunner({ runtime, capability, input }) : fallback();
 }
 
 function aggregateInventory(items = []) {
