@@ -120,12 +120,40 @@ test('movement policy truly blocks jump routes and water routes when disabled', 
     getMoveUp() {}
   }
   const baseBot = { blockAt: position => (position.x === 1 && position.y === 64 && position.z === 0 ? { name: 'water' } : { name: 'air' }) };
-  const disabled = createNavigationMovements({ Movements, bot: baseBot, policy: { allowJump: false, water: { allowSwimming: false, allowEnterWater: false, allowDeepWater: false, allowUnderwaterRoute: false, maxDepth: 2, maxUnderwaterDurationMs: 1000 } } });
-  const enabled = createNavigationMovements({ Movements, bot: baseBot, policy: { allowJump: true, water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: true, allowUnderwaterRoute: true, maxDepth: 2, maxUnderwaterDurationMs: 1000 } } });
+  const disabled = createNavigationMovements({ Movements, bot: baseBot, policy: { allowJump: false, allowParkour: false, water: { allowSwimming: false, allowEnterWater: false, allowDeepWater: false, allowUnderwaterRoute: false, maxDepth: 2, maxUnderwaterDurationMs: 1000 } } });
+  const enabled = createNavigationMovements({ Movements, bot: baseBot, policy: { allowJump: true, allowParkour: true, water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: true, allowUnderwaterRoute: true, maxDepth: 2, maxUnderwaterDurationMs: 1000 } } });
   const node = { x: 0, y: 64, z: 0 };
   assert.ok(disabled.getNeighbors(node).every(move => move.y <= 64));
   assert.ok(enabled.getNeighbors(node).some(move => move.y > 64));
   assert.ok(disabled.getNeighbors(node).every(move => move.x !== 1 || move.z !== 0));
+});
+
+test('movement policy distinguishes surface water from underwater depth limits', () => {
+  class Movements {
+    constructor(bot) { this.bot = bot; this.allowJump = true; this.allowParkour = true; this.allow1by1towers = true; this.allowSprinting = true; this.allowFreeMotion = true; this.maxDropDown = 4; this.canOpenDoors = false; this.openable = new Set(); }
+    getBlock(pos, dx, dy, dz) { const position = { x: pos.x + dx, y: pos.y + dy, z: pos.z + dz }; const name = this.bot.blockAt(position)?.name ?? 'air'; const liquid = name === 'water'; const physical = !['air', 'water'].includes(name); return { position, name, safe: !liquid, physical, replaceable: !physical, liquid, height: position.y, openable: false }; }
+    getMoveJumpUp(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x, y: node.y + 1, z: node.z + dir.z }); }
+    getMoveDiagonal(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x, y: node.y + 1, z: node.z + dir.z }); }
+    getMoveParkourForward(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x * 2, y: node.y + 1, z: node.z + dir.z * 2, parkour: true }); }
+    getMoveForward(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x, y: node.y, z: node.z + dir.z }); }
+    getMoveDropDown() {}
+    getMoveDown() {}
+    getMoveUp() {}
+  }
+  const bot = { blockAt: position => {
+    if (position.x === 1 && position.y === 64 && position.z === 0) return { name: 'water' };
+    if (position.x === 1 && position.y === 63 && position.z === 0) return { name: 'stone' };
+    if (position.x === 2 && position.y === 64 && position.z === 0) return { name: 'water' };
+    if (position.x === 2 && position.y === 63 && position.z === 0) return { name: 'water' };
+    return { name: 'air' };
+  } };
+  const surfaceOnly = createNavigationMovements({ Movements, bot, policy: { allowJump: true, allowParkour: false, water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: false, allowUnderwaterRoute: false, maxDepth: 1, maxUnderwaterDurationMs: 1000 } } });
+  const underwaterBlocked = createNavigationMovements({ Movements, bot, policy: { allowJump: true, allowParkour: false, water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: true, allowUnderwaterRoute: false, maxDepth: 3, maxUnderwaterDurationMs: 1000 } } });
+  const underwaterAllowed = createNavigationMovements({ Movements, bot, policy: { allowJump: true, allowParkour: false, water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: true, allowUnderwaterRoute: true, maxDepth: 3, maxUnderwaterDurationMs: 1000 } } });
+  const node = { x: 0, y: 64, z: 0 };
+  assert.ok(surfaceOnly.getNeighbors(node).some(move => move.x === 1 && move.z === 0));
+  assert.ok(underwaterBlocked.getNeighbors(node).every(move => move.x !== 2 || move.z !== 0));
+  assert.ok(underwaterAllowed.getNeighbors(node).some(move => move.x === 1 && move.z === 0));
 });
 
 test('movement setup failures become observable plugin errors', async () => {

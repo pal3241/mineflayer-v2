@@ -9,7 +9,11 @@ export function createNavigationMovements({ Movements, bot, policy }) {
       super(client);
       this.policy = normalizedPolicy;
       this.waterPolicy = structuredClone(normalizedPolicy.water ?? {});
+      this.allow1by1towers = Boolean(normalizedPolicy.allow1by1towers);
       this.allowJump = Boolean(normalizedPolicy.allowJump);
+      this.allowParkour = Boolean(normalizedPolicy.allowParkour);
+      this.allowSprinting = Boolean(normalizedPolicy.allowSprinting);
+      this.allowFreeMotion = Boolean(normalizedPolicy.allowFreeMotion);
       this.allowSwimming = Boolean(this.waterPolicy.allowSwimming);
       this.allowEnterWater = Boolean(this.waterPolicy.allowEnterWater);
       this.allowDeepWater = Boolean(this.waterPolicy.allowDeepWater);
@@ -29,6 +33,7 @@ export function createNavigationMovements({ Movements, bot, policy }) {
     }
 
     getMoveDiagonal(node, dir, neighbors) {
+      if (!this.#canTraverseWater(node, dir, 0, 0)) return;
       if (this.allowJump) return super.getMoveDiagonal(node, dir, neighbors);
       const before = neighbors.length;
       super.getMoveDiagonal(node, dir, neighbors);
@@ -38,6 +43,19 @@ export function createNavigationMovements({ Movements, bot, policy }) {
     getMoveForward(node, dir, neighbors) {
       if (!this.#canTraverseWater(node, dir, 0, 0)) return;
       return super.getMoveForward(node, dir, neighbors);
+    }
+
+    getMoveParkourForward(node, dir, neighbors) {
+      const immediate = this.#canTraverseWater(node, dir, 0, 0);
+      const landing = this.getBlock(node, dir.x * 2, 0, dir.z * 2);
+      const landingDepth = waterDepth(this.bot, landing.position ?? node, this.maxWaterDepth);
+      const landingSubmerged = isSubmerged(this.bot, landing.position ?? node);
+      if (!immediate) return;
+      if (isWater(landing) && !this.allowEnterWater) return;
+      if (landingDepth > this.maxWaterDepth) return;
+      if (isWater(landing) && !this.allowDeepWater && landingDepth > 1) return;
+      if (landingSubmerged && !this.allowUnderwaterRoute) return;
+      return super.getMoveParkourForward(node, dir, neighbors);
     }
 
     getMoveDropDown(node, dir, neighbors) {
@@ -70,19 +88,20 @@ export function createNavigationMovements({ Movements, bot, policy }) {
     }
 
     #canTraverseWater(node, dir, dy, dz) {
-      const policy = this.waterPolicy;
       const target = this.getBlock(node, dir.x, dy, dir.z ?? dz);
       const current = this.getBlock(node, 0, 0, 0);
       const head = this.getBlock(node, 0, 1, 0);
       const targetHead = this.getBlock(node, dir.x, dy + 1, dir.z ?? dz);
-      const depth = waterDepth(this.bot, target.position ?? node, this.maxWaterDepth);
-      const underwater = isUnderwater(current) || isUnderwater(head) || isUnderwater(target) || isUnderwater(targetHead);
+      const targetWaterDepth = waterDepth(this.bot, target.position ?? node, this.maxWaterDepth);
+      const currentSubmerged = isSubmerged(this.bot, current.position ?? node);
+      const targetSubmerged = isSubmerged(this.bot, target.position ?? node);
+      const targetIsWater = isWater(target);
 
-      if ((isUnderwater(current) || isUnderwater(head)) && !this.allowSwimming) return false;
-      if (isUnderwater(target) && !this.allowEnterWater) return false;
-      if (depth > this.maxWaterDepth) return false;
-      if (!this.allowDeepWater && depth > 1) return false;
-      if (underwater && !this.allowUnderwaterRoute) return false;
+      if (currentSubmerged && !this.allowSwimming) return false;
+      if (targetIsWater && !this.allowEnterWater) return false;
+      if (targetWaterDepth > this.maxWaterDepth) return false;
+      if (targetIsWater && !this.allowDeepWater && targetWaterDepth > 1) return false;
+      if ((currentSubmerged || targetSubmerged) && !this.allowUnderwaterRoute) return false;
       return true;
     }
   }(bot);
@@ -120,8 +139,11 @@ function waterDepth(bot, position, maxDepth) {
   return depth;
 }
 
-function isUnderwater(block) {
-  return isWater(block) && isWaterAbove(block);
+function isSubmerged(bot, position) {
+  if (!bot?.blockAt || !position) return false;
+  const feet = position.floored ? position.floored() : position;
+  const head = feet.offset ? feet.offset(0, 1, 0) : { x: feet.x, y: feet.y + 1, z: feet.z };
+  return isWater(bot.blockAt(feet)) && isWater(bot.blockAt(head));
 }
 
 function isWater(block) {
