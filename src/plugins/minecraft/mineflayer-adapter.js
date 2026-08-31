@@ -103,6 +103,9 @@ export class MineflayerAdapter extends EventEmitter {
     const requiredTools = Object.keys(definition.harvestTools ?? {}).map(id => bot.registry.items?.[Number(id)]?.name).filter(Boolean);
     return { block, diggable: definition.diggable !== false, material: definition.material ?? null, handMineable: requiredTools.length === 0, requiredTools };
   }
+  toolRequirementForBlock(block) {
+    const bot = this.#ready('tool-requirement'); const definition = bot.registry?.blocksByName?.[block]; if (!definition) throw new ValidationError(`Unknown block '${block}'`); const tools = Object.keys(definition.harvestTools ?? {}).map(id => bot.registry.items?.[Number(id)]?.name).filter(name => String(name).endsWith('_pickaxe')); if (!tools.length) return null; return { type: 'pickaxe', tier: Math.min(...tools.map(toolTier)) };
+  }
   async craftRequirements({ item, count = 1 }) {
     const bot = this.#ready('craft-planning'); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1)); const inventory = inventoryLedger(bot);
     const definition = bot.registry?.itemsByName?.[item]; const recipes = definition ? bot.recipesAll(definition.id, null, true) ?? [] : [];
@@ -373,10 +376,10 @@ export class MineflayerAdapter extends EventEmitter {
       result.set(name, { name, count: (existing?.count ?? 0) + Number(item.count) });
       return result;
     }, new Map());
-    const slots = Array.isArray(bot?.inventory?.slots) ? bot.inventory.slots.slice(9, 45) : []; const inventorySlotsUsed = slots.filter(Boolean).length; const inventorySlotsFree = Math.max(0, 36 - inventorySlotsUsed); const freeItemCapacity = slots.reduce((total, item) => total + (item ? Math.max(0, Number(item.stackSize ?? 64) - Number(item.count ?? 0)) : 64), 0);
+    const slots = Array.isArray(bot?.inventory?.slots) ? bot.inventory.slots.slice(9, 45) : []; const inventorySlotsUsed = slots.filter(Boolean).length; const inventorySlotsFree = Math.max(0, 36 - inventorySlotsUsed); const freeItemCapacity = slots.reduce((total, item) => total + (item ? Math.max(0, Number(item.stackSize ?? 64) - Number(item.count ?? 0)) : 64), 0); const inventorySlots = slots.map(item => item ? { name: String(item.name).toLowerCase(), count: Number(item.count), stackSize: Number(item.stackSize ?? 64) } : null);
     return { connection: this.status, position: bot?.entity?.position ? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z } : null,
       health: bot?.health ?? null, food: bot?.food ?? null, alive: this.alive, dimension: bot?.game?.dimension ?? null,
-      inventorySummary: [...inventory.values()], inventorySlotsUsed, inventorySlotsFree, freeItemCapacity, plugins: { ...this.pluginStatus },
+      inventorySummary: [...inventory.values()], inventorySlots, inventorySlotsUsed, inventorySlotsFree, freeItemCapacity, plugins: { ...this.pluginStatus },
       camera: { active: Boolean(bot?.viewer), port: this.viewerPort ?? null, mode: this.viewerMode ?? null, version: bot?.version ?? null, renderVersion: this.viewerRenderVersion ?? null, versionSupported: this.viewerVersionSupported ?? null }, combat: { ...this.combatState }, timestamp: new Date().toISOString() };
   }
 
@@ -385,6 +388,7 @@ export class MineflayerAdapter extends EventEmitter {
 }
 
 function inventoryCount(bot, name) { return bot.inventory?.items?.().filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0) ?? 0; }
+function toolTier(name) { return { wooden: 1, golden: 2, stone: 3, iron: 4, diamond: 5, netherite: 6 }[String(name).split('_', 1)[0]] ?? 0; }
 function recoveryState(bot) { const position = bot.entity?.position; return { position: position ? { x: Number(position.x), y: Number(position.y), z: Number(position.z) } : null, dimension: String(bot.game?.dimension ?? 'overworld'), inventory: (bot.inventory?.items?.() ?? []).filter(item => Number(item.count) > 0).map(item => ({ name: String(item.name), count: Number(item.count), customName: recoveryCustomName(item), enchanted: recoveryEnchanted(item) })), health: Number(bot.health ?? 0), food: Number(bot.food ?? 0), capturedAt: new Date().toISOString() }; }
 function recoveryCustomName(item) { const value = item.customName ?? item.nbt?.value?.display?.value?.Name?.value; return value ? String(value).slice(0, 160) : null; }
 function recoveryEnchanted(item) { return Boolean(item.enchants?.length || item.nbt?.value?.Enchantments?.value?.value?.length || item.nbt?.value?.ench?.value?.value?.length); }
