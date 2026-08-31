@@ -39,6 +39,8 @@ export function createRecoveryJobService(input) {
   validateEvents(dependencies.events);
   const repository = dependencies.repository;
   const events = dependencies.events ?? null;
+  const bots = dependencies.bots ?? null;
+  const resourceReservations = dependencies.resourceReservations ?? null;
   const config = createRecoveryConfig(dependencies.config);
   let mutationQueue = Promise.resolve();
   const mutate = operation => {
@@ -73,6 +75,7 @@ export function createRecoveryJobService(input) {
       evaluationDecision: evaluation.decision,
       status: 'EVALUATING',
       assignedBotId: null,
+      resourceReservationIds: [],
       despawn: createDespawnBudget({ budgetTicks: config.despawnTicks, safetyMarginTicks: config.safetyMarginTicks, estimatedLoadedTicks: 0, chunkActive }),
       recoveryAttempts: 0,
       maxAttempts: config.maxAttempts,
@@ -101,7 +104,7 @@ export function createRecoveryJobService(input) {
     const source = requiredRecord(inputValue, 'Recovery transition input');
     const current = await find(source.jobId);
     const nextStatus = recoveryState(source.status, 'Recovery transition status');
-    return transitionRecord(repository, events, current, nextStatus, {});
+    const updated = await transitionRecord(repository, events, current, nextStatus, {}); return releaseRecoveryResourcesIfTerminal(repository, resourceReservations, updated);
   });
 
   const assign = inputValue => mutate(async () => {
@@ -109,7 +112,7 @@ export function createRecoveryJobService(input) {
     const current = await find(source.jobId);
     const botId = identifier(source.botId, 'Recovery assignment botId');
     if (!['EVALUATING', 'PENDING', 'REASSIGN_REQUIRED'].includes(current.status)) throw invalidTransition(current, 'ASSIGNED');
-    return transitionRecord(repository, events, current, 'ASSIGNED', { assignedBotId: botId, failure: null });
+    releaseRecoveryResources(resourceReservations, current.resourceReservationIds); const reservationIds = reserveRecoveryResources(resourceReservations, bots, current, botId); try { return await transitionRecord(repository, events, current, 'ASSIGNED', { assignedBotId: botId, failure: null, resourceReservationIds: reservationIds }); } catch (error) { releaseRecoveryResources(resourceReservations, reservationIds); throw error; }
   });
 
   const recordFailure = inputValue => mutate(async () => {
@@ -122,11 +125,12 @@ export function createRecoveryJobService(input) {
     const reachedLimit = recoveryAttempts >= current.maxAttempts;
     const nextStatus = code === 'ITEMS_DESPAWNED' ? 'EXPIRED' : IRRECOVERABLE_CODES.has(code) ? 'UNRECOVERABLE' : reachedLimit ? 'FAILED' : 'REASSIGN_REQUIRED';
     const failureCode = reachedLimit && nextStatus === 'FAILED' ? 'MAX_RECOVERY_ATTEMPTS' : code;
-    return transitionRecord(repository, events, current, nextStatus, {
+    const updated = await transitionRecord(repository, events, current, nextStatus, {
       assignedBotId: nextStatus === 'REASSIGN_REQUIRED' ? null : current.assignedBotId,
+      resourceReservationIds: nextStatus === 'REASSIGN_REQUIRED' ? [] : current.resourceReservationIds,
       recoveryAttempts,
       failure: Object.freeze({ code: failureCode, attemptCode: code, message, at: new Date().toISOString() })
-    });
+    }); if (nextStatus === 'REASSIGN_REQUIRED' || isTerminal(nextStatus)) releaseRecoveryResources(resourceReservations, current.resourceReservationIds); return updated;
   });
 
   const updateDespawn = inputValue => mutate(async () => {
@@ -150,7 +154,7 @@ export function createRecoveryJobService(input) {
     if (current.status !== 'VERIFYING') throw invalidTransition(current, source.verification?.verified ? 'RECOVERED' : 'PARTIAL');
     const verification = validateRecoveryVerification(source.verification);
     const nextStatus = verification.verified ? 'RECOVERED' : 'PARTIAL';
-    return transitionRecord(repository, events, current, nextStatus, { verification });
+    const updated = await transitionRecord(repository, events, current, nextStatus, { verification, resourceReservationIds: [] }); releaseRecoveryResources(resourceReservations, current.resourceReservationIds); return updated;
   });
 
   const remove = inputValue => mutate(async () => {
@@ -165,6 +169,10 @@ export function createRecoveryJobService(input) {
 
   return Object.freeze({ create, find, list, transition, assign, recordFailure, updateDespawn, complete, remove, settings: () => config });
 }
+
+function reserveRecoveryResources(reservations, bots, job, botId) { if (!reservations || !bots) return []; const runtime = bots.get(botId); const inventory = runtime.adapter.snapshot().inventorySummary ?? []; const ids = []; try { for (const item of job.items.filter(entry => entry.decision !== 'SKIP')) ids.push(reservations.reserve({ ownerType: 'RECOVERY', ownerId: job.id, sessionId: job.id, botId, item: item.name, count: item.count, inventory, reason: 'RECOVERY_RESERVED', allowUnbacked: true }).id); return ids; } catch (error) { releaseRecoveryResources(reservations, ids); throw error; } }
+function releaseRecoveryResources(reservations, ids) { if (!reservations) return; for (const id of Array.isArray(ids) ? ids : []) reservations.release({ leaseId: id }); }
+async function releaseRecoveryResourcesIfTerminal(repository, reservations, job) { if (!isTerminal(job.status)) return job; releaseRecoveryResources(reservations, job.resourceReservationIds); return normalizeRecoveryJob(await repository.update(job.id, { resourceReservationIds: [], updatedAt: new Date().toISOString() })); }
 
 export function transitionRecoveryJob(input) {
   const source = requiredRecord(input, 'Recovery job state transition');

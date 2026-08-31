@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../src/core/event-bus.js';
 import { MemoryRepository } from '../src/persistence/memory-repository.js';
+import { createResourceReservationService } from '../src/navigation/index.js';
 import {
   advanceDespawnBudget,
   createDeathManifest,
@@ -180,6 +181,10 @@ test('recovery job service verifies required items before recording completion',
   assert.equal(job.status, 'RECOVERED');
   assert.equal(job.verification.verified, true);
   assert.deepEqual((await service.list({ statuses: ['RECOVERED'] })).map(record => record.id), [job.id]);
+});
+
+test('recovery assignment protects expected output and releases it after verification', async () => {
+  const resourceReservations = createResourceReservationService(); const runtime = { adapter: { snapshot: () => ({ inventorySummary: [] }) } }; const service = createRecoveryJobService({ repository: new MemoryRepository(), events: null, bots: { get: () => runtime }, resourceReservations, config: createRecoveryConfig({}) }); const death = manifest([{ name: 'diamond', count: 4 }], {}); const evaluation = evaluateRecoveryItems({ manifest: death, signals: [], cost: DEFAULT_COST, config: createRecoveryConfig({}) }); let job = await service.create({ manifest: death, evaluation, chunkActive: true }); job = await service.assign({ jobId: job.id, botId: 'courier' }); const active = resourceReservations.reservationsForBot('courier'); assert.equal(active.length, 1); assert.equal(active[0].reason, 'RECOVERY_RESERVED'); assert.equal(active[0].status, 'ACTIVE'); for (const status of ['TRAVELLING', 'SEARCHING', 'COLLECTING', 'VERIFYING']) job = await service.transition({ jobId: job.id, status }); const verification = verifyRecovery({ expectedItems: evaluation.items, beforeInventory: [], afterInventory: [{ name: 'diamond', count: 4 }] }); await service.complete({ jobId: job.id, verification }); assert.equal(resourceReservations.reservationsForBot('courier')[0].status, 'RELEASED');
 });
 
 function manifest(items, overrides) {
