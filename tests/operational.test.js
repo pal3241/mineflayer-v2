@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createApplication } from '../src/index.js';
 import { MineflayerAdapter } from '../src/plugins/minecraft/mineflayer-adapter.js';
+import { createNavigationMovements } from '../src/navigation/index.js';
 import { createRequire } from 'node:module';
 
 class OperationalAdapter extends EventEmitter {
@@ -106,6 +107,27 @@ test('movement policy disables risky shortcuts and enables safe wooden door navi
   const client = new MovementClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { Movements }; client.emit('spawn'); await new Promise(resolve => setImmediate(resolve)); assert.equal(client.movements.allow1by1towers, false); assert.equal(client.movements.allowParkour, false); assert.deepEqual(client.movements.scafoldingBlocks, []); assert.equal(client.movements.placeCost, Number.POSITIVE_INFINITY); assert.equal(client.movements.maxDropDown, 3); assert.equal(client.movements.canOpenDoors, true); assert.equal(client.movements.openable.has(4), true); assert.equal(client.movements.openable.has(5), false); assert.equal(client.movements.openable.has(6), false); assert.equal(client.movements.openable.has(99), true); await adapter.disconnect();
 });
 
+test('movement policy truly blocks jump routes and water routes when disabled', () => {
+  class Movements {
+    constructor(bot) { this.bot = bot; this.allowParkour = true; this.allowJump = true; this.allow1by1towers = true; this.allowSprinting = true; this.allowFreeMotion = true; this.maxDropDown = 4; this.canOpenDoors = false; this.openable = new Set(); }
+    getBlock(pos, dx, dy, dz) { const position = { x: pos.x + dx, y: pos.y + dy, z: pos.z + dz }; const block = this.bot.blockAt(position) ?? { name: 'air' }; const liquid = block.name === 'water'; const physical = !['air', 'water'].includes(block.name); return { position, name: block.name, safe: !liquid, physical, replaceable: !physical, liquid, height: position.y, openable: false }; }
+    getMoveJumpUp(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x, y: node.y + 1, z: node.z + dir.z }); }
+    getMoveDiagonal(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x, y: node.y + 1, z: node.z + dir.z }); neighbors.push({ x: node.x + dir.x, y: node.y, z: node.z + dir.z }); }
+    getMoveParkourForward(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x * 2, y: node.y + 1, z: node.z + dir.z * 2, parkour: true }); }
+    getMoveForward(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x, y: node.y, z: node.z + dir.z }); }
+    getMoveDropDown() {}
+    getMoveDown() {}
+    getMoveUp() {}
+  }
+  const baseBot = { blockAt: position => (position.x === 1 && position.y === 64 && position.z === 0 ? { name: 'water' } : { name: 'air' }) };
+  const disabled = createNavigationMovements({ Movements, bot: baseBot, policy: { allowJump: false, water: { allowSwimming: false, allowEnterWater: false, allowDeepWater: false, allowUnderwaterRoute: false, maxDepth: 2, maxUnderwaterDurationMs: 1000 } } });
+  const enabled = createNavigationMovements({ Movements, bot: baseBot, policy: { allowJump: true, water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: true, allowUnderwaterRoute: true, maxDepth: 2, maxUnderwaterDurationMs: 1000 } } });
+  const node = { x: 0, y: 64, z: 0 };
+  assert.ok(disabled.getNeighbors(node).every(move => move.y <= 64));
+  assert.ok(enabled.getNeighbors(node).some(move => move.y > 64));
+  assert.ok(disabled.getNeighbors(node).every(move => move.x !== 1 || move.z !== 0));
+});
+
 test('movement setup failures become observable plugin errors', async () => {
   class BrokenMovements { constructor() { throw new Error('movement setup failed'); } }
   class MovementClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.pathfinder = { setGoal() {} }; } clearControlStates() {} quit() { this.emit('end'); } }
@@ -174,6 +196,37 @@ test('navigation accepts a door activation step and continues to its destination
   class GoalNear { constructor(x, y, z, range) { Object.assign(this, { x, y, z, range }); } }
   class DoorClient extends EventEmitter { constructor() { super(); this.entity = { position: { x: 0, y: 64, z: 0 } }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [] }; this.pathfinder = { goto: async goal => { this.emit('path_update', { path: [{ toPlace: [{ x: 1, y: 64, z: 0, useOne: true }] }] }); this.entity.position = { x: goal.x, y: goal.y, z: goal.z }; this.emit('move'); }, setGoal() {} }; } clearControlStates() {} quit() { this.emit('end'); } }
   const client = new DoorClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear } }; client.emit('spawn'); const result = await adapter.navigate({ x: 2, y: 64, z: 0, range: 1 }); assert.deepEqual(result.position, { x: 2, y: 64, z: 0 }); await adapter.disconnect();
+});
+
+test('bridge step verifies both placement and actual movement to the new block', async () => {
+  const { Vec3 } = await import('vec3');
+  class GoalNear { constructor(x, y, z, range) { Object.assign(this, { x, y, z, range }); } }
+  class BridgeClient extends EventEmitter {
+    constructor() { super(); this.entity = { position: new Vec3(0, 64, 0) }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [{ name: 'dirt', count: 2 }] }; this.blocks = new Map([['0,63,0', 'stone']]); this.pathfinder = { goto: async goal => { this.entity.position = new Vec3(goal.x, goal.y, goal.z); this.emit('move'); }, setGoal() {} }; this.registry = { itemsByName: { dirt: { id: 1 } } }; }
+    blockAt(position) { return { name: this.blocks.get(`${position.x},${position.y},${position.z}`) ?? 'air', position }; }
+    async equip() {}
+    async placeBlock(_support, _offset) { this.blocks.set('1,63,0', 'dirt'); }
+    clearControlStates() {}
+    quit() { this.emit('end'); }
+  }
+  const client = new BridgeClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear } }; client.emit('spawn');
+  const result = await adapter.safeBridgeStep({ item: 'dirt', target: { x: 1, z: 0 } }, {});
+  assert.equal(result.verified, true); assert.deepEqual(result.position, { x: 1, y: 63, z: 0 }); await adapter.disconnect();
+});
+
+test('bridge step fails when placement succeeds but the bot does not reach the new block', async () => {
+  const { Vec3 } = await import('vec3');
+  class GoalNear { constructor(x, y, z, range) { Object.assign(this, { x, y, z, range }); } }
+  class BridgeClient extends EventEmitter {
+    constructor() { super(); this.entity = { position: new Vec3(0, 64, 0) }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [{ name: 'dirt', count: 2 }] }; this.blocks = new Map([['0,63,0', 'stone']]); this.pathfinder = { goto: async () => { this.entity.position = new Vec3(0, 64, 0); }, setGoal() {} }; this.registry = { itemsByName: { dirt: { id: 1 } } }; }
+    blockAt(position) { return { name: this.blocks.get(`${position.x},${position.y},${position.z}`) ?? 'air', position }; }
+    async equip() {}
+    async placeBlock(_support, _offset) { this.blocks.set('1,63,0', 'dirt'); }
+    clearControlStates() {}
+    quit() { this.emit('end'); }
+  }
+  const client = new BridgeClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear } }; client.emit('spawn');
+  await assert.rejects(adapter.safeBridgeStep({ item: 'dirt', target: { x: 1, z: 0 } }, {}), error => error.code === 'BRIDGE_UNSTABLE_POSITION'); await adapter.disconnect();
 });
 
 test('crafting executes every registry wood and stone tool material recipe', async () => {
