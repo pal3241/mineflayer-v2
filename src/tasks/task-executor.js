@@ -19,8 +19,8 @@ export class TaskExecutor {
   async #rejectBeforeStart(task, error) { task.update(TaskStatus.FAILED, { error: { code: error.code, message: error.message } }); this.scheduler.release(task); this.metrics.increment('tasks.failed'); await this.events.publish('task.failed', task.toDTO(), { source: 'task-executor', correlationId: task.goalId }); throw error; }
   async #executeNow(task) {
     const started = performance.now(); const token = new CancellationToken(); this.#tokens.set(task.id, token);
-    await this.#reserveTaskResources(task); task.update(TaskStatus.RUNNING); await this.events.publish('task.started', task.toDTO(), { source: 'task-executor', correlationId: task.goalId });
     try {
+      await this.#reserveTaskResources(task); task.update(TaskStatus.RUNNING); await this.events.publish('task.started', task.toDTO(), { source: 'task-executor', correlationId: task.goalId });
       const result = await retry(async attempt => {
         task.attempts = attempt; token.throwIfCancelled();
         await this.checkpoints?.save({ taskId: task.id, botId: task.assignedBot, machineState: 'RUNNING', attempt, blackboardSnapshot: { input: task.input } });
