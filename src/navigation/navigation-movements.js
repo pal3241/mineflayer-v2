@@ -22,18 +22,8 @@ export function createNavigationMovements({ Movements, bot, policy }) {
       this.maxUnderwaterDurationMs = Number(this.waterPolicy.maxUnderwaterDurationMs ?? 10_000);
     }
 
-    getMoveJumpUp(node, dir, neighbors) {
-      if (!this.allowJump) return;
-      return super.getMoveJumpUp(node, dir, neighbors);
-    }
-
-    getMoveParkourForward(node, dir, neighbors) {
-      if (!this.allowJump) return;
-      return super.getMoveParkourForward(node, dir, neighbors);
-    }
-
     getMoveDiagonal(node, dir, neighbors) {
-      if (!this.#canTraverseWater(node, dir, 0, 0)) return;
+      if (!this.#canTraverseRoute(node, dir, 0, 0, { allowJump: this.allowJump, allowParkour: this.allowParkour })) return;
       if (this.allowJump) return super.getMoveDiagonal(node, dir, neighbors);
       const before = neighbors.length;
       super.getMoveDiagonal(node, dir, neighbors);
@@ -41,36 +31,35 @@ export function createNavigationMovements({ Movements, bot, policy }) {
     }
 
     getMoveForward(node, dir, neighbors) {
-      if (!this.#canTraverseWater(node, dir, 0, 0)) return;
+      if (!this.#canTraverseRoute(node, dir, 0, 0, { allowSwimming: this.allowSwimming, allowEnterWater: this.allowEnterWater, allowDeepWater: this.allowDeepWater, allowUnderwaterRoute: this.allowUnderwaterRoute })) return;
       return super.getMoveForward(node, dir, neighbors);
     }
 
-    getMoveParkourForward(node, dir, neighbors) {
-      const immediate = this.#canTraverseWater(node, dir, 0, 0);
-      const landing = this.getBlock(node, dir.x * 2, 0, dir.z * 2);
-      const landingDepth = waterDepth(this.bot, landing.position ?? node, this.maxWaterDepth);
-      const landingSubmerged = isSubmerged(this.bot, landing.position ?? node);
-      if (!immediate) return;
-      if (isWater(landing) && !this.allowEnterWater) return;
-      if (landingDepth > this.maxWaterDepth) return;
-      if (isWater(landing) && !this.allowDeepWater && landingDepth > 1) return;
-      if (landingSubmerged && !this.allowUnderwaterRoute) return;
-      return super.getMoveParkourForward(node, dir, neighbors);
+    getMoveJumpUp(node, dir, neighbors) {
+      if (!this.allowJump) return;
+      if (!this.#canTraverseRoute(node, dir, 1, 0, { allowJump: this.allowJump, allowParkour: this.allowParkour })) return;
+      return super.getMoveJumpUp(node, dir, neighbors);
     }
 
     getMoveDropDown(node, dir, neighbors) {
-      if (!this.#canTraverseWater(node, dir, -1, 0)) return;
+      if (!this.#canTraverseRoute(node, dir, -1, 0, { allowSwimming: this.allowSwimming, allowEnterWater: this.allowEnterWater, allowDeepWater: this.allowDeepWater, allowUnderwaterRoute: this.allowUnderwaterRoute })) return;
       return super.getMoveDropDown(node, dir, neighbors);
     }
 
     getMoveDown(node, neighbors) {
-      if (!this.#canTraverseWater(node, { x: 0, z: 0 }, -1, 0)) return;
+      if (!this.#canTraverseRoute(node, { x: 0, z: 0 }, -1, 0, { allowSwimming: this.allowSwimming, allowEnterWater: this.allowEnterWater, allowDeepWater: this.allowDeepWater, allowUnderwaterRoute: this.allowUnderwaterRoute })) return;
       return super.getMoveDown(node, neighbors);
     }
 
     getMoveUp(node, neighbors) {
-      if (!this.#canTraverseWater(node, { x: 0, z: 0 }, 1, 0)) return;
+      if (!this.#canTraverseRoute(node, { x: 0, z: 0 }, 1, 0, { allowSwimming: this.allowSwimming, allowEnterWater: this.allowEnterWater, allowDeepWater: this.allowDeepWater, allowUnderwaterRoute: this.allowUnderwaterRoute })) return;
       return super.getMoveUp(node, neighbors);
+    }
+
+    getMoveParkourForward(node, dir, neighbors) {
+      if (!this.allowParkour || !this.allowJump) return;
+      if (!this.#canTraverseRoute(node, dir, 0, 0, { allowSwimming: this.allowSwimming, allowEnterWater: this.allowEnterWater, allowDeepWater: this.allowDeepWater, allowUnderwaterRoute: this.allowUnderwaterRoute, parkour: true })) return;
+      return super.getMoveParkourForward(node, dir, neighbors);
     }
 
     getNeighbors(node) {
@@ -87,7 +76,7 @@ export function createNavigationMovements({ Movements, bot, policy }) {
       return neighbors;
     }
 
-    #canTraverseWater(node, dir, dy, dz) {
+    #canTraverseRoute(node, dir, dy, dz, options) {
       const target = this.getBlock(node, dir.x, dy, dir.z ?? dz);
       const current = this.getBlock(node, 0, 0, 0);
       const head = this.getBlock(node, 0, 1, 0);
@@ -96,12 +85,14 @@ export function createNavigationMovements({ Movements, bot, policy }) {
       const currentSubmerged = isSubmerged(this.bot, current.position ?? node);
       const targetSubmerged = isSubmerged(this.bot, target.position ?? node);
       const targetIsWater = isWater(target);
+      const targetIsOpenWater = targetIsWater && targetWaterDepth >= 1;
 
-      if (currentSubmerged && !this.allowSwimming) return false;
-      if (targetIsWater && !this.allowEnterWater) return false;
+      if ((currentSubmerged || isWater(head)) && !options.allowSwimming) return false;
+      if (targetIsWater && !options.allowEnterWater) return false;
       if (targetWaterDepth > this.maxWaterDepth) return false;
-      if (targetIsWater && !this.allowDeepWater && targetWaterDepth > 1) return false;
-      if ((currentSubmerged || targetSubmerged) && !this.allowUnderwaterRoute) return false;
+      if (targetIsOpenWater && !options.allowDeepWater && targetWaterDepth > 1) return false;
+      if ((currentSubmerged || targetSubmerged) && !options.allowUnderwaterRoute) return false;
+      if (options.parkour && (currentSubmerged || targetSubmerged || isWater(targetHead))) return false;
       return true;
     }
   }(bot);
@@ -130,10 +121,11 @@ function waterDepth(bot, position, maxDepth) {
   if (!bot?.blockAt || !position) return 0;
   let depth = 0;
   let cursor = position.floored ? position.floored() : position;
-  while (depth < maxDepth) {
+  while (depth <= maxDepth) {
     const block = bot.blockAt(cursor);
     if (!isWater(block)) break;
     depth++;
+    if (depth > maxDepth) return depth;
     cursor = cursor.offset ? cursor.offset(0, -1, 0) : { x: cursor.x, y: cursor.y - 1, z: cursor.z };
   }
   return depth;
@@ -148,8 +140,4 @@ function isSubmerged(bot, position) {
 
 function isWater(block) {
   return ['water', 'bubble_column'].includes(String(block?.name ?? ''));
-}
-
-function isWaterAbove(block) {
-  return Boolean(block?.liquid ?? ['water', 'bubble_column'].includes(String(block?.name ?? '')));
 }

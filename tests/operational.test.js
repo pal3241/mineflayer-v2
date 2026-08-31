@@ -128,6 +128,47 @@ test('movement policy truly blocks jump routes and water routes when disabled', 
   assert.ok(disabled.getNeighbors(node).every(move => move.x !== 1 || move.z !== 0));
 });
 
+test('movement policy blocks parkour when jump is disabled even if parkour is enabled', () => {
+  class Movements {
+    constructor(bot) { this.bot = bot; this.allowParkour = true; this.allowJump = true; this.allow1by1towers = true; this.allowSprinting = true; this.allowFreeMotion = true; this.maxDropDown = 4; this.canOpenDoors = false; this.openable = new Set(); }
+    getBlock(pos, dx, dy, dz) { const position = { x: pos.x + dx, y: pos.y + dy, z: pos.z + dz }; const name = this.bot.blockAt(position)?.name ?? 'air'; const liquid = name === 'water'; const physical = !['air', 'water'].includes(name); return { position, name, safe: !liquid, physical, replaceable: !physical, liquid, height: position.y, openable: false }; }
+    getMoveJumpUp(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x, y: node.y + 1, z: node.z + dir.z, kind: 'jump' }); }
+    getMoveDiagonal(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x, y: node.y + 1, z: node.z + dir.z, kind: 'diag-up' }); }
+    getMoveParkourForward(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x * 2, y: node.y + 1, z: node.z + dir.z * 2, kind: 'parkour' }); }
+    getMoveForward(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x, y: node.y, z: node.z + dir.z, kind: 'forward' }); }
+    getMoveDropDown() {}
+    getMoveDown() {}
+    getMoveUp() {}
+  }
+  const bot = { blockAt: position => (position.x === 2 && position.y === 64 && position.z === 0 ? { name: 'air' } : { name: 'air' }) };
+  const movements = createNavigationMovements({ Movements, bot, policy: { allowJump: false, allowParkour: true, water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: true, allowUnderwaterRoute: true, maxDepth: 2, maxUnderwaterDurationMs: 1000 } } });
+  const neighbors = movements.getNeighbors({ x: 0, y: 64, z: 0 });
+  assert.ok(neighbors.some(move => move.kind === 'forward'));
+  assert.ok(neighbors.every(move => move.kind !== 'jump'));
+  assert.ok(neighbors.every(move => move.kind !== 'parkour'));
+});
+
+test('movement policy rejects water columns deeper than the configured maximum', () => {
+  class Movements {
+    constructor(bot) { this.bot = bot; this.allowJump = true; this.allowParkour = false; this.allow1by1towers = true; this.allowSprinting = true; this.allowFreeMotion = true; this.maxDropDown = 4; this.canOpenDoors = false; this.openable = new Set(); }
+    getBlock(pos, dx, dy, dz) { const position = { x: pos.x + dx, y: pos.y + dy, z: pos.z + dz }; const name = this.bot.blockAt(position)?.name ?? 'air'; const liquid = name === 'water'; const physical = !['air', 'water'].includes(name); return { position, name, safe: !liquid, physical, replaceable: !physical, liquid, height: position.y, openable: false }; }
+    getMoveForward(node, dir, neighbors) { neighbors.push({ x: node.x + dir.x, y: node.y, z: node.z + dir.z, kind: 'forward' }); }
+    getMoveJumpUp() {}
+    getMoveDiagonal() {}
+    getMoveParkourForward() {}
+    getMoveDropDown() {}
+    getMoveDown() {}
+    getMoveUp() {}
+  }
+  const bot = { blockAt: position => {
+    if (position.x === 1 && position.z === 0 && [64, 63, 62].includes(position.y)) return { name: 'water' };
+    return { name: 'air' };
+  } };
+  const movements = createNavigationMovements({ Movements, bot, policy: { allowJump: true, allowParkour: false, water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: true, allowUnderwaterRoute: true, maxDepth: 2, maxUnderwaterDurationMs: 1000 } } });
+  const neighbors = movements.getNeighbors({ x: 0, y: 64, z: 0 });
+  assert.ok(neighbors.every(move => move.x !== 1 || move.z !== 0));
+});
+
 test('movement policy distinguishes surface water from underwater depth limits', () => {
   class Movements {
     constructor(bot) { this.bot = bot; this.allowJump = true; this.allowParkour = true; this.allow1by1towers = true; this.allowSprinting = true; this.allowFreeMotion = true; this.maxDropDown = 4; this.canOpenDoors = false; this.openable = new Set(); }
@@ -255,6 +296,26 @@ test('bridge step fails when placement succeeds but the bot does not reach the n
   }
   const client = new BridgeClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear } }; client.emit('spawn');
   await assert.rejects(adapter.safeBridgeStep({ item: 'dirt', target: { x: 1, z: 0 } }, {}), error => error.code === 'BRIDGE_UNSTABLE_POSITION'); await adapter.disconnect();
+});
+
+test('bridge step cancellation aborts pathfinder movement and stability wait', async () => {
+  const { Vec3 } = await import('vec3');
+  class GoalNear { constructor(x, y, z, range) { Object.assign(this, { x, y, z, range }); } }
+  class BridgeClient extends EventEmitter {
+    constructor() { super(); this.entity = { position: new Vec3(0, 64, 0) }; this.game = { dimension: 'overworld' }; this.inventory = { items: () => [{ name: 'dirt', count: 2 }] }; this.blocks = new Map([['0,63,0', 'stone']]); this.pathfinder = { goto: () => new Promise((_resolve, reject) => this.once('abortGoto', reject)), setGoal() {} }; this.registry = { itemsByName: { dirt: { id: 1 } } }; }
+    blockAt(position) { return { name: this.blocks.get(`${position.x},${position.y},${position.z}`) ?? 'air', position }; }
+    async equip() {}
+    async placeBlock(_support, _offset) { this.blocks.set('1,63,0', 'dirt'); }
+    clearControlStates() {}
+    quit() { this.emit('end'); }
+  }
+  const client = new BridgeClient(); const adapter = new MineflayerAdapter({ factory: () => client, plugins: false }); await adapter.connect({}); adapter.pathfinderModule = { goals: { GoalNear } }; client.emit('spawn');
+  const signal = new AbortController();
+  const step = adapter.safeBridgeStep({ item: 'dirt', target: { x: 1, z: 0 } }, { signal: signal.signal });
+  setTimeout(() => signal.abort(new Error('cancel bridge')), 20);
+  await assert.rejects(step, error => error.code === 'BRIDGE_CANCELLED' || /cancel bridge/.test(String(error.message)));
+  client.emit('abortGoto', new Error('abort pathfinder'));
+  await adapter.disconnect();
 });
 
 test('crafting executes every registry wood and stone tool material recipe', async () => {
