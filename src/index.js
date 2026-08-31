@@ -32,3 +32,4 @@ export { createFleetTransferService } from './logistics/fleet-transfer-service.j
 export { createHelpCommandService, createHelpService } from './help/index.js';
 export { createSurvivalService, normalizeSurvivalPolicy, SurvivalCapabilityError } from './survival/index.js';
 export { createTaskReporter } from './tasks/task-reporter.js';
+export { NavigationError, createNavigationService, normalizeNavigationPolicy, normalizeNavigationRequest, normalizeNavigationTarget } from './navigation/index.js';

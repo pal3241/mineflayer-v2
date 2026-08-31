@@ -1,8 +1,8 @@
 const HELP = 'commands: help <owner>, add helper <bot...>, stop help, helpers, help status, status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, shear, milk, sleep, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
 
 export class ChatCommandController {
-  constructor({ goalService, executor, capabilities, coordinator, helpCommands, config, logger }) {
-    this.goals = goalService; this.executor = executor; this.capabilities = capabilities; this.coordinator = coordinator; this.helpCommands = helpCommands; this.config = config; this.logger = logger;
+  constructor({ goalService, executor, capabilities, coordinator, helpCommands, navigation, config, logger }) {
+    this.goals = goalService; this.executor = executor; this.capabilities = capabilities; this.coordinator = coordinator; this.helpCommands = helpCommands; this.navigation = navigation; this.config = config; this.logger = logger;
   }
   attach(runtime) {
     if (!this.config.enabled) return () => {};
@@ -28,6 +28,8 @@ export class ChatCommandController {
       if (command === 'remove' && args[0] === 'helper') { await this.helpCommands.removeHelper({ ownerBotId: runtime.bot.id, helperBotId: args[1] }); return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: runtime.bot.id })); }
       if (command === 'stop' && args[0] === 'help') { await this.helpCommands.stopHelping({ botId: runtime.bot.id }); return this.#reply(runtime, 'help stopped'); }
       if (command === 'helpers') return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: runtime.bot.id }));
+      if (command === 'goto') { const result = await this.navigation.moveTo({ botId: runtime.bot.id, target: { type: 'POSITION', x: Number(args[0]), y: Number(args[1]), z: Number(args[2]) }, mode: 'SAFE', tolerance: 2, timeout: 120_000, source: 'CHAT_COMMAND' }); return this.#reply(runtime, `arrived in ${result.durationMs}ms`); }
+      if (command === 'come') { const result = await this.navigation.moveTo({ botId: runtime.bot.id, target: { type: 'PLAYER', username }, mode: 'FAST', tolerance: 2, timeout: 120_000, source: 'CHAT_COMMAND' }); return this.#reply(runtime, `arrived near ${username} in ${result.durationMs}ms`); }
       if (['ai', 'collect', 'craft', 'smelt', 'cook', 'masak', 'lebur', 'survey', 'scan', 'jelajah', 'register_chest', 'daftar_chest', 'store', 'simpan', 'retrieve', 'withdraw', 'ambil_chest', 'stock', 'stok', 'farm', 'farming', 'deforest', 'reforest', 'guard', 'combat', 'meat', 'remember', 'place'].includes(command)) {
         const targetSelector = selector === 'global' ? 'global' : selector === className ? `class:${className}` : `bot:${alias}`; const request = command === 'ai' ? args.join(' ') : [command, ...args].join(' ');
         if (!this.coordinator.shouldHandle(runtime.bot.id, targetSelector)) return;
@@ -41,9 +43,7 @@ export class ChatCommandController {
       if (command === 'home') { await runtime.adapter.goHome({ name: args[0] ?? 'home' }); return this.#reply(runtime, 'going home'); }
       if (command === 'stop') { await runtime.adapter.stopActions(); for (const task of this.goals.allTasks().filter(task => task.assignedBot === runtime.bot.id && ['ASSIGNED', 'RUNNING'].includes(task.status))) this.executor.cancel(task.id, `Stopped by ${username}`); return this.#reply(runtime, 'running and queued actions stopped'); }
       let step;
-      if (command === 'come') step = { type: 'come', input: { username }, requiredCapabilities: ['minecraft.come'], timeout: 120_000 };
-      else if (command === 'follow') step = { type: 'follow-player', input: { username: args[0] ?? username }, requiredCapabilities: ['minecraft.follow-player'], timeout: 120_000 };
-      else if (command === 'goto') step = { type: 'navigate', input: { x: Number(args[0]), y: Number(args[1]), z: Number(args[2]) }, requiredCapabilities: ['minecraft.navigation'], timeout: 120_000 };
+      if (command === 'follow') step = { type: 'follow-player', input: { username: args[0] ?? username }, requiredCapabilities: ['minecraft.follow-player'], timeout: 120_000 };
       else if (command === 'shear') step = { type: 'shear-nearest', input: {}, requiredCapabilities: ['minecraft.shear-nearest'], timeout: 120_000 };
       else if (command === 'milk') step = { type: 'milk-nearest', input: {}, requiredCapabilities: ['minecraft.milk-nearest'], timeout: 120_000 };
       else if (command === 'sleep') step = { type: 'sleep', input: {}, requiredCapabilities: ['minecraft.sleep'], timeout: 120_000 };

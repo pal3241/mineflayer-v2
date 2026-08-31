@@ -146,6 +146,8 @@ Membuat bot mendatangi admin yang mengirim command satu kali. Command ini berbed
 !bot1 come
 ```
 
+`come` memakai NavigationSession mode `FAST` menuju posisi pemain admin yang sedang terlihat. Command ini selesai setelah posisi bot diverifikasi berada dalam tolerance, bukan hanya setelah pathfinder mengembalikan hasil.
+
 ### `follow [pemain]`
 
 Membuat bot terus mengikuti pemain. Jika nama pemain tidak diberikan, bot mengikuti admin yang mengirim command.
@@ -164,6 +166,8 @@ Menggerakkan bot ke koordinat tertentu menggunakan smart movement.
 ```
 
 Ketiga koordinat wajib berupa angka. Movement otomatis tidak memakai tower 1x1, parkour, atau scaffolding block. Route yang membutuhkan penempatan block akan gagal dengan pesan jelas agar bot tidak berulang kali mencoba gerakan yang sama.
+
+`goto` membuat NavigationSession dengan mode `SAFE`, tolerance dua block, timeout dua menit, dan verifikasi posisi runtime setelah pathfinder selesai.
 
 ### `sethome [nama]`
 
@@ -669,6 +673,30 @@ Gunakan `{"clearOpenRouterKeys":true}` atau `{"clearNvidiaKeys":true}` untuk men
 | `GET` | `/api/v1/tasks/queue` | Status antrean. |
 | `GET` | `/api/v1/tasks/:id` | Detail task. |
 | `POST` | `/api/v1/tasks/:id/cancel` | Membatalkan task; body `{"reason":"alasan"}`. |
+
+#### Navigation
+
+| Method | Endpoint | Fungsi |
+| --- | --- | --- |
+| `GET` | `/api/v1/navigation/status` | Status NavigationSession aktif dan riwayat runtime terbaru. |
+| `GET` | `/api/v1/navigation/bots/:botId` | Session navigation aktif untuk satu bot, atau `null`. |
+| `POST` | `/api/v1/navigation/move` | Memulai perpindahan terverifikasi. |
+| `POST` | `/api/v1/navigation/cancel` | Membatalkan session aktif dengan `botId` atau `sessionId`. |
+
+Contoh request move:
+
+```powershell
+$body = @{
+  botId = 'bot1'
+  target = @{ type = 'POSITION'; x = 100; y = 64; z = -30 }
+  mode = 'SAFE'
+  tolerance = 2
+  timeout = 120000
+  source = 'SYSTEM'
+} | ConvertTo-Json -Depth 3
+
+Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/navigation/move" -Headers $headers -ContentType 'application/json' -Body $body
+```
 
 #### Manual helping
 

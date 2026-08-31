@@ -6,7 +6,7 @@ import { MineflayerAdapter } from '../src/plugins/minecraft/mineflayer-adapter.j
 import { createRequire } from 'node:module';
 
 class OperationalAdapter extends EventEmitter {
-  constructor() { super(); this.status = 'READY'; this.messages = []; this.collected = []; this.items = []; }
+  constructor() { super(); this.status = 'READY'; this.messages = []; this.collected = []; this.items = []; this.position = { x: 1, y: 64, z: 2 }; }
   async connect() { this.connectCalls = (this.connectCalls ?? 0) + 1; this.status = 'READY'; this.emit('login'); this.emit('spawn'); }
   async disconnect() { this.status = 'DISCONNECTED'; this.emit('end'); }
   async chat(message) { this.messages.push(message); return { sent: true }; }
@@ -20,7 +20,10 @@ class OperationalAdapter extends EventEmitter {
   async goHome() { return { position: this.home }; }
   async dropItem({ item }) { const found = this.items.find(entry => entry.name === item && entry.count > 0); if (!found) throw new Error('missing item'); found.count--; this.worldDrop = item; return { item }; }
   async pickupItem({ item }) { this.items.push({ name: item, count: 1 }); return { item, collected: true }; }
-  async navigate(input) { return { position: input }; }
+  async navigate(input) { this.lastNavigate = input; this.position = { ...input }; return { position: input }; }
+  async navigateTo({ position }) { this.lastNavigate = position; this.position = { ...position }; return { position }; }
+  async stopNavigation() { this.navigationStopped = true; return { stopped: true }; }
+  async resolveNavigationTarget({ type, username }) { if (type !== 'PLAYER' || username !== 'Alice') throw new Error('player is not visible'); return { x: 4, y: 64, z: 2 }; }
   async followPlayer(input) { this.following = input.username; return { player: input.username }; }
   async comeToPlayer(input) { this.cameTo = input.username; return { player: input.username }; }
   async findSheep() { return { entityId: 'sheep-1' }; }
@@ -31,7 +34,7 @@ class OperationalAdapter extends EventEmitter {
   async stopActions() {}
   async startViewer({ port, mode }) { this.camera = { active: true, port, mode }; return this.camera; }
   async stopViewer() { this.camera = { active: false, port: null }; return this.camera; }
-  snapshot() { return { connection: this.status, position: { x: 1, y: 64, z: 2 }, health: 20, food: 20, inventorySummary: this.items.filter(item => item.count > 0), plugins: {}, camera: this.camera ?? { active: false, port: null }, timestamp: new Date().toISOString() }; }
+  snapshot() { return { connection: this.status, position: { ...this.position }, health: 20, food: 20, inventorySummary: this.items.filter(item => item.count > 0), plugins: {}, camera: this.camera ?? { active: false, port: null }, timestamp: new Date().toISOString() }; }
 }
 
 async function waitFor(predicate, timeout = 1000) {
@@ -51,7 +54,7 @@ test('authorized chat command creates and completes a real capability goal', asy
   await waitFor(() => app.goals.list()[0]?.status === 'COMPLETED');
   assert.deepEqual(adapter.collected, [{ block: 'oak_log', count: 2 }]); assert.ok(adapter.messages.some(message => message.includes('coordinator completed'))); assert.ok(adapter.messages.some(message => message.includes('task baru: collect'))); assert.ok(adapter.messages.some(message => message.includes('task selesai: collect')));
   adapter.emit('chat', 'Alice', '!worker shear'); await waitFor(() => adapter.sheared === 'sheep-1'); adapter.emit('chat', 'Alice', '!worker milk'); await waitFor(() => adapter.milked === 'cow-1'); adapter.emit('chat', 'Alice', '!worker sleep'); await waitFor(() => adapter.slept === true);
-  adapter.emit('chat', 'Alice', '!worker follow Bob'); await waitFor(() => adapter.following === 'Bob'); adapter.emit('chat', 'Alice', '!worker come'); await waitFor(() => adapter.cameTo === 'Alice'); adapter.emit('chat', 'Alice', '!worker berapa 1+1'); await waitFor(() => adapter.messages.some(message => message.includes('1 + 1 = 2'))); assert.equal(adapter.following, 'Bob'); assert.equal(adapter.cameTo, 'Alice'); await app.stop();
+  adapter.emit('chat', 'Alice', '!worker follow Bob'); await waitFor(() => adapter.following === 'Bob'); adapter.emit('chat', 'Alice', '!worker come'); await waitFor(() => adapter.lastNavigate?.x === 4); adapter.emit('chat', 'Alice', '!worker goto 8 64 -2'); await waitFor(() => adapter.lastNavigate?.x === 8); adapter.emit('chat', 'Alice', '!worker berapa 1+1'); await waitFor(() => adapter.messages.some(message => message.includes('1 + 1 = 2'))); assert.equal(adapter.following, 'Bob'); assert.equal(adapter.lastNavigate.z, -2); await app.stop();
 });
 
 test('class and global selectors route commands to the intended bots', async () => {

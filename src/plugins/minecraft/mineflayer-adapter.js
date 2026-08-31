@@ -66,13 +66,22 @@ export class MineflayerAdapter extends EventEmitter {
   #abort(signal, action) { if (!signal) return () => {}; const handler = () => action(); if (signal.aborted) handler(); else signal.addEventListener('abort', handler, { once: true }); return () => signal.removeEventListener('abort', handler); }
 
   async chat(message) { const bot = this.#ready('chat'); bot.chat(String(message).slice(0, 240)); return { sent: true }; }
-  async navigate({ x, y, z, range = 1 }, { signal } = {}) {
+  async navigate(input, context) { return this.navigateTo({ position: { x: input?.x, y: input?.y, z: input?.z }, tolerance: input?.range }, context); }
+  async navigateTo(input, context) {
+    const position = input?.position; const signal = context?.signal;
     const bot = this.#ready('navigation'); if (!bot.pathfinder) throw new ValidationError('Pathfinder plugin is unavailable');
-    for (const value of [x, y, z]) if (!Number.isFinite(Number(value))) throw new ValidationError('Navigation requires numeric x, y, z');
-    const destination = { x: Number(x), y: Number(y), z: Number(z) }; const acceptedRange = boundedDistance(range, 1, 64, 'Navigation range'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const goal = new goals.GoalNear(destination.x, destination.y, destination.z, acceptedRange);
+    for (const value of [position?.x, position?.y, position?.z]) if (!Number.isFinite(Number(value))) throw new ValidationError('Navigation requires numeric x, y, z');
+    const destination = { x: Number(position.x), y: Number(position.y), z: Number(position.z) }; const acceptedRange = boundedDistance(input?.tolerance ?? 1, 0, 64, 'Navigation range'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const goal = new goals.GoalNear(destination.x, destination.y, destination.z, acceptedRange);
     const cleanupAbort = this.#abort(signal, () => bot.pathfinder.setGoal(null)); const guard = navigationGuard(bot, destination, acceptedRange, 10_000);
-    try { await Promise.race([bot.pathfinder.goto(goal), guard.promise]); const position = this.snapshot().position; if (!position || distance3(position, destination) > acceptedRange + 1) throw new ValidationError(`Navigation ended outside target range: target ${destination.x},${destination.y},${destination.z}, actual ${formatPosition(position)}`); return { position }; }
+    try { await Promise.race([bot.pathfinder.goto(goal), guard.promise]); const finalPosition = this.snapshot().position; if (!finalPosition || distance3(finalPosition, destination) > acceptedRange + 1) throw new ValidationError(`Navigation ended outside target range: target ${destination.x},${destination.y},${destination.z}, actual ${formatPosition(finalPosition)}`); return { position: finalPosition }; }
     catch (error) { bot.pathfinder.setGoal(null); throw error; } finally { guard.stop(); cleanupAbort(); }
+  }
+  async stopNavigation() { const bot = this.#ready('navigation-stop'); bot.pathfinder?.setGoal(null); return { stopped: true }; }
+  resolveNavigationTarget(target) {
+    const bot = this.#ready('navigation-target'); const type = String(target?.type ?? '').toUpperCase();
+    if (type === 'PLAYER') { const actualName = Object.keys(bot.players ?? {}).find(name => name.toLowerCase() === String(target.username).toLowerCase()); const entity = bot.players?.[actualName]?.entity; if (!entity?.position) throw new NotFoundError('Visible player', target.username); return validRecoveryPosition(entity.position); }
+    if (type === 'ENTITY') { const entity = Object.values(bot.entities ?? {}).find(value => String(value?.id) === String(target.entityId)); if (!entity?.position) throw new NotFoundError('Entity', target.entityId); return validRecoveryPosition(entity.position); }
+    throw new ValidationError(`Unsupported adapter navigation target '${type}'`);
   }
   async followPlayer({ username, range = 2 }, { signal } = {}) {
     const bot = this.#ready('follow-player'); const actualName = Object.keys(bot.players ?? {}).find(name => name.toLowerCase() === String(username).toLowerCase()); const entity = bot.players?.[actualName]?.entity;

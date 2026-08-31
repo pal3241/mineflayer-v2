@@ -41,6 +41,7 @@ import { createFleetTransferService } from '../logistics/fleet-transfer-service.
 import { createHelpCommandService, createHelpService } from '../help/index.js';
 import { createSurvivalService } from '../survival/index.js';
 import { createTaskReporter } from '../tasks/task-reporter.js';
+import { createNavigationService } from '../navigation/index.js';
 
 export class Application {
   constructor(config, overrides = {}) {
@@ -75,15 +76,16 @@ export class Application {
     this.acquisition.configureTaskRunner(async ({ runtime, capability, input }) => { const goal = this.goals.create({ description: `Acquisition ${capability} for ${runtime.id}`, priority: input.priority ?? 70, constraints: { preferredBot: runtime.id }, steps: [{ type: 'acquisition', input, requiredCapabilities: [capability], timeout: 300_000, retries: 1, reportLifecycle: false }] }); await this.goals.run(goal.id); const task = this.goals.tasks(goal.id)[0]; if (task.status !== 'COMPLETED') throw new ValidationError(task.error?.message ?? `Acquisition task '${capability}' failed`); return task.result; });
     this.autonomy = createAutonomyService({ repository: repository('autonomy-objectives'), coordinator: this.coordinator, hive: this.hive, bots: this.bots, health: this.health, events: this.events, logger: this.logger, enabled: config.autonomy.enabled, intervalMs: config.autonomy.intervalMs, maxActionsPerHour: config.autonomy.maxActionsPerHour });
     registerMinecraftCapabilities(this.capabilities, this.bots, this.survival);
+    this.navigation = createNavigationService({ bots: this.bots, capabilities: this.capabilities, events: this.events, metrics: this.metrics });
     this.admins = new AdminManager({ repository: repository('admins'), bootstrap: [...(config.commands?.admins ?? [])], target: config.commands?.admins ?? [] });
     this.botProfiles = new BotProfileManager({ repository: repository('bots'), botManager: this.bots });
-    this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, coordinator: this.coordinator, helpCommands: this.helpCommands, config: config.commands ?? { enabled: false, admins: [] }, logger: this.logger });
+    this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, coordinator: this.coordinator, helpCommands: this.helpCommands, navigation: this.navigation, config: config.commands ?? { enabled: false, admins: [] }, logger: this.logger });
     this.taskReporter = createTaskReporter({ events: this.events, bots: this.bots, logger: this.logger });
     this.events.subscribe('bot.death', async event => { const affected = await this.acquisition.handleBotDeath(event.payload.botId); const helpSessions = await this.help.handleBotDeath(event.payload.botId); if (affected.length) await this.events.publish('acquisition.recovery.required', { botId: event.payload.botId, requestIds: affected.map(request => request.id) }, { source: 'acquisition', correlationId: event.payload.botId }); if (helpSessions.length) await this.events.publish('help.recovery.required', { botId: event.payload.botId, sessionIds: helpSessions.map(session => session.id) }, { source: 'help', correlationId: event.payload.botId }); });
     this.events.subscribe('task.cancelled', async event => { const reason = event.payload.error?.message ?? 'Parent task cancelled'; if (reason.startsWith(COLLABORATIVE_TAKEOVER_PREFIX)) return; await this.help.cancelForParent(event.payload.id, reason); });
     this.bots.onCreated(runtime => { this.chatCommands.attach(runtime); this.structureObserver.attach(runtime); this.survival.attach(runtime); });
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
-    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, helpCommands: this.helpCommands, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
+    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, helpCommands: this.helpCommands, navigation: this.navigation, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
     this.health.register('application', async () => ({ status: ['READY', 'RUNNING'].includes(this.state) ? 'HEALTHY' : 'DEGRADED' }), { critical: true });
     this.health.register('bots', async () => ({ status: this.bots.list().some(bot => ['FAILED', 'DEGRADED'].includes(bot.status)) ? 'DEGRADED' : 'HEALTHY' }));
     this.health.register('database', async () => this.database?.health() ?? { status: 'HEALTHY', driver: config.profile === 'test' ? 'memory' : 'json' }, { critical: true });
@@ -97,6 +99,7 @@ export class Application {
     this.health.register('recovery', async () => { const jobs = await this.recovery.list({ statuses: ['PENDING', 'EVALUATING', 'ASSIGNED', 'TRAVELLING', 'SEARCHING', 'COLLECTING', 'VERIFYING', 'REASSIGN_REQUIRED'] }); return { status: jobs.length ? 'DEGRADED' : 'HEALTHY', activeJobs: jobs.length, jobs }; });
     this.health.register('survival', async () => this.survival.status());
     this.health.register('help', async () => this.help.status());
+    this.health.register('navigation', async () => { const status = this.navigation.status(); return { status: 'HEALTHY', activeSessions: status.active, failedRecent: status.recent.filter(session => session.status === 'FAILED').length }; });
     this.health.register('taskQueue', async () => { const tasks = this.executor.status(); const coordinator = this.coordinator.status(); const saturation = Math.max(tasks.saturation, coordinator.saturation); return { status: saturation >= 0.8 ? 'DEGRADED' : 'HEALTHY', saturation, tasks, coordinator: { queuedOperations: coordinator.queuedOperations, maximumDepth: coordinator.maximumDepth, maxQueuePerBot: coordinator.maxQueuePerBot } }; });
   }
 
@@ -122,7 +125,7 @@ export class Application {
   }
   async stop() {
     if (['STOPPED', 'CREATED'].includes(this.state)) { this.state = 'STOPPED'; await this.logStore?.flush(); return; }
-    this.state = 'SHUTTING_DOWN'; this.autonomy.stop(); this.memoryLifecycle.stop(); this.structureObserver.stop(); this.survival.stop(); this.taskReporter.stop(); await this.api.stop(); await this.goals.stop(); await this.bots.stopAll();
+    this.state = 'SHUTTING_DOWN'; this.autonomy.stop(); this.memoryLifecycle.stop(); this.structureObserver.stop(); this.survival.stop(); this.taskReporter.stop(); await this.navigation.stop(); await this.api.stop(); await this.goals.stop(); await this.bots.stopAll();
     await this.plugins.run('stop', this.context(), { reverse: true }); await this.modules.run('stop', this.context(), { reverse: true });
     this.state = 'STOPPED'; await this.events.publish('application.stopped', {}, { source: 'application' }); this.events.clear(); this.database?.close(); this.logger.info('application.stopped'); await this.logStore?.flush();
   }
@@ -163,7 +166,7 @@ export class Application {
     return normalized;
   }
   configureSurvival(input) { return this.survival.configure(input); }
-  status() { return { name: 'MineHive', version: '0.7.3', phase: 'Helping Phase 3', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
+  status() { return { name: 'MineHive', version: '0.7.4', phase: 'Navigation Foundation Phase 1', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
 }
 
 function portAvailable(port) {

@@ -35,6 +35,7 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 | [0.7.3 Phase 1](updates/0.7.3-helping-phase-1-survival-capability-completion.md) | Helping — Survival Capability Completion | Implemented |
 | [0.7.3 Phase 2](updates/0.7.3-helping-phase-2-output-ownership.md) | Helping — Output Ownership and Resource Handoff | Implemented |
 | [0.7.3 Phase 3](updates/0.7.3-helping-phase-3-manual-helping.md) | Helping — Manual Helping | Implemented |
+| [0.7.4 Phase 1](updates/0.7.4-navigation-foundation-phase-1.md) | Advanced Navigation & Movement — Navigation Foundation | Implemented |
 | 0.8.0 | Territory Foundation | Planned |
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Setiap release baru memiliki satu catatan tersendiri di folder [`updates/`](updates/README.md).

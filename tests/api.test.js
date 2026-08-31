@@ -21,6 +21,7 @@ test('API exposes health and versioned bot DTOs', async () => {
     const health = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(health.status, 200);
     assert.equal((await health.json()).status, 'HEALTHY');
+    const navigationStatus = await fetch(`http://127.0.0.1:${port}/api/v1/navigation/status`); assert.equal(navigationStatus.status, 200); assert.equal((await navigationStatus.json()).data.active, 0);
     const dashboardSnapshot = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/snapshot`); const snapshotPayload = await dashboardSnapshot.json(); assert.equal(dashboardSnapshot.status, 200); assert.equal(snapshotPayload.data.health.status, 'HEALTHY'); assert.deepEqual(snapshotPayload.data.bots, []); assert.ok(Number(dashboardSnapshot.headers.get('x-ratelimit-remaining')) < 120); assert.ok(snapshotPayload.data.diagnostics.rssMb > 0); assert.ok(snapshotPayload.data.diagnostics.heapUsedMb > 0);
 
     const created = await fetch(`http://127.0.0.1:${port}/api/v1/bots`, {

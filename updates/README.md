@@ -17,6 +17,7 @@ Folder ini menyimpan satu catatan untuk setiap release atau update fitur MineHiv
 - [`0.7.3 Phase 1 — Helping: Survival Capability Completion`](0.7.3-helping-phase-1-survival-capability-completion.md)
 - [`0.7.3 Phase 2 — Helping: Output Ownership and Resource Handoff`](0.7.3-helping-phase-2-output-ownership.md)
 - [`0.7.3 Phase 3 — Helping: Manual Helping`](0.7.3-helping-phase-3-manual-helping.md)
+- [`0.7.4 Phase 1 — Advanced Navigation & Movement: Navigation Foundation`](0.7.4-navigation-foundation-phase-1.md)
 
 ## Daftar update fitur
 
