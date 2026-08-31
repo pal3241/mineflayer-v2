@@ -269,7 +269,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
     }
     if (plan.status === 'CRAFT_READY') {
       const item = plan.item ?? plan.requirement.item;
-      const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item, count: plan.count ?? plan.requirement.count }, () => runtime.adapter.craftItem({ item, count: plan.count ?? plan.requirement.count }));
+      const count = plan.count ?? plan.requirement.count; const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item, count }, acquisitionResources([], [{ item, count }]), () => runtime.adapter.craftItem({ item, count }));
       verifyAcquired(runtime, item, plan.requirement.count);
       return await complete(plan, request, { execution: result }, events, save);
     }
@@ -277,7 +277,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       const executions = [];
       for (const subrequest of plan.subrequests) executions.push(await acquire(subrequest, depth + 1, budget));
       const item = plan.item ?? plan.requirement.item;
-      const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item, count: plan.count ?? plan.requirement.count }, () => runtime.adapter.craftItem({ item, count: plan.count ?? plan.requirement.count }));
+      const count = plan.count ?? plan.requirement.count; const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item, count }, acquisitionResources(plan.subrequests.map(resourceEntry), [{ item, count }]), () => runtime.adapter.craftItem({ item, count }));
       verifyAcquired(runtime, item, plan.requirement.count);
       return await complete(plan, request, { execution: { dependencies: executions, craft: result } }, events, save);
     }
@@ -287,7 +287,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
         if (collected >= plan.requirement.count) break;
         const before = itemTotal(runtime, plan.requirement.item);
         try {
-          await runBatches(taskRunner, runtime, 'minecraft.collection', { block, maxDistance: settings.maxDistance }, (plan.count ?? plan.requirement.count) - collected, (count) => runtime.adapter.collect({ block, count, maxDistance: settings.maxDistance }));
+          await runBatches(taskRunner, runtime, 'minecraft.collection', { block, maxDistance: settings.maxDistance }, (plan.count ?? plan.requirement.count) - collected, batch => acquisitionResources([], [{ item: plan.requirement.item, count: batch }]), (count) => runtime.adapter.collect({ block, count, maxDistance: settings.maxDistance }));
         } catch (error) {
           request?.trace.push({ at: new Date().toISOString(), step: 'collect-source-failed', detail: `${block}: ${error.message}` });
           continue;
@@ -306,7 +306,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       const count = plan.count ?? plan.requirement.count;
       const input = await acquire({ requesterBotId: runtime.id, type: 'ITEM', item: plan.formula.input.name, count: plan.formula.input.count }, depth + 1, budget);
       const fuel = await acquire({ requesterBotId: runtime.id, type: 'ITEM', item: plan.formula.fuel.name, count: plan.formula.fuel.count }, depth + 1, budget);
-      const result = await runBatches(taskRunner, runtime, 'minecraft.smelting', { item: plan.requirement.item, fuel: plan.formula.fuel.name }, count, (batch) => runtime.adapter.smeltItem({ item: plan.requirement.item, count: batch, fuel: plan.formula.fuel.name }));
+      const result = await runBatches(taskRunner, runtime, 'minecraft.smelting', { item: plan.requirement.item, fuel: plan.formula.fuel.name }, count, batch => acquisitionResources([{ item: plan.formula.input.name, count: batch }, { item: plan.formula.fuel.name, count: Math.ceil(batch / 8) }], [{ item: plan.requirement.item, count: batch }]), (batch) => runtime.adapter.smeltItem({ item: plan.requirement.item, count: batch, fuel: plan.formula.fuel.name }));
       verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
       return await complete(plan, request, { execution: { input, fuel, smelt: result } }, events, save);
     }
@@ -315,7 +315,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       if (!source) throw new ConflictError(`Acquisition special source '${plan.specialSource}' is unavailable`);
       const dependencies = [];
       for (const dependency of plan.dependencies) dependencies.push(await acquire(dependency, depth + 1, budget));
-      const execution = await runAdapter(taskRunner, runtime, source.capability, { item: plan.item, count: plan.count }, () => source.execute({ runtime, item: plan.item, count: plan.count, context: {} }));
+      const execution = await runAdapter(taskRunner, runtime, source.capability, { item: plan.item, count: plan.count }, acquisitionResources([], [{ item: plan.item, count: plan.count }]), () => source.execute({ runtime, item: plan.item, count: plan.count, context: {} }));
       verifyAcquired(runtime, plan.item, plan.requirement.count);
       await events?.publish?.('acquisition.special.completed', { requestId: plan.requestId, source: source.name, item: plan.item, count: plan.count }, { source: 'acquisition' });
       return await complete(plan, request, { execution: { dependencies, special: execution } }, events, save);
@@ -365,15 +365,15 @@ function acquisitionKey(input = {}) {
   return [input.requesterBotId, input.type, input.item ?? input.category, input.count ?? 1, input.minimumTier ?? ''].join(':').toLowerCase();
 }
 
-async function runAdapter(taskRunner, runtime, capability, input, fallback) {
-  return taskRunner ? taskRunner({ runtime, capability, input }) : fallback();
+async function runAdapter(taskRunner, runtime, capability, input, resources, fallback) {
+  return taskRunner ? taskRunner({ runtime, capability, input, resources }) : fallback();
 }
 
-async function runBatches(taskRunner, runtime, capability, payload, count, fallback) {
+async function runBatches(taskRunner, runtime, capability, payload, count, resourcesForBatch, fallback) {
   const results = [];
   for (let remaining = count; remaining > 0; remaining -= Math.min(64, remaining)) {
     const batch = Math.min(64, remaining);
-    results.push(await runAdapter(taskRunner, runtime, capability, { ...payload, count: batch }, () => fallback(batch)));
+    results.push(await runAdapter(taskRunner, runtime, capability, { ...payload, count: batch }, resourcesForBatch(batch), () => fallback(batch)));
   }
   return results.length === 1 ? results[0] : results;
 }
@@ -436,6 +436,10 @@ function normalizeConfig(input = {}) {
   if (typeof config.toolPreservation !== 'boolean') throw new ValidationError('Acquisition toolPreservation must be a boolean');
   return config;
 }
+
+function acquisitionResources(inputs, outputs) { return { ownerType: 'ACQUISITION', reason: 'ACQUISITION_RESERVED', inputs: mergeResourceEntries(inputs), outputs: mergeResourceEntries(outputs) }; }
+function resourceEntry(requirement) { return { item: requirement.item ?? requirement.acceptedItems?.[0], count: requirement.count }; }
+function mergeResourceEntries(entries) { const totals = new Map(); for (const entry of entries) { const item = String(entry?.item ?? '').trim().toLowerCase(); const count = Number(entry?.count); if (!item || !Number.isInteger(count) || count < 1) continue; totals.set(item, (totals.get(item) ?? 0) + count); } return [...totals].map(([item, count]) => ({ item, count })); }
 
 function normalizeSpecialSource(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ValidationError('Acquisition special source must be an object');
