@@ -27,6 +27,8 @@ export class ChatCommandController {
       if (command === 'add' && args[0] === 'helper') { await this.helpCommands.addHelpers({ ownerBotId: runtime.bot.id, helperBotIds: args.slice(1) }); return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: runtime.bot.id })); }
       if (command === 'remove' && args[0] === 'helper') { await this.helpCommands.removeHelper({ ownerBotId: runtime.bot.id, helperBotId: args[1] }); return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: runtime.bot.id })); }
       if (command === 'stop' && args[0] === 'help') { await this.helpCommands.stopHelping({ botId: runtime.bot.id }); return this.#reply(runtime, 'help stopped'); }
+      if (command === 'pause' && args[0] === 'help') { await this.helpCommands.pause({ botId: runtime.bot.id }); return this.#reply(runtime, 'help paused'); }
+      if (command === 'resume' && args[0] === 'help') { await this.helpCommands.resume({ botId: runtime.bot.id }); return this.#reply(runtime, 'help resumed'); }
       if (command === 'helpers') return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: runtime.bot.id }));
       if (command === 'goto') { const result = await this.navigation.moveTo({ botId: runtime.bot.id, target: { type: 'POSITION', x: Number(args[0]), y: Number(args[1]), z: Number(args[2]) }, mode: 'SAFE', tolerance: 2, timeout: 120_000, source: 'CHAT_COMMAND' }); return this.#reply(runtime, `arrived in ${result.durationMs}ms`); }
       if (command === 'come') { const result = await this.navigation.moveTo({ botId: runtime.bot.id, target: { type: 'PLAYER', username }, mode: 'FAST', tolerance: 2, timeout: 120_000, source: 'CHAT_COMMAND' }); return this.#reply(runtime, `arrived near ${username} in ${result.durationMs}ms`); }

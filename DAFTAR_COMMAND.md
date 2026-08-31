@@ -125,6 +125,15 @@ Helper keluar dari session yang sedang diikutinya.
 
 Output yang belum diserahkan otomatis dihandoff dan diverifikasi sebelum helper keluar.
 
+#### `pause help` dan `resume help`
+
+Menjeda atau melanjutkan partisipasi helper tanpa menghapus HelpSession. Saat jeda, pekerjaan baru dihentikan dan output yang masih dibawa diserahkan terlebih dahulu. Saat lanjut, sistem membuat WorkShare generation baru dari sisa kerja terverifikasi.
+
+```text
+!bot2 pause help
+!bot2 resume help
+```
+
 #### `helpers` dan `help status`
 
 Menampilkan daftar helper owner atau status helping bot terpilih.
@@ -714,6 +723,11 @@ Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/navigation/move" -Headers $
 | `POST` | `/api/v1/help/sessions/:id/leave` | Mengeluarkan helper dan melakukan auto handoff bila diperlukan. |
 | `POST` | `/api/v1/help/sessions/:id/handoff` | Menyerahkan output WorkShare yang sudah siap. |
 | `POST` | `/api/v1/help/sessions/:id/recovery` | Rekonsiliasi output helper setelah recovery. |
+| `GET` | `/api/v1/help/sessions/:id/workers` | Snapshot worker ter-normalisasi untuk koordinasi. |
+| `POST` | `/api/v1/help/sessions/:id/rebalance` | Menjalankan rebalance dengan body opsional `reason` dan `rebalanceKey`. |
+| `POST` | `/api/v1/help/sessions/:id/steal` | Idle helper mengambil kerja belum selesai; body `{"botId":"bot3"}`. |
+| `POST` | `/api/v1/help/sessions/:id/pause` | Menjeda helper; body `{"botId":"bot2"}`. |
+| `POST` | `/api/v1/help/sessions/:id/resume` | Melanjutkan helper dan membuat generation baru. |
 
 #### AI, memory, ML, dan HiveMind
 

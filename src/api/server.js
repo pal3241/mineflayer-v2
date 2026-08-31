@@ -112,6 +112,11 @@ export class ApiServer {
           if (req.method === 'POST' && parts[5] === 'leave') return send(200, { data: await this.application.help.leave({ sessionId: parts[4], ...(await body(req)) }) });
           if (req.method === 'POST' && parts[5] === 'handoff') return send(200, { data: await this.application.help.handoff({ sessionId: parts[4], ...(await body(req)) }) });
           if (req.method === 'POST' && parts[5] === 'recovery') return send(200, { data: await this.application.help.reconcileRecovery({ sessionId: parts[4], ...(await body(req)) }) });
+          if (req.method === 'GET' && parts[5] === 'workers') return send(200, { data: await this.application.help.workerStates(parts[4]) });
+          if (req.method === 'POST' && parts[5] === 'rebalance') return send(200, { data: await this.application.help.rebalanceSession({ sessionId: parts[4], ...(await body(req)) }) });
+          if (req.method === 'POST' && parts[5] === 'steal') return send(200, { data: await this.application.help.stealWork({ sessionId: parts[4], ...(await body(req)) }) });
+          if (req.method === 'POST' && parts[5] === 'pause') return send(200, { data: await this.application.help.pause({ sessionId: parts[4], ...(await body(req)) }) });
+          if (req.method === 'POST' && parts[5] === 'resume') return send(200, { data: await this.application.help.resume({ sessionId: parts[4], ...(await body(req)) }) });
         }
         if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'logistics' && parts[3] === 'reservations' && parts[4] && parts[5] === 'release') { const input = await body(req); return send(200, { data: await this.application.logistics.release({ reservationId: parts[4], requesterBotId: input.requesterBotId }) }); }
         if (req.method === 'POST' && url.pathname === '/api/v1/database/backup') { if (!this.application.database) throw new ValidationError('Database backup requires the sqlite driver'); const input = await body(req); const name = String(input.name ?? `minehive-${Date.now()}.sqlite`); if (!/^[A-Za-z0-9_.-]{1,100}\.sqlite$/.test(name)) throw new ValidationError('Backup name must be a safe .sqlite filename'); return send(201, { data: await this.application.database.backup(join(resolve(this.application.config.dataPath), 'backups', name)) }); }

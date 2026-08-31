@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EventBus, MemoryRepository, Task, TaskStatus, createFleetTransferService, createHelpCommandService, createHelpService } from '../src/index.js';
+import { EventBus, MemoryRepository, Task, TaskStatus, createFleetTransferService, createHelpCommandService, createHelpService, splitWeightedWork } from '../src/index.js';
 import { CapabilityRegistry } from '../src/bots/capabilities.js';
 import { MetricsManager } from '../src/core/health.js';
 import { FleetScheduler } from '../src/fleet/scheduler.js';
@@ -11,7 +11,7 @@ import { TaskExecutor } from '../src/tasks/task-executor.js';
 
 class BotAdapter {
   constructor(items, position) { this.items = items; this.position = position; }
-  snapshot() { return { inventorySummary: structuredClone(this.items), position: this.position, dimension: 'overworld' }; }
+  snapshot() { return { inventorySummary: structuredClone(this.items), inventorySlots: this.capacity ?? 36, position: this.position, dimension: 'overworld' }; }
   async smartMove() {}
   async dropItem({ item, count }) { change(this.items, item, -count); }
   async pickupItem({ item, count }) { change(this.items, item, count); }
@@ -103,6 +103,35 @@ test('concurrent command joins create one session without duplicate work shares'
 
 test('running parent takeover waits for executor stop and never publishes task.cancelled', async () => {
   const events = new EventBus(); const metrics = new MetricsManager(); const capabilities = new CapabilityRegistry(); capabilities.register({ name: 'minecraft.collection', execute: async (_input, context) => new Promise((resolve, reject) => { context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true }); }) }); const botManager = { list: () => [{ id: 'owner', status: 'READY', capabilities: ['minecraft.collection'] }] }; const scheduler = new FleetScheduler({ botManager }); const executor = new TaskExecutor({ capabilities, scheduler, eventBus: events, metrics, checkpointRepository: null, maxQueuePerBot: 10 }); const goals = new GoalService({ planner: new DeterministicPlanner(), scheduler, executor, eventBus: events, metrics }); let cancellations = 0; events.subscribe('task.cancelled', async () => { cancellations += 1; }); const goal = goals.create({ description: 'collect stone', constraints: { preferredBot: 'owner' }, steps: [{ type: 'collect', input: { block: 'stone', count: 64 }, requiredCapabilities: ['minecraft.collection'] }] }); const parent = goals.tasks(goal.id)[0]; const running = goals.run(goal.id); await waitFor(() => goals.task(parent.id).status === TaskStatus.RUNNING, 100, 10); const collaborative = await goals.transitionTaskToCollaborative(parent.id, 'help-session-1'); await running; assert.equal(collaborative.status, TaskStatus.COLLABORATIVE); assert.equal(goals.task(parent.id).status, TaskStatus.COLLABORATIVE); assert.equal(cancellations, 0); assert.deepEqual(executor.status().running, {});
+});
+
+test('weighted splitter is deterministic and respects worker capacity', () => {
+  const allocations = splitWeightedWork({ remaining: 30, workerStates: [
+    { botId: 'fast', available: true, alive: true, connected: true, toolSuitable: true, inventoryFreeSlots: 20, currentRate: 2, remaining: 0 },
+    { botId: 'slow', available: true, alive: true, connected: true, toolSuitable: true, inventoryFreeSlots: 10, currentRate: 0, remaining: 8 },
+    { botId: 'offline', available: false, alive: true, connected: false, toolSuitable: true, inventoryFreeSlots: 36, currentRate: 9, remaining: 0 }
+  ] });
+  assert.deepEqual(allocations.map(entry => [entry.botId, entry.assigned]), [['fast', 20], ['slow', 10]]);
+});
+
+test('rebalance creates a new generation once per idempotency key without changing credited progress', async () => {
+  const context = setup(64, { ownerStone: 0 }); const session = await context.service.create({ parentTaskId: context.parent.id, ownerBotId: 'owner', workers: ['owner', 'helper', 'helper2'] }); const first = await context.service.rebalanceSession({ sessionId: session.id, reason: 'MANUAL_REBALANCE', rebalanceKey: 'rebalance-1' }); const repeated = await context.service.rebalanceSession({ sessionId: session.id, reason: 'MANUAL_REBALANCE', rebalanceKey: 'rebalance-1' });
+  assert.equal(first.generation, 2); assert.equal(repeated.generation, 2); assert.equal(repeated.workShares.filter(share => share.generation === 2).reduce((total, share) => total + share.assigned, 0), 64); assert.equal(repeated.progress.credited, 0); assert.ok(repeated.workShares.filter(share => share.generation === 1).every(share => share.status === 'SUPERSEDED'));
+});
+
+test('an idle helper steals only unfinished work through a fresh generation', async () => {
+  const context = setup(64, { ownerStone: 0 }); const session = await context.service.create({ parentTaskId: context.parent.id, ownerBotId: 'owner', workers: ['helper', 'helper2'] }); const helper2Share = session.workShares.find(share => share.botId === 'helper2'); await context.repositories.shares.update(helper2Share.shareId, { ...helper2Share, status: 'COMPLETED', completed: helper2Share.assigned, delivered: helper2Share.assigned, credited: helper2Share.assigned });
+  change(context.owner.adapter.items, 'stone', helper2Share.assigned);
+  const stolen = await context.service.stealWork({ sessionId: session.id, botId: 'helper2' }); const active = stolen.workShares.filter(share => share.generation === stolen.generation); assert.ok(active.some(share => share.botId === 'helper2' && share.assigned > 0)); assert.ok(active.reduce((total, share) => total + share.assigned, 0) <= stolen.progress.remaining);
+});
+
+test('pause and resume preserve progress while creating a fresh assignment generation', async () => {
+  const context = setup(49); const session = await context.service.create({ parentTaskId: context.parent.id, ownerBotId: 'owner', workers: ['helper'] }); const paused = await context.service.pause({ sessionId: session.id, botId: 'helper' }); assert.equal(paused.workShares[0].status, 'PAUSED'); const resumed = await context.service.resume({ sessionId: session.id, botId: 'helper' }); assert.ok(resumed.generation > paused.generation); assert.ok(resumed.workShares.some(share => share.generation === resumed.generation && share.botId === 'helper'));
+});
+
+test('helper loss preserves verified output and redistributes only unfinished work', async () => {
+  const context = setup(64, { ownerStone: 0 }); const session = await context.service.create({ parentTaskId: context.parent.id, ownerBotId: 'owner', workers: ['helper', 'helper2'] }); const helperShare = session.workShares.find(share => share.botId === 'helper'); await context.repositories.shares.update(helperShare.shareId, { ...helperShare, completed: 8, delivered: 8, credited: 8, status: 'PARTIAL' }); change(context.owner.adapter.items, 'stone', 8);
+  const affected = await context.service.handleBotDeath('helper'); const recovered = affected[0]; const replacement = recovered.workShares.filter(share => share.generation === recovered.generation); assert.equal(recovered.progress.current, 8); assert.ok(replacement.every(share => share.botId === 'helper2')); assert.equal(replacement.reduce((total, share) => total + share.assigned, 0), 56);
 });
 
 function runtime(id, stone, x) { return { id, status: 'READY', bot: { id }, options: { host: 'server', port: 25565 }, adapter: new BotAdapter(stone ? [{ name: 'stone', count: stone }] : [], { x, y: 64, z: 0 }) }; }
