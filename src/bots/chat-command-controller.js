@@ -1,4 +1,4 @@
-const HELP = 'commands: help <owner>, add helper <bot...>, stop help, helpers, help status, status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
+const HELP = 'commands: help <owner>, add helper <bot...>, stop help, helpers, help status, status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, shear, milk, sleep, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
 
 export class ChatCommandController {
   constructor({ goalService, executor, capabilities, coordinator, helpCommands, config, logger }) {
@@ -44,6 +44,9 @@ export class ChatCommandController {
       if (command === 'come') step = { type: 'come', input: { username }, requiredCapabilities: ['minecraft.come'], timeout: 120_000 };
       else if (command === 'follow') step = { type: 'follow-player', input: { username: args[0] ?? username }, requiredCapabilities: ['minecraft.follow-player'], timeout: 120_000 };
       else if (command === 'goto') step = { type: 'navigate', input: { x: Number(args[0]), y: Number(args[1]), z: Number(args[2]) }, requiredCapabilities: ['minecraft.navigation'], timeout: 120_000 };
+      else if (command === 'shear') step = { type: 'shear-nearest', input: {}, requiredCapabilities: ['minecraft.shear-nearest'], timeout: 120_000 };
+      else if (command === 'milk') step = { type: 'milk-nearest', input: {}, requiredCapabilities: ['minecraft.milk-nearest'], timeout: 120_000 };
+      else if (command === 'sleep') step = { type: 'sleep', input: {}, requiredCapabilities: ['minecraft.sleep'], timeout: 120_000 };
       else {
         const targetSelector = selector === 'global' ? 'global' : selector === className ? `class:${className}` : `bot:${alias}`; if (!this.coordinator.shouldHandle(runtime.bot.id, targetSelector)) return; const result = await this.coordinator.coordinateOnce(`${username}:${message}`, { text: [command, ...args].join(' '), selector: targetSelector, actor: username }); const reply = result.results.find(item => item.status === 'COMPLETED')?.result?.reply; return this.#reply(runtime, reply ?? `coordinator completed ${result.results.filter(item => item.status === 'COMPLETED').length}/${result.results.length}`);
       }

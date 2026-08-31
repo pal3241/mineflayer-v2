@@ -23,6 +23,11 @@ class OperationalAdapter extends EventEmitter {
   async navigate(input) { return { position: input }; }
   async followPlayer(input) { this.following = input.username; return { player: input.username }; }
   async comeToPlayer(input) { this.cameTo = input.username; return { player: input.username }; }
+  async findSheep() { return { entityId: 'sheep-1' }; }
+  async shearSheep(input) { this.sheared = input.entityId; return { entityId: input.entityId, verified: true }; }
+  async findCow() { return { entityId: 'cow-1' }; }
+  async milkCow(input) { this.milked = input.entityId; return { entityId: input.entityId, verified: true }; }
+  async sleep() { this.slept = true; return { state: 'SLEEPING' }; }
   async stopActions() {}
   async startViewer({ port, mode }) { this.camera = { active: true, port, mode }; return this.camera; }
   async stopViewer() { this.camera = { active: false, port: null }; return this.camera; }
@@ -45,6 +50,7 @@ test('authorized chat command creates and completes a real capability goal', asy
   adapter.emit('chat', 'Alice', '!worker collect oak_log 2');
   await waitFor(() => app.goals.list()[0]?.status === 'COMPLETED');
   assert.deepEqual(adapter.collected, [{ block: 'oak_log', count: 2 }]); assert.ok(adapter.messages.some(message => message.includes('coordinator completed'))); assert.ok(adapter.messages.some(message => message.includes('task baru: collect'))); assert.ok(adapter.messages.some(message => message.includes('task selesai: collect')));
+  adapter.emit('chat', 'Alice', '!worker shear'); await waitFor(() => adapter.sheared === 'sheep-1'); adapter.emit('chat', 'Alice', '!worker milk'); await waitFor(() => adapter.milked === 'cow-1'); adapter.emit('chat', 'Alice', '!worker sleep'); await waitFor(() => adapter.slept === true);
   adapter.emit('chat', 'Alice', '!worker follow Bob'); await waitFor(() => adapter.following === 'Bob'); adapter.emit('chat', 'Alice', '!worker come'); await waitFor(() => adapter.cameTo === 'Alice'); adapter.emit('chat', 'Alice', '!worker berapa 1+1'); await waitFor(() => adapter.messages.some(message => message.includes('1 + 1 = 2'))); assert.equal(adapter.following, 'Bob'); assert.equal(adapter.cameTo, 'Alice'); await app.stop();
 });
 

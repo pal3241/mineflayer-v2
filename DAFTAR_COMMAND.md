@@ -80,6 +80,62 @@ Menghentikan pathfinding dan aksi bot, lalu membatalkan task aktif dan antrean b
 !global stop
 ```
 
+### Manual helping
+
+Manual helping membagi task collect aktif milik bot owner kepada beberapa bot. Selector menentukan bot yang menjalankan command, sehingga helper harus dipanggil melalui selector helper dan owner disebut sebagai argumen.
+
+#### `help <owner>`
+
+Menjadikan bot terpilih sebagai helper untuk task collect aktif milik owner. Task owner harus dapat dibantu dan berada pada server serta dimension yang sama.
+
+```text
+!bot2 help bot1
+!bot3 help bot1
+```
+
+Saat helper pertama masuk, task owner diambil alih secara aman menjadi collaborative. Sistem menghitung sisa target dari progress terverifikasi, bukan dari target awal.
+
+#### `add helper <bot...>`
+
+Meminta owner menambahkan satu atau beberapa helper sekaligus.
+
+```text
+!bot1 add helper bot2 bot3
+```
+
+Setiap tambahan divalidasi secara atomik: helper tidak boleh duplikat, maksimum empat helper per session, dan pembagian kerja tiap peserta harus minimal empat item.
+
+#### `remove helper <bot>`
+
+Mengeluarkan helper dari session owner.
+
+```text
+!bot1 remove helper bot2
+```
+
+Jika helper masih membawa hasil collect, sistem menghentikan pekerjaan baru, melakukan handoff ke destination, memverifikasi credit, lalu mengeluarkannya. Jika destination owner offline atau mati, command berhenti dengan status `WAITING_TRANSFER` tanpa menjatuhkan item sembarangan.
+
+#### `stop help`
+
+Helper keluar dari session yang sedang diikutinya.
+
+```text
+!bot2 stop help
+```
+
+Output yang belum diserahkan otomatis dihandoff dan diverifikasi sebelum helper keluar.
+
+#### `helpers` dan `help status`
+
+Menampilkan daftar helper owner atau status helping bot terpilih.
+
+```text
+!bot1 helpers
+!bot2 help status
+```
+
+Helper hanya dapat bergabung bila berstatus `READY` atau `ACTIVE`, tidak sedang recovery, emergency, critical combat, atau user-critical task.
+
 ## 4. Command movement
 
 ### `come`
@@ -189,6 +245,22 @@ Target yang didukung meliputi:
 - `cooked_cod`, `cooked_salmon`, `baked_potato`, dan `dried_kelp`.
 
 Nama sederhana seperti `besi`, `sapi`, `ayam`, `salmon`, dan `kentang` dinormalisasi ke hasil smelting yang sesuai. Bot mencari furnace terdekat, membuat furnace jika belum ada, lalu menyiapkan input dan fuel. Hasil harus bertambah sesuai jumlah yang diminta sebelum task dinyatakan selesai.
+
+### `shear`, `milk`, dan `sleep`
+
+Menjalankan interaksi survival terverifikasi pada bot terpilih.
+
+```text
+!bot1 shear
+!bot1 milk
+!bot1 sleep
+```
+
+- `shear` mencari domba dewasa yang belum dicukur, memakai shears, lalu memverifikasi wool masuk ke inventory.
+- `milk` mencari sapi dewasa, memakai bucket, lalu memverifikasi perubahan bucket menjadi `milk_bucket`.
+- `sleep` mencari bed kosong terdekat, berjalan ke sana, dan hanya tidur bila waktu serta dimension mengizinkan.
+
+Command akan gagal dengan pesan spesifik bila alat tidak tersedia, hewan atau bed tidak ditemukan, bed ditempati, inventory penuh, atau tidur tidak diizinkan.
 
 ## 6. Command eksplorasi dan shared memory
 
@@ -597,6 +669,23 @@ Gunakan `{"clearOpenRouterKeys":true}` atau `{"clearNvidiaKeys":true}` untuk men
 | `GET` | `/api/v1/tasks/queue` | Status antrean. |
 | `GET` | `/api/v1/tasks/:id` | Detail task. |
 | `POST` | `/api/v1/tasks/:id/cancel` | Membatalkan task; body `{"reason":"alasan"}`. |
+
+#### Manual helping
+
+| Method | Endpoint | Fungsi |
+| --- | --- | --- |
+| `GET` | `/api/v1/help/status` | Ringkasan health dan jumlah HelpSession. |
+| `POST` | `/api/v1/help/request` | Meminta helper dengan body `{"helperBotId":"bot2","ownerBotId":"bot1"}`. |
+| `GET` | `/api/v1/help/sessions` | Daftar HelpSession beserta WorkShare. |
+| `POST` | `/api/v1/help/sessions` | Membuat HelpSession terstruktur. |
+| `GET` | `/api/v1/help/sessions/:id` | Detail satu HelpSession. |
+| `POST` | `/api/v1/help/sessions/:id/execute` | Menjalankan WorkShare; body berisi `shareId` dan opsional `botId`. |
+| `POST` | `/api/v1/help/sessions/:id/collected` | Mencatat output collect terverifikasi. |
+| `POST` | `/api/v1/help/sessions/:id/join` | Menambah satu helper; body `{"botId":"bot2"}`. |
+| `POST` | `/api/v1/help/sessions/:id/join-many` | Menambah beberapa helper; body `{"botIds":["bot2","bot3"]}`. |
+| `POST` | `/api/v1/help/sessions/:id/leave` | Mengeluarkan helper dan melakukan auto handoff bila diperlukan. |
+| `POST` | `/api/v1/help/sessions/:id/handoff` | Menyerahkan output WorkShare yang sudah siap. |
+| `POST` | `/api/v1/help/sessions/:id/recovery` | Rekonsiliasi output helper setelah recovery. |
 
 #### AI, memory, ML, dan HiveMind
 
