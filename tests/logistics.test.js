@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { EventBus, MemoryRepository, createAdaptiveModel, createDiscoveryService, createHashEmbeddingProvider, createHiveService, createLogisticsService, createSemanticMemory, createStructureObserver } from '../src/index.js';
 import { WorldMemoryService } from '../src/memory/world-memory-service.js';
+import { createResourceReservationService } from '../src/navigation/index.js';
 
 function createHive(events) { const ml = createAdaptiveModel({ outcomeRepository: new MemoryRepository(), modelRepository: new MemoryRepository(), events, minimumSamples: 2 }); return createHiveService({ repositories: { messages: new MemoryRepository(), state: new MemoryRepository(), locks: new MemoryRepository(), decisions: new MemoryRepository() }, events, ml, heartbeatTimeoutMs: 30_000 }); }
 
@@ -17,11 +18,11 @@ class LogisticsAdapter extends EventEmitter {
 }
 
 test('logistics reserves stock without double spending and verifies transfers', async () => {
-  const events = new EventBus(); const repositories = { storages: new MemoryRepository(), reservations: new MemoryRepository(), transfers: new MemoryRepository() }; const logistics = createLogisticsService({ repositories, hive: createHive(events), events }); const adapter = new LogisticsAdapter(); const runtime = { bot: { id: 'courier' }, adapter, options: { host: 'server', port: 25565 } };
+  const events = new EventBus(); const repositories = { storages: new MemoryRepository(), reservations: new MemoryRepository(), transfers: new MemoryRepository() }; const resourceReservations = createResourceReservationService(); const logistics = createLogisticsService({ repositories, hive: createHive(events), events, resourceReservations }); const adapter = new LogisticsAdapter(); const runtime = { bot: { id: 'courier' }, adapter, options: { host: 'server', port: 25565 } };
   const storage = await logistics.registerNearest({ runtime, name: 'gudang utama', maxDistance: 16 }); assert.equal(storage.inventory[0].count, 20);
   const deposited = await logistics.store({ runtime, storageName: 'gudang utama', item: 'stone', count: 5 }); assert.equal(deposited.storage.inventory[0].count, 25); assert.equal(deposited.transfer.status, 'COMPLETED'); assert.deepEqual(deposited.transfer.lifecycle.map(entry => entry.state), ['CREATED', 'LOCK_ACQUIRED', 'DEPOSITING', 'VERIFYING', 'COMPLETED']);
   const reservation = await logistics.reserve({ runtime, storageName: 'gudang utama', item: 'stone', count: 20, ttlMs: 60_000 }); await assert.rejects(logistics.reserve({ runtime, storageName: 'gudang utama', item: 'stone', count: 6, ttlMs: 60_000 }), /5 available/); await logistics.release({ reservationId: reservation.id, requesterBotId: 'courier' });
-  const retrieved = await logistics.retrieve({ runtime, storageName: 'gudang utama', item: 'stone', count: 10 }); assert.equal(retrieved.reservation.status, 'COMPLETED'); assert.equal(adapter.storageInventory[0].count, 15); assert.equal((await logistics.status()).transfers, 2);
+  const retrieved = await logistics.retrieve({ runtime, storageName: 'gudang utama', item: 'stone', count: 10 }); assert.equal(retrieved.reservation.status, 'COMPLETED'); assert.equal(adapter.storageInventory[0].count, 15); assert.equal((await logistics.status()).transfers, 2); const shared = resourceReservations.reservationsForBot('courier'); assert.equal(shared.length, 2); assert.ok(shared.every(record => record.ownerType === 'LOGISTICS' && record.reason === 'LOGISTICS_RESERVED' && record.status === 'RELEASED'));
 });
 
 test('logistics rejects duplicate chest positions and only renames registered storage explicitly', async () => {
