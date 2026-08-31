@@ -41,7 +41,7 @@ import { createFleetTransferService } from '../logistics/fleet-transfer-service.
 import { createCoordinationMonitor, createHelpCommandService, createHelpService } from '../help/index.js';
 import { createSurvivalService } from '../survival/index.js';
 import { createTaskReporter } from '../tasks/task-reporter.js';
-import { createNavigationService, createResourceReservationService, createResourceReservationCoordinator } from '../navigation/index.js';
+import { createNavigationService, createNavigationSettingsService, createResourceReservationService, createResourceReservationCoordinator } from '../navigation/index.js';
 
 export class Application {
   constructor(config, overrides = {}) {
@@ -59,6 +59,7 @@ export class Application {
     this.database = config.profile !== 'test' && config.database.driver === 'sqlite' ? new SqliteDatabase({ file: config.database.file }) : null;
     this._repositoryFactory = name => config.profile === 'test' ? new MemoryRepository() : this.database ? this.database.repository(name) : new JsonRepository(join(resolve(config.dataPath), `${name}.json`));
     const repository = name => this._repositoryFactory(name);
+    this.navigationSettings = createNavigationSettingsService({ repository: repository('navigation-settings') });
     this.worldMemory = new WorldMemoryService({ repository: repository('world-memory'), events: this.events, logger: this.logger });
     this.semanticMemory = createSemanticMemory({ repository: repository('semantic-memory'), events: this.events, embeddingProvider: createHashEmbeddingProvider({ dimensions: config.semanticMemory.dimensions, version: '1' }), maxRecords: config.semanticMemory.maxRecords, shortTermMaxRecords: config.semanticMemory.shortTermMaxRecords, shortTermTtlMs: config.semanticMemory.shortTermTtlMs, promotionAccesses: config.semanticMemory.promotionAccesses, promotionImportance: config.semanticMemory.promotionImportance });
     this.memoryLifecycle = createMemoryLifecycle({ memory: this.semanticMemory, logger: this.logger, intervalMs: config.semanticMemory.consolidationIntervalMs ?? 60_000 });
@@ -77,7 +78,7 @@ export class Application {
     this.acquisition.configureTaskRunner(async ({ runtime, capability, input, resources }) => { const goal = this.goals.create({ description: `Acquisition ${capability} for ${runtime.id}`, priority: input.priority ?? 70, constraints: { preferredBot: runtime.id }, steps: [{ type: 'acquisition', input, resources, requiredCapabilities: [capability], timeout: 300_000, retries: 1, reportLifecycle: false }] }); await this.goals.run(goal.id); const task = this.goals.tasks(goal.id)[0]; if (task.status !== 'COMPLETED') throw new ValidationError(task.error?.message ?? `Acquisition task '${capability}' failed`); return task.result; });
     this.autonomy = createAutonomyService({ repository: repository('autonomy-objectives'), coordinator: this.coordinator, hive: this.hive, bots: this.bots, health: this.health, events: this.events, logger: this.logger, enabled: config.autonomy.enabled, intervalMs: config.autonomy.intervalMs, maxActionsPerHour: config.autonomy.maxActionsPerHour });
     registerMinecraftCapabilities(this.capabilities, this.bots, this.survival);
-    this.resourceReservationCoordinator = createResourceReservationCoordinator({ events: this.events, bots: this.bots, reservations: this.resourceReservations }); this.navigation = createNavigationService({ bots: this.bots, capabilities: this.capabilities, events: this.events, metrics: this.metrics, reservations: this.resourceReservations });
+    this.resourceReservationCoordinator = createResourceReservationCoordinator({ events: this.events, bots: this.bots, reservations: this.resourceReservations }); this.navigation = createNavigationService({ bots: this.bots, capabilities: this.capabilities, events: this.events, metrics: this.metrics, reservations: this.resourceReservations, settings: this.navigationSettings });
     this.admins = new AdminManager({ repository: repository('admins'), bootstrap: [...(config.commands?.admins ?? [])], target: config.commands?.admins ?? [] });
     this.botProfiles = new BotProfileManager({ repository: repository('bots'), botManager: this.bots });
     this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, coordinator: this.coordinator, helpCommands: this.helpCommands, navigation: this.navigation, config: config.commands ?? { enabled: false, admins: [] }, logger: this.logger });
@@ -109,7 +110,7 @@ export class Application {
   async initialize() {
     if (this.state !== 'CREATED') return;
     this.state = 'BOOTSTRAPPING'; this.logger.info('application.bootstrapping'); this.state = 'INITIALIZING';
-    await this.admins.initialize(); this.restoredProfiles = await this.botProfiles.initialize(); await this.acquisition.initialize(); await this.help.initialize();
+    await this.admins.initialize(); this.restoredProfiles = await this.botProfiles.initialize(); await this.navigationSettings.initialize(); await this.acquisition.initialize(); await this.help.initialize();
     await this.modules.run('initialize', this.context()); await this.plugins.run('initialize', this.context()); this.state = 'READY';
     await this.events.publish('application.ready', {}, { source: 'application' });
   }

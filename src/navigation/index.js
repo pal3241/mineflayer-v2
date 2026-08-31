@@ -8,3 +8,4 @@ export { createResourceReservationService } from './resource-reservation-service
 export { createScaffoldLedger } from './scaffold-ledger.js';
 export { createResourceReservationCoordinator } from './resource-reservation-coordinator.js';
 export { microEscapeAction, alternateApproaches } from './recovery-strategy.js';
+export { createNavigationSettingsService } from './navigation-settings-service.js';

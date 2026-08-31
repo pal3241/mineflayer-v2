@@ -19,6 +19,7 @@
       <button class="nav" data-view="logistics">▦ <span>Logistics</span></button>
       <button class="nav" data-view="recovery">✚ <span>Recovery</span></button>
       <button class="nav" data-view="memory">◫ <span>Memory</span></button>
+      <button class="nav" data-view="movement">➤ <span>Movement</span></button>
       <button class="nav" data-view="admins">♙ <span>Admins</span></button>
       <button class="nav" data-view="settings">⚙ <span>Settings</span></button>
     </nav>
@@ -205,6 +206,19 @@
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">ACCESS CONTROL</p><h2>Add chat admin</h2></div></div><form id="adminForm" class="inline-form"><input name="username" required pattern="[A-Za-z0-9_]{2,32}" placeholder="Minecraft username"><button class="button primary">Add admin</button></form><p class="hint">Dashboard admins can be removed here. Admins loaded from .env must be edited in the file.</p></section>
         <section class="panel"><div class="panel-title"><div><p class="eyebrow">AUTHORIZED USERS</p><h2>Chat administrators</h2></div></div><div id="adminList" class="admin-list"></div></section>
       </div>
+    </section>
+
+    <section id="movement" class="view">
+      <div class="panel-title"><div><p class="eyebrow">v0.7.4 ADVANCED NAVIGATION</p><h2>Movement & Navigation</h2></div><span class="badge">NEXT NAVIGATION</span></div>
+      <section class="panel"><form id="movementSettingsForm" class="form-grid movement-form">
+        <label>Scope<select id="movementScope"><option value="GLOBAL">Global default</option><option value="BOT">Current bot</option></select></label>
+        <label>Bot<select id="movementBot"></select></label><label>Preset<select id="movementPreset"><option>SAFE</option><option>BALANCED</option><option>AGGRESSIVE</option><option>CUSTOM</option></select></label>
+        <fieldset><legend>General movement</legend><label class="check"><input id="movementSprint" type="checkbox"><span>Sprint</span></label><label class="check"><input id="movementJump" type="checkbox"><span>Jump</span></label><label class="check"><input id="movementParkour" type="checkbox"><span>Parkour</span></label><label>Max drop<input id="movementMaxDrop" type="number" min="0" max="16"></label></fieldset>
+        <fieldset><legend>Recovery</legend><label>Max attempts<input id="movementRecoveryAttempts" type="number" min="0" max="20"></label><label>Max replans<input id="movementReplans" type="number" min="0" max="10"></label><label>Cooldown ms<input id="movementCooldown" type="number" min="0" max="10000"></label><label>Minimum displacement<input id="movementDisplacement" type="number" min="0.05" max="4" step="0.05"></label></fieldset>
+        <fieldset><legend>Scaffolding</legend><label class="check"><input id="movementScaffold" type="checkbox"><span>Allow free scaffold resources</span></label><label>Max blocks<input id="movementScaffoldBlocks" type="number" min="0" max="64"></label><label class="full">Preferred free blocks<input id="movementScaffoldPreference" placeholder="dirt, cobblestone, stone, netherrack"></label><p class="hint full">Task, Help, Acquisition, Logistics, and Recovery reservations can never be used as scaffold.</p></fieldset>
+        <fieldset><legend>Pillar & Bridge</legend><label class="check"><input id="movementPillar" type="checkbox"><span>Allow pillar</span></label><label>Max pillar height<input id="movementPillarHeight" type="number" min="0" max="16"></label><label>Pillar attempts<input id="movementPillarAttempts" type="number" min="0" max="8"></label><label class="check"><input id="movementBridge" type="checkbox"><span>Allow bridge</span></label><label>Max bridge length<input id="movementBridgeLength" type="number" min="0" max="16"></label><label>Bridge attempts<input id="movementBridgeAttempts" type="number" min="0" max="8"></label></fieldset>
+        <div class="actions full"><button id="movementApplyPreset" class="button secondary" type="button">Apply preset</button><button id="movementReset" class="button secondary" type="button">Reset draft</button><button class="button primary" type="submit">Save changes</button></div>
+      </form></section>
     </section>
 
     <section id="settings" class="view">

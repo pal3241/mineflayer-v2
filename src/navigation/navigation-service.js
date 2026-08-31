@@ -9,10 +9,11 @@ import { createResourceReservationService } from './resource-reservation-service
 import { createScaffoldLedger } from './scaffold-ledger.js';
 import { alternateApproaches, microEscapeAction } from './recovery-strategy.js';
 
-export function createNavigationService({ bots, capabilities, events, metrics, reservations }) {
+export function createNavigationService({ bots, capabilities, events, metrics, reservations, settings }) {
   if (!bots || !capabilities || !metrics) throw new NavigationError('NAVIGATION_CONFIGURATION_INVALID', 'Navigation service requires bots, capabilities, and metrics', {});
   const active = new Map(); const controllers = new Map(); const history = []; const resourceReservations = reservations ?? createResourceReservationService(); const scaffoldLedger = createScaffoldLedger();
   const moveTo = async input => {
+    input = { ...input, policy: { ...(settings?.resolve({ botId: input?.botId }) ?? {}), ...(input?.policy ?? {}) } };
     const request = normalizeNavigationRequest(input); const runtime = resolveRuntime(bots, request.botId); ensureReady(runtime, request.botId); if (active.has(request.botId)) throw new NavigationError('NAVIGATION_BUSY', `Bot '${request.botId}' already has active navigation '${active.get(request.botId).id}'`, { botId: request.botId, sessionId: active.get(request.botId).id });
     const startPosition = currentPosition(runtime, request.botId); let session = createNavigationSession(request, startPosition); const controller = new AbortController(); active.set(request.botId, session); controllers.set(session.id, controller); metrics.increment('navigation.requests'); await publish(events, 'navigation.requested', session);
     const unlink = linkSignal(request.signal, controller); const timer = setTimeout(() => controller.abort(new NavigationError('NAVIGATION_TIMEOUT', `Navigation '${session.id}' exceeded ${request.policy.timeout}ms`, { botId: request.botId, sessionId: session.id, timeout: request.policy.timeout })), request.policy.timeout);
