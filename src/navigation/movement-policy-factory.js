@@ -6,10 +6,12 @@ export function createMovementPolicy({ policy, lease }) {
   return Object.freeze({
     allow1by1towers: Boolean(policy.allowPlace && policy.allowTower && lease),
     allowBridge: Boolean(policy.allowPlace && policy.allowBridge && lease),
-    allowParkour: false,
+    allowParkour: Boolean(policy.allowParkour),
+    allowJump: Boolean(policy.allowJump),
     allowSprinting: policy.allowSprint,
-    allowFreeMotion: false,
-    maxDropDown: 3,
+    allowFreeMotion: Boolean(policy.allowFreeMotion),
+    maxDropDown: policy.maxDropDown,
+    water: structuredClone(policy.water),
     placeCost: policy.allowPlace && lease ? 1 : Number.POSITIVE_INFINITY,
     scaffoldItems,
     scaffoldLeaseId: lease?.id ?? null
