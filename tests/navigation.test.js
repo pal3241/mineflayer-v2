@@ -8,6 +8,7 @@ function setup(options) {
   const state = { bot1: { x: 0, y: 64, z: 0 }, bot2: { x: 10, y: 64, z: 0 } }; const runtimes = Object.fromEntries(Object.keys(state).map(id => [id, { id, status: options?.statuses?.[id] ?? 'READY', adapter: { snapshot: () => ({ position: { ...state[id] }, inventorySummary: structuredClone(options?.inventory?.[id] ?? []) }) } }])); const calls = { navigation: [], stopped: [] }; const capabilities = { execute: async (name, input, context) => {
     if (name === 'minecraft.navigation-stop') { calls.stopped.push(context.botId); return { stopped: true }; }
     if (name === 'minecraft.navigation-target') return options?.targets?.[input.target.type] ?? { x: 4, y: 64, z: 0 };
+    if (name === 'minecraft.navigation-pillar') return options?.pillar?.({ input, context, state, calls }) ?? { position: { x: 0, y: 64, z: 0 }, verified: true };
     if (name !== 'minecraft.navigation') throw new Error(`Unexpected capability '${name}'`);
     calls.navigation.push({ input, context }); if (options?.navigate) return options.navigate({ input, context, state, calls }); state[context.botId] = { ...input.target }; return { position: { ...state[context.botId] } };
   } };
@@ -51,6 +52,10 @@ test('true stuck movement is confirmed, replanned, and resumes without retrying 
 
 test('explicit scaffolding leases only preferred unreserved blocks and is released after navigation', async () => {
   const reservations = createResourceReservationService(); const context = setup({ reservations, inventory: { bot1: [{ name: 'stone', count: 20 }, { name: 'dirt', count: 4 }] } }); const result = await context.service.moveTo({ botId: 'bot1', target: { x: 3, y: 64, z: 0 }, timeout: 1_000, source: 'TASK', policy: { allowPlace: true, allowScaffolding: true, allowTower: true, maxScaffoldBlocks: 3, scaffoldPreference: ['dirt'] } }); assert.equal(result.status, 'ARRIVED'); const leases = reservations.reservationsForBot('bot1'); assert.equal(leases.length, 1); assert.equal(leases[0].item, 'dirt'); assert.equal(leases[0].status, 'RELEASED');
+});
+
+test('pillar recovery verifies and records a leased scaffold only after replan budget is exhausted', async () => {
+  let attempts = 0; const reservations = createResourceReservationService(); const context = setup({ reservations, inventory: { bot1: [{ name: 'dirt', count: 3 }] }, navigate: async ({ input, context: capabilityContext, state }) => { attempts++; if (attempts === 1) return new Promise((_resolve, reject) => capabilityContext.signal.addEventListener('abort', () => reject(capabilityContext.signal.reason), { once: true })); state[capabilityContext.botId] = { ...input.target }; return {}; }, pillar: () => ({ position: { x: 0, y: 64, z: 0 }, verified: true }) }); const result = await context.service.moveTo({ botId: 'bot1', target: { x: 4, y: 66, z: 0 }, timeout: 2_000, source: 'TASK', policy: { allowPlace: true, allowScaffolding: true, allowTower: true, maxScaffoldBlocks: 2, maxReplans: 0, maxRecoveryAttempts: 2, sampleIntervalMs: 50, stuckTimeoutMs: 500, confirmationSamples: 1 } }); assert.equal(result.status, 'ARRIVED'); assert.equal(context.service.scaffoldLedger.forSession(result.sessionId).length, 1); assert.equal(reservations.reservationsForBot('bot1')[0].used, 1);
 });
 
 function deferredNavigation() { const pending = []; return { navigate: ({ input, context, state }) => new Promise(resolveMove => pending.push(() => { state[context.botId] = { ...input.target }; resolveMove({}); })), resolveAll: () => pending.splice(0).forEach(resolveMove => resolveMove()) }; }

@@ -7,6 +7,7 @@ Phase 2 menambahkan batas aman untuk navigasi yang gagal bergerak dan konfiguras
 - Semua mode navigasi tetap menonaktifkan placement, scaffolding, tower, dan bridge secara default. Tower atau bridge hanya dapat aktif bersama `allowPlace` dan `allowScaffolding` yang eksplisit.
 - Movement policy factory menerapkan konfigurasi yang sama pada Pathfinder dan CollectBlock: tidak ada tower otomatis, tidak ada parkour, dan daftar scaffold tidak pernah berasal dari seluruh inventori.
 - Scaffold memakai lease resource quantity-aware. Hanya item dari `scaffoldPreference` yang tidak sedang di-lease dapat dipilih; lease dilepas pada terminal cleanup.
+- Saat replan sudah habis dan policy tower eksplisit mengizinkan, recovery dapat menjalankan satu `PILLAR_STEP` terkontrol. Adapter memverifikasi blok yang ditempatkan dan kenaikan posisi bot sebelum lease di-commit; setiap placement dicatat pada scaffold ledger dengan session, aksi, alasan, item, posisi, dan hasil verifikasi.
 - Event `navigation.progress`, `navigation.stuck.suspected`, `navigation.stuck.detected`, `navigation.recovery.started`, dan event replanning membuat recovery dapat diaudit dari event stream. Diagnostics navigation menyimpan status movement, recovery, dan lease scaffold.
 
 Regresi menguji tower/bridge opt-in, perlindungan kuantitas resource dari lease bersamaan, deteksi stuck yang dikonfirmasi lalu replan berhasil, serta pelepasan lease setelah navigasi selesai.

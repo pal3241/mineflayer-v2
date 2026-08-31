@@ -5,3 +5,4 @@ export { normalizeNavigationTarget } from './navigation-target.js';
 export { createNavigationService } from './navigation-service.js';
 export { createMovementPolicy } from './movement-policy-factory.js';
 export { createResourceReservationService } from './resource-reservation-service.js';
+export { createScaffoldLedger } from './scaffold-ledger.js';
