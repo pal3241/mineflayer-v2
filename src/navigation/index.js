@@ -6,3 +6,4 @@ export { createNavigationService } from './navigation-service.js';
 export { createMovementPolicy } from './movement-policy-factory.js';
 export { createResourceReservationService } from './resource-reservation-service.js';
 export { createScaffoldLedger } from './scaffold-ledger.js';
+export { createResourceReservationCoordinator } from './resource-reservation-coordinator.js';

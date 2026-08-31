@@ -8,7 +8,7 @@ export function createResourceReservationService() {
   const reservations = new Map();
   const reserve = input => {
     const item = normalizedItem(input.item); const count = positive(input.count, 'count'); const available = availableFor({ botId: input.botId, item, inventory: input.inventory });
-    if (count > available) throw new NavigationError('SCAFFOLD_RESOURCE_UNAVAILABLE', `Only ${available} unreserved '${item}' available for scaffolding`, { botId: input.botId, item, requested: count, available });
+    if (count > available && input.allowUnbacked !== true) throw new NavigationError('SCAFFOLD_RESOURCE_UNAVAILABLE', `Only ${available} unreserved '${item}' available for scaffolding`, { botId: input.botId, item, requested: count, available });
     const now = new Date().toISOString(); const reason = reservationReason(input.reason); const reservation = { id: `RES-${randomUUID()}`, reservationId: null, sessionId: String(input.sessionId ?? input.ownerId ?? ''), ownerType: String(input.ownerType ?? 'NAVIGATION'), ownerId: String(input.ownerId ?? input.sessionId ?? ''), botId: String(input.botId), item, reserved: count, used: 0, reason, status: 'ACTIVE', createdAt: now, updatedAt: now }; reservation.reservationId = reservation.id; reservations.set(reservation.id, reservation); return copy(reservation);
   };
   const commit = input => {

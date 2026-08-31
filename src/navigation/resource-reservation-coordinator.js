@@ -1,0 +1,11 @@
+export function createResourceReservationCoordinator({ events, bots, reservations }) {
+  const owners = new Map();
+  const reserveTask = async event => { const task = event.payload; const item = task.input?.item ?? task.input?.block; const count = Number(task.input?.count); if (!item || !Number.isInteger(count) || count < 1 || !task.assignedBot) return; const reason = outputTask(task) ? 'TASK_OUTPUT' : 'TASK_INPUT'; const inventory = bots.get(task.assignedBot).adapter.snapshot().inventorySummary; const reservation = reservations.reserve({ ownerType: 'TASK', ownerId: task.id, sessionId: task.id, botId: task.assignedBot, item, count, inventory, reason, allowUnbacked: reason === 'TASK_OUTPUT' }); owners.set(`task:${task.id}`, [reservation.id]); };
+  const releaseOwner = async key => { for (const id of owners.get(key) ?? []) reservations.release({ leaseId: id }); owners.delete(key); };
+  const reserveHelpOutput = async event => { const output = event.payload; if (!output.botId || !output.item || !Number.isInteger(output.delta) || output.delta < 1) return; const inventory = bots.get(output.botId).adapter.snapshot().inventorySummary; const reservation = reservations.reserve({ ownerType: 'HELP', ownerId: output.contributionId, sessionId: output.sessionId, botId: output.botId, item: output.item, count: output.delta, inventory, reason: 'HELP_OUTPUT', allowUnbacked: true }); owners.set(`help:${output.contributionId}`, [reservation.id]); };
+  const releaseHelp = async event => releaseOwner(`help:${event.payload.contributionId}`);
+  const subscriptions = [events.subscribe('task.started', reserveTask), events.subscribe('task.completed', event => releaseOwner(`task:${event.payload.id}`)), events.subscribe('task.failed', event => releaseOwner(`task:${event.payload.id}`)), events.subscribe('task.cancelled', event => releaseOwner(`task:${event.payload.id}`)), events.subscribe('help.output.ready', reserveHelpOutput), events.subscribe('help.output.credited', releaseHelp)];
+  return Object.freeze({ dispose: () => subscriptions.forEach(unsubscribe => unsubscribe?.()), reservationsForOwner: key => [...(owners.get(key) ?? [])] });
+}
+
+function outputTask(task) { return ['collect', 'help-collection', 'acquisition'].includes(String(task.type)); }
