@@ -1,12 +1,13 @@
 # Catatan update MineHive
 
-Folder ini menyimpan satu catatan untuk setiap release atau update fitur MineHive agar README utama tetap berfokus pada gambaran proyek dan roadmap.
+Folder ini menyimpan histori lengkap setiap release, phase, dan update fitur MineHive agar README utama tetap berfokus pada gambaran proyek dan roadmap.
 
 ## Aturan penulisan
 
-- Gunakan nama file `<versi>-<nama-release>.md` untuk release atau `<YYYY-MM-DD>-<nama-update>.md` untuk update fitur di antara release.
-- Simpan ringkasan, perubahan perilaku, API baru, dashboard, pengujian, dan batas scope di file release tersebut.
-- Jangan menduplikasi catatan release ke README utama; cukup tautkan versinya dari tabel roadmap.
+- Untuk phase release, gunakan folder `v<versi>/` dan nama `phase-<nomor>-<nama>.md`.
+- Gunakan nama `<versi>-<nama-release>.md` atau `<YYYY-MM-DD>-<nama-update>.md` hanya untuk release tanpa phase atau update fitur di antara release.
+- Simpan ringkasan, perubahan perilaku, API baru, dashboard, pengujian, dan batas scope di file phase atau release tersebut.
+- Jangan menduplikasi histori phase ke README utama. Roadmap hanya menampilkan phase yang belum selesai, sedangkan semua phase selesai tetap dicatat di sini.
 - Tulis kondisi sistem saat release dibuat, bukan riwayat pekerjaan harian.
 
 ## Daftar release
@@ -14,10 +15,10 @@ Folder ini menyimpan satu catatan untuk setiap release atau update fitur MineHiv
 - [`0.7.0 — Logistik Foundation`](0.7.0-logistik-foundation.md)
 - [`0.7.1 — Intelligent Death Recovery`](0.7.1-intelligent-death-recovery.md)
 - [`0.7.2 — Universal Automatic Item Acquisition`](0.7.2-universal-automatic-item-acquisition.md)
-- [`0.7.3 Phase 1 — Helping: Survival Capability Completion`](0.7.3-helping-phase-1-survival-capability-completion.md)
-- [`0.7.3 Phase 2 — Helping: Output Ownership and Resource Handoff`](0.7.3-helping-phase-2-output-ownership.md)
-- [`0.7.3 Phase 3 — Helping: Manual Helping`](0.7.3-helping-phase-3-manual-helping.md)
-- [`0.7.4 Phase 1 — Advanced Navigation & Movement: Navigation Foundation`](0.7.4-navigation-foundation-phase-1.md)
+- [`v0.7.3 Phase 1 — Helping: Survival Capability Completion`](v0.7.3/phase-1-survival-capability-completion.md)
+- [`v0.7.3 Phase 2 — Helping: Output Ownership and Resource Handoff`](v0.7.3/phase-2-output-ownership-and-resource-handoff.md)
+- [`v0.7.3 Phase 3 — Helping: Manual Helping`](v0.7.3/phase-3-manual-helping.md)
+- [`v0.7.4 Phase 1 — Advanced Navigation & Movement: Navigation Foundation`](v0.7.4/phase-1-navigation-foundation.md)
 
 ## Daftar update fitur
 

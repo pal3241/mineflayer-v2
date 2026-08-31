@@ -21,21 +21,21 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 
 ## Roadmap
 
-| Release | Cakupan | Status |
-|---|---|---|
-| 0.1.0 | Foundation dan core | Implemented |
-| 0.2.0 | Runtime bot dan behavior engine | Implemented |
-| 0.3.0 | Goal, task, recovery, advanced orchestration | Implemented |
-| 0.4.0–0.4.1 | Safe AI, LLM key pool, crafting, movement, dan nearest-bot coordination | Implemented |
-| 0.5.0 | Shared world memory, natural chat, farming, forestry, dan combat states | Implemented |
-| 0.6.0 | Semantic memory, adaptive ML, HiveMind lanjutan, SQLite production, dan safe autonomy | Implemented |
-| [0.7.0](updates/0.7.0-logistik-foundation.md) | Logistics Foundation | Implemented |
-| [0.7.1](updates/0.7.1-intelligent-death-recovery.md) | Intelligent Death Recovery | Implemented |
-| [0.7.2](updates/0.7.2-universal-automatic-item-acquisition.md) | Universal Automatic Item Acquisition | Implemented |
-| [0.7.3 Phase 1](updates/0.7.3-helping-phase-1-survival-capability-completion.md) | Helping — Survival Capability Completion | Implemented |
-| [0.7.3 Phase 2](updates/0.7.3-helping-phase-2-output-ownership.md) | Helping — Output Ownership and Resource Handoff | Implemented |
-| [0.7.3 Phase 3](updates/0.7.3-helping-phase-3-manual-helping.md) | Helping — Manual Helping | Implemented |
-| [0.7.4 Phase 1](updates/0.7.4-navigation-foundation-phase-1.md) | Advanced Navigation & Movement — Navigation Foundation | Implemented |
-| 0.8.0 | Territory Foundation | Planned |
+- v0.1.0 — Foundation dan core — Implemented
+- v0.2.0 — Runtime bot dan behavior engine — Implemented
+- v0.3.0 — Goal, task, recovery, advanced orchestration — Implemented
+- v0.4.0–0.4.1 — Safe AI, LLM key pool, crafting, movement, dan nearest-bot coordination — Implemented
+- v0.5.0 — Shared world memory, natural chat, farming, forestry, dan combat states — Implemented
+- v0.6.0 — Semantic memory, adaptive ML, HiveMind lanjutan, SQLite production, dan safe autonomy — Implemented
+- [v0.7.0 — Logistics Foundation](updates/0.7.0-logistik-foundation.md) — Implemented
+- [v0.7.1 — Intelligent Death Recovery](updates/0.7.1-intelligent-death-recovery.md) — Implemented
+- [v0.7.2 — Universal Automatic Item Acquisition](updates/0.7.2-universal-automatic-item-acquisition.md) — Implemented
+- v0.7.3 — Helping — Implemented
+- v0.7.4 — Advanced Navigation & Movement
+  - Phase 2 — Stuck Recovery & Safe Scaffolding
+  - Phase 3 — Terrain & Safety Navigation
+  - Phase 4 — Precision Movement
+  - Phase 5 — Multi-Bot Navigation
+- v0.8.0 — Territory Foundation — Planned
 
-Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Setiap release baru memiliki satu catatan tersendiri di folder [`updates/`](updates/README.md).
+Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Roadmap hanya menampilkan phase yang belum selesai; histori phase yang selesai tersimpan permanen di folder [`updates/`](updates/README.md).
