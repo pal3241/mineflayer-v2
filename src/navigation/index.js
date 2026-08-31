@@ -7,3 +7,4 @@ export { createMovementPolicy } from './movement-policy-factory.js';
 export { createResourceReservationService } from './resource-reservation-service.js';
 export { createScaffoldLedger } from './scaffold-ledger.js';
 export { createResourceReservationCoordinator } from './resource-reservation-coordinator.js';
+export { microEscapeAction, alternateApproaches } from './recovery-strategy.js';
