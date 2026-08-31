@@ -10,7 +10,7 @@ import { CapabilityRegistry } from '../bots/capabilities.js';
 import { DeterministicPlanner } from '../goals/planner.js';
 import { FleetScheduler } from '../fleet/scheduler.js';
 import { TaskExecutor } from '../tasks/task-executor.js';
-import { GoalService } from '../goals/goal-service.js';
+import { COLLABORATIVE_TAKEOVER_PREFIX, GoalService } from '../goals/goal-service.js';
 import { CheckpointManager } from '../orchestration/checkpoints.js';
 import { ValidationError } from './errors.js';
 import { MINECRAFT_CAPABILITIES, registerMinecraftCapabilities } from '../bots/minecraft-capabilities.js';
@@ -67,7 +67,7 @@ export class Application {
     this.logistics = createLogisticsService({ repositories: { storages: repository('logistics-storages'), reservations: repository('logistics-reservations'), transfers: repository('logistics-transfers') }, hive: this.hive, events: this.events });
     this.fleetTransfer = createFleetTransferService({ events: this.events });
     this.acquisition = createAcquisitionService({ bots: this.bots, logistics: this.logistics, events: this.events, logger: this.logger, repository: repository('acquisition-requests'), fleetTransfer: this.fleetTransfer, config: config.acquisition ?? { enabled: true, maxDepth: 8, maxSubtasks: 32, maxAttempts: 3, maxDistance: 2000, storageFirst: true, allowFleet: true, allowCraft: true, allowSmelt: true, allowCollect: true, allowPartial: false, toolPreservation: true } });
-    this.help = createHelpService({ repository: repository('help-sessions'), workShareRepository: repository('help-work-shares'), contributionRepository: repository('help-contributions'), bots: this.bots, fleetTransfer: this.fleetTransfer, logistics: this.logistics, goals: this.goals, executor: this.executor, events: this.events });
+    this.help = createHelpService({ repository: repository('help-sessions'), workShareRepository: repository('help-work-shares'), contributionRepository: repository('help-contributions'), bots: this.bots, fleetTransfer: this.fleetTransfer, logistics: this.logistics, goals: this.goals, executor: this.executor, events: this.events, maxHelpersPerSession: 4, minimumChunk: 4 });
     this.helpCommands = createHelpCommandService({ help: this.help, goals: this.goals, bots: this.bots, events: this.events, maxHelpersPerSession: 4, minimumChunk: 4 });
     this.recovery = createRecoveryJobService({ repository: repository('recovery-jobs'), events: this.events, config: config.recovery ?? { enabled: true, maxAttempts: 3, minScore: 40, optionalScore: 20, urgentScore: 70, despawnTicks: 6000, safetyMarginTicks: 600, maxDistance: 2000, dangerLimit: 0.75 } });
     this.survival = createSurvivalService({ acquisition: this.acquisition, events: this.events, logger: this.logger, config: config.survival ?? defaultSurvivalSettings() });
@@ -80,7 +80,7 @@ export class Application {
     this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, coordinator: this.coordinator, helpCommands: this.helpCommands, config: config.commands ?? { enabled: false, admins: [] }, logger: this.logger });
     this.taskReporter = createTaskReporter({ events: this.events, bots: this.bots, logger: this.logger });
     this.events.subscribe('bot.death', async event => { const affected = await this.acquisition.handleBotDeath(event.payload.botId); const helpSessions = await this.help.handleBotDeath(event.payload.botId); if (affected.length) await this.events.publish('acquisition.recovery.required', { botId: event.payload.botId, requestIds: affected.map(request => request.id) }, { source: 'acquisition', correlationId: event.payload.botId }); if (helpSessions.length) await this.events.publish('help.recovery.required', { botId: event.payload.botId, sessionIds: helpSessions.map(session => session.id) }, { source: 'help', correlationId: event.payload.botId }); });
-    this.events.subscribe('task.cancelled', async event => { await this.help.cancelForParent(event.payload.id, event.payload.error?.message ?? 'Parent task cancelled'); });
+    this.events.subscribe('task.cancelled', async event => { const reason = event.payload.error?.message ?? 'Parent task cancelled'; if (reason.startsWith(COLLABORATIVE_TAKEOVER_PREFIX)) return; await this.help.cancelForParent(event.payload.id, reason); });
     this.bots.onCreated(runtime => { this.chatCommands.attach(runtime); this.structureObserver.attach(runtime); this.survival.attach(runtime); });
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
     Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, helpCommands: this.helpCommands, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
@@ -163,7 +163,7 @@ export class Application {
     return normalized;
   }
   configureSurvival(input) { return this.survival.configure(input); }
-  status() { return { name: 'MineHive', version: '0.7.3', phase: 'Helping Phase 2', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
+  status() { return { name: 'MineHive', version: '0.7.3', phase: 'Helping Phase 3', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
 }
 
 function portAvailable(port) {
