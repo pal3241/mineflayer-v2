@@ -169,6 +169,17 @@ test('smelting acquires input and fuel before executing the smelt task', async (
   assert.equal(result.status, 'COMPLETED'); assert.equal(smelted, true); assert.deepEqual(collected, [{ block: 'iron_ore', count: 1 }, { block: 'coal_ore', count: 1 }]);
 });
 
+test('craft-ready protects the complete quantity-aware ingredient contract', async () => {
+  const items = [{ name: 'oak_planks', count: 2 }]; let contract;
+  const bot = { id: 'bot-a', status: 'READY', options: { host: 'localhost', port: 25565 }, adapter: { snapshot: () => ({ inventorySummary: items, dimension: 'overworld' }), craftRequirements: async () => ({ craftable: true, missing: [], ingredients: [{ item: 'oak_planks', count: 2 }], steps: [{ item: 'stick', crafts: 1, resultCount: 4 }] }), craftItem: async () => { items[0].count -= 2; items.push({ name: 'stick', count: 4 }); return { item: 'stick', count: 4 }; } } };
+  const service = createAcquisitionService({ bots: { list: () => [bot], get: () => bot }, logistics: { stock: async () => [] }, events: { publish: async () => {} } }); service.configureTaskRunner(async input => { contract = input.resources; return input.runtime.adapter.craftItem(input.input); }); await service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'stick', count: 4 }); assert.deepEqual(contract.inputs, [{ item: 'oak_planks', count: 2 }]); assert.deepEqual(contract.outputs, [{ item: 'stick', count: 4 }]);
+});
+
+test('special source reserves only dependencies declared as consumable', async () => {
+  const items = [{ name: 'bucket', count: 1 }, { name: 'shears', count: 1 }]; let contract;
+  const bot = { id: 'bot-a', status: 'READY', options: { host: 'localhost', port: 25565 }, adapter: { snapshot: () => ({ inventorySummary: items, dimension: 'overworld' }) } }; const service = createAcquisitionService({ bots: { list: () => [bot], get: () => bot }, logistics: { stock: async () => [] }, events: { publish: async () => {} } }); service.registerSpecialSource({ name: 'test-milk', capability: 'minecraft.acquire-milk', matches: item => item === 'milk_bucket', dependencies: () => [{ type: 'ITEM', item: 'bucket', count: 1, consume: true }, { type: 'ITEM', item: 'shears', count: 1, consume: false }], execute: async () => ({ acquired: 1 }) }); service.configureTaskRunner(async input => { contract = input.resources; items.push({ name: 'milk_bucket', count: 1 }); return { acquired: 1 }; }); await service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'milk_bucket', count: 1 }); assert.deepEqual(contract.inputs, [{ item: 'bucket', count: 1 }]); assert.deepEqual(contract.outputs, [{ item: 'milk_bucket', count: 1 }]);
+});
+
 test('smelting task receives an acquisition input and output resource contract', async () => {
   const items = []; const contracts = [];
   const bot = { id: 'bot-a', status: 'READY', options: { host: 'localhost', port: 25565 }, adapter: {

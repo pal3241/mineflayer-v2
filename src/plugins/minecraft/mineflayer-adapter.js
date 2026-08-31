@@ -119,9 +119,9 @@ export class MineflayerAdapter extends EventEmitter {
   async craftRequirements({ item, count = 1 }) {
     const bot = this.#ready('craft-planning'); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1)); const inventory = inventoryLedger(bot);
     const definition = bot.registry?.itemsByName?.[item]; const recipes = definition ? bot.recipesAll(definition.id, null, true) ?? [] : [];
-    if (!recipes.length) return { item, count: amount, craftable: false, missing: [], steps: [], selectedRecipe: null, alternatives: [] };
+    if (!recipes.length) return { item, count: amount, craftable: false, missing: [], ingredients: [], steps: [], selectedRecipe: null, alternatives: [] };
     const plan = resolveCraftPlan(bot, item, amount, inventory, new Set(), 0); const alternatives = inspectRecipeAlternatives(bot, item, amount, inventory, plan.recipe);
-    return { item, count: amount, craftable: true, missing: missingList(plan.missing), steps: plan.steps, selectedRecipe: alternatives[0] ?? null, alternatives };
+    return { item, count: amount, craftable: true, missing: missingList(plan.missing), ingredients: craftIngredients(bot, plan), steps: plan.steps, selectedRecipe: alternatives[0] ?? null, alternatives };
   }
   async findSourceBlocks({ item }) {
     const bot = this.#ready('resource-analysis'); const definition = bot.registry?.itemsByName?.[item]; if (!definition) return [];
@@ -467,6 +467,7 @@ function planSpecificRecipe(bot, name, requiredCount, recipe, ledger, visiting, 
 }
 function rankRecipes(bot, _name, _requiredCount, ledger, _visiting, _depth, recipes) { return [...recipes].map((recipe, index) => ({ recipe, index, score: recipeAffinity(bot, recipe, ledger) })).sort((left, right) => left.score - right.score || left.index - right.index).map(value => value.recipe); }
 function inspectRecipeAlternatives(bot, name, requiredCount, ledger, selected) { const definition = bot.registry?.itemsByName?.[name]; if (!definition) return []; const recipes = rankRecipes(bot, name, requiredCount, ledger, new Set(), 0, bot.recipesAll(definition.id, null, true) ?? []); if (selected) recipes.sort((left, right) => Number(right === selected) - Number(left === selected)); return recipes.map((recipe, index) => ({ rank: index + 1, selected: recipe === selected, score: recipeAffinity(bot, recipe, ledger), requiresTable: recipe.requiresTable, ingredients: recipe.delta.filter(value => value.count < 0).map(value => ({ name: bot.registry.items?.[value.id]?.name, count: Math.abs(value.count) })).filter(value => value.name) })); }
+function craftIngredients(bot, plan) { if (!plan.recipe) return []; const finalStep = plan.steps.at(-1); const crafts = Number(finalStep?.crafts ?? 0); if (!Number.isInteger(crafts) || crafts < 1) return []; return plan.recipe.delta.filter(value => value.count < 0).map(value => ({ item: bot.registry.items?.[value.id]?.name, count: Math.abs(value.count) * crafts })).filter(value => value.item); }
 function recipeAffinity(bot, recipe, ledger) { let score = 0; for (const ingredient of recipe.delta.filter(value => value.count < 0)) { const name = bot.registry.items?.[ingredient.id]?.name; if (!name) continue; const required = Math.abs(ingredient.count); const direct = ledger.get(name) ?? 0; score += Math.max(0, required - direct) * 100; if (direct >= required) score -= 1000; else if (craftSourceAvailable(bot, name, ledger)) score -= 50; } return score; }
 function craftSourceAvailable(bot, name, ledger) { const definition = bot.registry.itemsByName?.[name]; if (!definition) return false; return (bot.recipesAll(definition.id, null, true) ?? []).some(recipe => recipe.delta.some(ingredient => ingredient.count < 0 && (ledger.get(bot.registry.items?.[ingredient.id]?.name) ?? 0) > 0)); }
 function missingList(missing) { return [...missing].map(([name, count]) => ({ name, count })); }
