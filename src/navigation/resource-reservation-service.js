@@ -15,9 +15,10 @@ export function createResourceReservationService() {
     const current = required(reservations, input.leaseId); const count = positive(input.count, 'count'); if (!ACTIVE.has(current.status)) throw new NavigationError('SCAFFOLD_RESERVATION_FAILED', `Scaffold lease '${current.id}' is ${current.status}`, { leaseId: current.id }); if (current.used + count > current.reserved) throw new NavigationError('SCAFFOLD_BUDGET_EXHAUSTED', `Scaffold lease '${current.id}' has no remaining blocks`, { leaseId: current.id }); const next = { ...current, used: current.used + count, status: current.used + count === current.reserved ? 'PARTIALLY_USED' : 'PARTIALLY_USED', updatedAt: new Date().toISOString() }; reservations.set(next.id, next); return copy(next);
   };
   const release = input => { const current = required(reservations, input.leaseId); const next = { ...current, status: 'RELEASED', releasedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; reservations.set(next.id, next); return copy(next); };
+  const transfer = input => { const current = required(reservations, input.leaseId); if (!ACTIVE.has(current.status)) throw new NavigationError('SCAFFOLD_RESERVATION_FAILED', `Reservation '${current.id}' is ${current.status}`, { reservationId: current.id }); const next = { ...current, sessionId: String(input.sessionId ?? current.sessionId), ownerType: String(input.ownerType), ownerId: String(input.ownerId), reason: reservationReason(input.reason), updatedAt: new Date().toISOString() }; reservations.set(next.id, next); return copy(next); };
   const available = input => availableFor(input);
   const reservationsForBot = botId => [...reservations.values()].filter(entry => entry.botId === String(botId)).map(copy);
-  return Object.freeze({ reserve, protect: reserve, commit, release, available, reservationsForBot });
+  return Object.freeze({ reserve, protect: reserve, commit, release, transfer, available, reservationsForBot });
   function availableFor(input) { const inventoryCount = itemCount(input.inventory, input.item); const reserved = [...reservations.values()].filter(entry => entry.botId === String(input.botId) && entry.item === normalizedItem(input.item) && ACTIVE.has(entry.status)).reduce((sum, entry) => sum + entry.reserved - entry.used, 0); return Math.max(0, inventoryCount - reserved); }
 }
 
