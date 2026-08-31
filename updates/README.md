@@ -19,6 +19,7 @@ Folder ini menyimpan histori lengkap setiap release, phase, dan update fitur Min
 - [`v0.7.3 Phase 2 — Helping: Output Ownership and Resource Handoff`](v0.7.3/phase-2-output-ownership-and-resource-handoff.md)
 - [`v0.7.3 Phase 3 — Helping: Manual Helping`](v0.7.3/phase-3-manual-helping.md)
 - [`v0.7.3 Phase 4 — Helping: Advanced Multi-Helper Coordination`](v0.7.3/phase-4-advanced-multi-helper-coordination.md)
+- [`v0.7.4 Phase 2 — Stuck Recovery & Safe Scaffolding`](v0.7.4/phase-2-stuck-recovery-safe-scaffolding.md)
 - [`v0.7.4 Phase 1 — Advanced Navigation & Movement: Navigation Foundation`](v0.7.4/phase-1-navigation-foundation.md)
 
 ## Daftar update fitur

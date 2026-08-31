@@ -3,30 +3,56 @@ import { NavigationError } from './navigation-error.js';
 import { normalizeNavigationRequest } from './navigation-request.js';
 import { createNavigationSession, sessionView, transitionNavigationSession } from './navigation-session.js';
 import { navigationResult } from './navigation-result.js';
+import { createMovementMonitor } from './movement-monitor.js';
+import { createMovementPolicy } from './movement-policy-factory.js';
+import { createResourceReservationService } from './resource-reservation-service.js';
 
-export function createNavigationService({ bots, capabilities, events, metrics }) {
+export function createNavigationService({ bots, capabilities, events, metrics, reservations }) {
   if (!bots || !capabilities || !metrics) throw new NavigationError('NAVIGATION_CONFIGURATION_INVALID', 'Navigation service requires bots, capabilities, and metrics', {});
-  const active = new Map(); const controllers = new Map(); const history = [];
+  const active = new Map(); const controllers = new Map(); const history = []; const resourceReservations = reservations ?? createResourceReservationService();
   const moveTo = async input => {
     const request = normalizeNavigationRequest(input); const runtime = resolveRuntime(bots, request.botId); ensureReady(runtime, request.botId); if (active.has(request.botId)) throw new NavigationError('NAVIGATION_BUSY', `Bot '${request.botId}' already has active navigation '${active.get(request.botId).id}'`, { botId: request.botId, sessionId: active.get(request.botId).id });
     const startPosition = currentPosition(runtime, request.botId); let session = createNavigationSession(request, startPosition); const controller = new AbortController(); active.set(request.botId, session); controllers.set(session.id, controller); metrics.increment('navigation.requests'); await publish(events, 'navigation.requested', session);
     const unlink = linkSignal(request.signal, controller); const timer = setTimeout(() => controller.abort(new NavigationError('NAVIGATION_TIMEOUT', `Navigation '${session.id}' exceeded ${request.policy.timeout}ms`, { botId: request.botId, sessionId: session.id, timeout: request.policy.timeout })), request.policy.timeout);
     try {
       session = transitionNavigationSession(session, 'PLANNING', {}); active.set(request.botId, session); await publish(events, 'navigation.planning', session); const position = await resolvePosition({ target: request.target, runtime, bots, capabilities, botId: request.botId, signal: controller.signal });
-      session = transitionNavigationSession(session, 'MOVING', { target: { ...request.target, resolvedPosition: position } }); active.set(request.botId, session); await publish(events, 'navigation.started', session);
-      await Promise.race([capabilities.execute('minecraft.navigation', { target: position, tolerance: request.policy.tolerance, mode: request.policy.mode, policy: request.policy }, { botId: request.botId, signal: controller.signal }), abortPromise(controller.signal)]);
+      const lease = acquireScaffoldLease({ reservations: resourceReservations, runtime, session, policy: request.policy }); const movement = createMovementPolicy({ policy: request.policy, lease }); session = transitionNavigationSession(session, 'MOVING', { target: { ...request.target, resolvedPosition: position }, diagnostics: { ...session.diagnostics, scaffold: { leaseId: lease?.id ?? null, item: lease?.item ?? null, reserved: lease?.reserved ?? 0, used: 0 } } }); active.set(request.botId, session); await publish(events, 'navigation.started', session);
+      let recoveryAttempts = 0; let replans = 0;
+      while (true) {
+        try { await executeMonitoredNavigation({ capabilities, events, runtime, session, target: position, movement, controller }); break; }
+        catch (error) {
+          if (controller.signal.aborted || error?.code !== 'NAVIGATION_STUCK') throw error;
+          session = transitionNavigationSession(session, 'STUCK_SUSPECTED', { diagnostics: diagnosticsForStuck(session, error) }); active.set(request.botId, session); await publish(events, 'navigation.stuck.suspected', session);
+          session = transitionNavigationSession(session, 'STUCK', {}); active.set(request.botId, session); metrics.increment('navigation.stuck.count'); await publish(events, 'navigation.stuck.detected', session);
+          if (recoveryAttempts >= request.policy.maxRecoveryAttempts || replans >= request.policy.maxReplans) throw new NavigationError('RECOVERY_EXHAUSTED', `Navigation '${session.id}' exhausted its recovery budget`, { sessionId: session.id, recoveryAttempts, replans });
+          recoveryAttempts++; session = transitionNavigationSession(session, 'RECOVERING', { diagnostics: { ...session.diagnostics, recovery: { attempt: recoveryAttempts, replans } } }); active.set(request.botId, session); metrics.increment('navigation.recovery.attempts'); await publish(events, 'navigation.recovery.started', session); await stopNavigation(capabilities, request.botId);
+          replans++; session = transitionNavigationSession(session, 'REPLANNING', { diagnostics: { ...session.diagnostics, recovery: { attempt: recoveryAttempts, replans } } }); active.set(request.botId, session); await publish(events, 'navigation.replanning.started', session);
+          session = transitionNavigationSession(session, 'MOVING', {}); active.set(request.botId, session); metrics.increment('navigation.replans.total'); await publish(events, 'navigation.replanning.completed', session);
+        }
+      }
       const finalPosition = currentPosition(runtime, request.botId); const distanceRemaining = distance3D(finalPosition, position); if (distanceRemaining > request.policy.tolerance) throw new NavigationError('ARRIVAL_NOT_VERIFIED', `Navigation '${session.id}' ended ${distanceRemaining.toFixed(2)} blocks from target`, { botId: request.botId, sessionId: session.id, target: position, finalPosition, tolerance: request.policy.tolerance, distanceRemaining });
       session = transitionNavigationSession(session, 'ARRIVED', { finalPosition, distanceRemaining }); metrics.increment('navigation.success'); metrics.gauge('navigation.duration', session.durationMs); await publish(events, 'navigation.arrived', session); return navigationResult(session);
     } catch (error) {
       const failure = normalizeFailure(error, controller.signal, session); const finalPosition = safePosition(runtime); const distanceRemaining = finalPosition && session.target.resolvedPosition ? distance3D(finalPosition, session.target.resolvedPosition) : null; session = transitionNavigationSession(session, failure.status, { finalPosition, distanceRemaining, failureCode: failure.code, failureMessage: failure.message }); await stopNavigation(capabilities, request.botId); metrics.increment(failure.metric); metrics.gauge('navigation.duration', session.durationMs); await publish(events, failure.event, session); throw new NavigationError(failure.code, failure.message, { ...navigationResult(session), cause: error?.message ?? null });
-    } finally { clearTimeout(timer); unlink(); controllers.delete(session.id); if (active.get(request.botId)?.id === session.id) active.delete(request.botId); remember(history, session); }
+    } finally { clearTimeout(timer); unlink(); const leaseId = session.diagnostics?.scaffold?.leaseId; if (leaseId) resourceReservations.release({ leaseId }); controllers.delete(session.id); if (active.get(request.botId)?.id === session.id) active.delete(request.botId); remember(history, session); }
   };
   const cancel = async input => { const session = findSession(active, input); const controller = controllers.get(session.id); if (!controller) throw new NavigationError('NAVIGATION_NOT_ACTIVE', `Navigation '${session.id}' is not active`, { sessionId: session.id }); const reason = String(input.reason ?? 'Navigation cancelled').trim() || 'Navigation cancelled'; controller.abort(new NavigationError('NAVIGATION_CANCELLED', reason, { botId: session.botId, sessionId: session.id })); await stopNavigation(capabilities, session.botId); return sessionView(active.get(session.botId) ?? session); };
   const stop = async () => Promise.all([...active.keys()].map(botId => cancel({ botId, reason: 'Application shutdown' })));
   const status = () => ({ status: 'HEALTHY', active: active.size, sessions: [...active.values()].map(sessionView), recent: history.map(sessionView) });
   const statusForBot = botId => { const session = active.get(String(botId)); return session ? sessionView(session) : null; };
-  return Object.freeze({ moveTo, cancel, stop, status, statusForBot });
+  return Object.freeze({ moveTo, cancel, stop, status, statusForBot, reservations: resourceReservations });
 }
+
+async function executeMonitoredNavigation({ capabilities, events, runtime, session, target, movement, controller }) {
+  const attempt = new AbortController(); const unlink = linkSignal(controller.signal, attempt); let monitor;
+  const onSnapshot = async snapshot => { await events?.publish('navigation.progress', snapshot, { source: 'navigation', correlationId: session.id }); };
+  const onStuck = async error => { attempt.abort(error); await stopNavigation(capabilities, session.botId); };
+  try { monitor = createMovementMonitor({ session, runtime, target, policy: session.policy, onSnapshot, onStuck }); await Promise.race([capabilities.execute('minecraft.navigation', { target, tolerance: session.policy.tolerance, mode: session.policy.mode, policy: session.policy, movement }, { botId: session.botId, signal: attempt.signal }), abortPromise(attempt.signal)]); }
+  finally { monitor?.stop(); unlink(); }
+}
+
+function acquireScaffoldLease({ reservations, runtime, session, policy }) { if (!policy.allowPlace || !policy.allowScaffolding) return null; const inventory = runtime.adapter?.snapshot?.().inventorySummary ?? []; for (const item of policy.scaffoldPreference) { const available = reservations.available({ botId: session.botId, item, inventory }); if (available > 0) return reservations.reserve({ sessionId: session.id, botId: session.botId, item, count: Math.min(policy.maxScaffoldBlocks, available), inventory }); } throw new NavigationError('SCAFFOLD_RESOURCE_UNAVAILABLE', `Navigation '${session.id}' has no permitted scaffold resource`, { sessionId: session.id, botId: session.botId, scaffoldPreference: policy.scaffoldPreference }); }
+function diagnosticsForStuck(session, error) { return { ...session.diagnostics, movement: { ...session.diagnostics.movement, lastAction: 'STUCK', noProgressMs: error.details?.noProgressMs ?? 0, repeatedActionCount: error.details?.confirmations ?? 0 } }; }
 
 function resolveRuntime(bots, botId) { try { return bots.get(botId); } catch (error) { if (error instanceof NotFoundError) throw new NavigationError('BOT_NOT_FOUND', `Navigation bot '${botId}' was not found`, { botId }); throw error; } }
 function ensureReady(runtime, botId) { const status = runtime.snapshot?.().status ?? runtime.status ?? runtime.bot?.status; if (!['READY', 'ACTIVE'].includes(status)) throw new NavigationError('BOT_NOT_READY', `Navigation bot '${botId}' is ${status ?? 'unknown'}`, { botId, status: status ?? null }); }

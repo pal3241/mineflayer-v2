@@ -2,16 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../src/core/event-bus.js';
 import { MetricsManager } from '../src/core/health.js';
-import { createNavigationService } from '../src/navigation/index.js';
+import { createNavigationService, createResourceReservationService, normalizeNavigationPolicy } from '../src/navigation/index.js';
 
 function setup(options) {
-  const state = { bot1: { x: 0, y: 64, z: 0 }, bot2: { x: 10, y: 64, z: 0 } }; const runtimes = Object.fromEntries(Object.keys(state).map(id => [id, { id, status: options?.statuses?.[id] ?? 'READY', adapter: { snapshot: () => ({ position: { ...state[id] } }) } }])); const calls = { navigation: [], stopped: [] }; const capabilities = { execute: async (name, input, context) => {
+  const state = { bot1: { x: 0, y: 64, z: 0 }, bot2: { x: 10, y: 64, z: 0 } }; const runtimes = Object.fromEntries(Object.keys(state).map(id => [id, { id, status: options?.statuses?.[id] ?? 'READY', adapter: { snapshot: () => ({ position: { ...state[id] }, inventorySummary: structuredClone(options?.inventory?.[id] ?? []) }) } }])); const calls = { navigation: [], stopped: [] }; const capabilities = { execute: async (name, input, context) => {
     if (name === 'minecraft.navigation-stop') { calls.stopped.push(context.botId); return { stopped: true }; }
     if (name === 'minecraft.navigation-target') return options?.targets?.[input.target.type] ?? { x: 4, y: 64, z: 0 };
     if (name !== 'minecraft.navigation') throw new Error(`Unexpected capability '${name}'`);
     calls.navigation.push({ input, context }); if (options?.navigate) return options.navigate({ input, context, state, calls }); state[context.botId] = { ...input.target }; return { position: { ...state[context.botId] } };
   } };
-  const bots = { get: id => { if (!runtimes[id]) throw new Error(`Bot '${id}' not found`); return runtimes[id]; } }; const events = new EventBus(); const metrics = new MetricsManager(); return { service: createNavigationService({ bots, capabilities, events, metrics }), state, calls, events, metrics };
+  const bots = { get: id => { if (!runtimes[id]) throw new Error(`Bot '${id}' not found`); return runtimes[id]; } }; const events = new EventBus(); const metrics = new MetricsManager(); return { service: createNavigationService({ bots, capabilities, events, metrics, reservations: options?.reservations }), state, calls, events, metrics };
 }
 
 test('navigation arrives with verified runtime position and normalized policy', async () => {
@@ -34,6 +34,23 @@ test('navigation enforces one active session per bot while different bots move c
 
 test('navigation rejects invalid targets, unavailable bots, and pathfinder failures with structured codes', async () => {
   const invalid = setup(); await assert.rejects(invalid.service.moveTo({ botId: 'bot1', target: { x: Number.NaN, y: 64, z: 0 }, timeout: 1000, source: 'TASK' }), error => error.code === 'INVALID_TARGET'); const unavailable = setup({ statuses: { bot1: 'OFFLINE' } }); await assert.rejects(unavailable.service.moveTo({ botId: 'bot1', target: { x: 1, y: 64, z: 0 }, timeout: 1000, source: 'TASK' }), error => error.code === 'BOT_NOT_READY'); const failed = setup({ navigate: async () => { throw new Error('path not found'); } }); await assert.rejects(failed.service.moveTo({ botId: 'bot1', target: { x: 1, y: 64, z: 0 }, timeout: 1000, source: 'TASK' }), error => error.code === 'PATH_NOT_FOUND'); assert.equal(failed.service.status().active, 0);
+});
+
+test('navigation policy keeps scaffolding, towering, and bridging opt-in', () => {
+  const safe = normalizeNavigationPolicy({ mode: 'SAFE' }); assert.equal(safe.allowPlace, false); assert.equal(safe.allowTower, false); assert.equal(safe.allowBridge, false); awaitInvalidPolicy();
+  function awaitInvalidPolicy() { assert.throws(() => normalizeNavigationPolicy({ mode: 'SAFE', allowTower: true }), error => error.code === 'INVALID_POLICY'); }
+});
+
+test('resource leases protect reserved quantities and prevent concurrent scaffold consumption', () => {
+  const reservations = createResourceReservationService(); const inventory = [{ name: 'dirt', count: 12 }]; const first = reservations.reserve({ sessionId: 'one', botId: 'bot1', item: 'dirt', count: 8, inventory }); assert.equal(reservations.available({ botId: 'bot1', item: 'dirt', inventory }), 4); assert.throws(() => reservations.reserve({ sessionId: 'two', botId: 'bot1', item: 'dirt', count: 5, inventory }), error => error.code === 'SCAFFOLD_RESOURCE_UNAVAILABLE'); const used = reservations.commit({ leaseId: first.id, count: 1 }); assert.equal(used.used, 1); reservations.release({ leaseId: first.id }); assert.equal(reservations.available({ botId: 'bot1', item: 'dirt', inventory }), 12);
+});
+
+test('true stuck movement is confirmed, replanned, and resumes without retrying forever', async () => {
+  let attempts = 0; const context = setup({ navigate: async ({ input, context: capabilityContext, state }) => { attempts++; if (attempts === 1) return new Promise((_resolve, reject) => capabilityContext.signal.addEventListener('abort', () => reject(capabilityContext.signal.reason), { once: true })); state[capabilityContext.botId] = { ...input.target }; return {}; } }); const events = []; context.events.subscribe('navigation.stuck.detected', event => { events.push(event.payload); }); const result = await context.service.moveTo({ botId: 'bot1', target: { x: 4, y: 64, z: 0 }, timeout: 2_000, source: 'TASK', policy: { sampleIntervalMs: 50, stuckTimeoutMs: 500, confirmationSamples: 1, maxRecoveryAttempts: 2, maxReplans: 2 } }); assert.equal(result.status, 'ARRIVED'); assert.equal(attempts, 2); assert.equal(events.length, 1); assert.ok(context.calls.stopped.length >= 1);
+});
+
+test('explicit scaffolding leases only preferred unreserved blocks and is released after navigation', async () => {
+  const reservations = createResourceReservationService(); const context = setup({ reservations, inventory: { bot1: [{ name: 'stone', count: 20 }, { name: 'dirt', count: 4 }] } }); const result = await context.service.moveTo({ botId: 'bot1', target: { x: 3, y: 64, z: 0 }, timeout: 1_000, source: 'TASK', policy: { allowPlace: true, allowScaffolding: true, allowTower: true, maxScaffoldBlocks: 3, scaffoldPreference: ['dirt'] } }); assert.equal(result.status, 'ARRIVED'); const leases = reservations.reservationsForBot('bot1'); assert.equal(leases.length, 1); assert.equal(leases[0].item, 'dirt'); assert.equal(leases[0].status, 'RELEASED');
 });
 
 function deferredNavigation() { const pending = []; return { navigate: ({ input, context, state }) => new Promise(resolveMove => pending.push(() => { state[context.botId] = { ...input.target }; resolveMove({}); })), resolveAll: () => pending.splice(0).forEach(resolveMove => resolveMove()) }; }

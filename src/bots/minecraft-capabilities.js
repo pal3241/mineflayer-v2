@@ -5,7 +5,7 @@ export const MINECRAFT_CAPABILITIES = Object.freeze([
 export function registerMinecraftCapabilities(registry, botManager, survival) {
   const adapter = context => botManager.get(context.botId).adapter;
   const runtime = context => botManager.get(context.botId);
-  registry.register({ name: 'minecraft.navigation', execute: (input, context) => adapter(context).navigateTo({ position: input.target ?? input.position ?? input, tolerance: input.tolerance ?? input.range, mode: input.mode, policy: input.policy }, context) });
+  registry.register({ name: 'minecraft.navigation', execute: (input, context) => adapter(context).navigateTo({ position: input.target ?? input.position ?? input, tolerance: input.tolerance ?? input.range, mode: input.mode, policy: input.policy, movement: input.movement }, context) });
   registry.register({ name: 'minecraft.navigation-stop', execute: (_input, context) => adapter(context).stopNavigation() });
   registry.register({ name: 'minecraft.navigation-target', execute: (input, context) => adapter(context).resolveNavigationTarget(input.target) });
   registry.register({ name: 'minecraft.follow-player', execute: (input, context) => adapter(context).followPlayer(input, context) });

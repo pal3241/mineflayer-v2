@@ -168,7 +168,7 @@ export class Application {
     return normalized;
   }
   configureSurvival(input) { return this.survival.configure(input); }
-  status() { return { name: 'MineHive', version: '0.7.4', phase: 'Navigation Foundation Phase 1', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
+  status() { return { name: 'MineHive', version: '0.7.4', phase: 'Stuck Recovery & Safe Scaffolding Phase 2', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
 }
 
 function portAvailable(port) {

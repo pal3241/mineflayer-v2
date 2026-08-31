@@ -55,10 +55,16 @@ export class MineflayerAdapter extends EventEmitter {
   async #configureMovement() {
     if (!this.client?.pathfinder || !this.pathfinderModule) return;
     const Movements = this.pathfinderModule.Movements ?? this.pathfinderModule.default?.Movements;
-    if (Movements) { const movements = new Movements(this.client); movements.allow1by1towers = false; movements.allowParkour = false; movements.allowFreeMotion = false; movements.scafoldingBlocks = []; movements.placeCost = Number.POSITIVE_INFINITY; movements.maxDropDown = Math.min(3, movements.maxDropDown); configureDoorNavigation(movements, this.client.registry); this.client.pathfinder.setMovements(movements); }
+    if (Movements) this.#applyMovementPolicy({ allow1by1towers: false, allowBridge: false, allowParkour: false, allowSprinting: true, allowFreeMotion: false, maxDropDown: 3, placeCost: Number.POSITIVE_INFINITY, scaffoldItems: [] });
     if (this.autoEatLoader && !this.client.autoEat) {
       this.client.loadPlugin(this.autoEatLoader); this.client.autoEat.setOpts({ minHunger: this.autoEatConfig.minHunger }); this.client.autoEat.enableAuto(); this.pluginStatus.autoEat = 'HEALTHY';
     }
+  }
+
+  #applyMovementPolicy(policy) {
+    if (!this.client?.pathfinder || !this.pathfinderModule) return;
+    const Movements = this.pathfinderModule.Movements ?? this.pathfinderModule.default?.Movements; if (!Movements) return;
+    const movements = new Movements(this.client); movements.allow1by1towers = Boolean(policy.allow1by1towers); movements.allowParkour = Boolean(policy.allowParkour); movements.allowSprinting = Boolean(policy.allowSprinting); movements.allowFreeMotion = Boolean(policy.allowFreeMotion); movements.maxDropDown = Math.min(Number(policy.maxDropDown ?? 3), movements.maxDropDown); movements.placeCost = Number(policy.placeCost); movements.scafoldingBlocks = (policy.scaffoldItems ?? []).map(item => this.client.registry?.itemsByName?.[item]?.id).filter(Number.isInteger); configureDoorNavigation(movements, this.client.registry); this.client.pathfinder.setMovements(movements); if (this.client.collectBlock) this.client.collectBlock.movements = movements;
   }
 
   #ready(capability) { if (!this.client || this.status !== 'READY') throw new ValidationError(`Cannot use '${capability}' while bot is ${this.status}`); return this.client; }
@@ -71,7 +77,7 @@ export class MineflayerAdapter extends EventEmitter {
     const position = input?.position; const signal = context?.signal;
     const bot = this.#ready('navigation'); if (!bot.pathfinder) throw new ValidationError('Pathfinder plugin is unavailable');
     for (const value of [position?.x, position?.y, position?.z]) if (!Number.isFinite(Number(value))) throw new ValidationError('Navigation requires numeric x, y, z');
-    const destination = { x: Number(position.x), y: Number(position.y), z: Number(position.z) }; const acceptedRange = boundedDistance(input?.tolerance ?? 1, 0, 64, 'Navigation range'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const goal = new goals.GoalNear(destination.x, destination.y, destination.z, acceptedRange);
+    this.#applyMovementPolicy(input?.movement ?? input?.policy?.movement ?? { allow1by1towers: false, allowBridge: false, allowParkour: false, allowSprinting: true, allowFreeMotion: false, maxDropDown: 3, placeCost: Number.POSITIVE_INFINITY, scaffoldItems: [] }); const destination = { x: Number(position.x), y: Number(position.y), z: Number(position.z) }; const acceptedRange = boundedDistance(input?.tolerance ?? 1, 0, 64, 'Navigation range'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const goal = new goals.GoalNear(destination.x, destination.y, destination.z, acceptedRange);
     const cleanupAbort = this.#abort(signal, () => bot.pathfinder.setGoal(null)); const guard = navigationGuard(bot, destination, acceptedRange, 10_000);
     try { await Promise.race([bot.pathfinder.goto(goal), guard.promise]); const finalPosition = this.snapshot().position; if (!finalPosition || distance3(finalPosition, destination) > acceptedRange + 1) throw new ValidationError(`Navigation ended outside target range: target ${destination.x},${destination.y},${destination.z}, actual ${formatPosition(finalPosition)}`); return { position: finalPosition }; }
     catch (error) { bot.pathfinder.setGoal(null); throw error; } finally { guard.stop(); cleanupAbort(); }
