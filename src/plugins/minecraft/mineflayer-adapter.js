@@ -373,9 +373,10 @@ export class MineflayerAdapter extends EventEmitter {
       result.set(name, { name, count: (existing?.count ?? 0) + Number(item.count) });
       return result;
     }, new Map());
+    const slots = Array.isArray(bot?.inventory?.slots) ? bot.inventory.slots.slice(9, 45) : []; const inventorySlotsUsed = slots.filter(Boolean).length; const inventorySlotsFree = Math.max(0, 36 - inventorySlotsUsed); const freeItemCapacity = slots.reduce((total, item) => total + (item ? Math.max(0, Number(item.stackSize ?? 64) - Number(item.count ?? 0)) : 64), 0);
     return { connection: this.status, position: bot?.entity?.position ? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z } : null,
       health: bot?.health ?? null, food: bot?.food ?? null, alive: this.alive, dimension: bot?.game?.dimension ?? null,
-      inventorySummary: [...inventory.values()], plugins: { ...this.pluginStatus },
+      inventorySummary: [...inventory.values()], inventorySlotsUsed, inventorySlotsFree, freeItemCapacity, plugins: { ...this.pluginStatus },
       camera: { active: Boolean(bot?.viewer), port: this.viewerPort ?? null, mode: this.viewerMode ?? null, version: bot?.version ?? null, renderVersion: this.viewerRenderVersion ?? null, versionSupported: this.viewerVersionSupported ?? null }, combat: { ...this.combatState }, timestamp: new Date().toISOString() };
   }
 

@@ -15,3 +15,5 @@ Phase 4 menyelesaikan v0.7.3 Helping dengan koordinasi adaptif yang tetap manual
 API menambahkan snapshot worker serta endpoint rebalance, work steal, pause, dan resume. Command game menambahkan `pause help` dan `resume help`.
 
 Pengujian mencakup weighted splitting, capacity limit, rebalance idempoten, work stealing, dan pause/resume; seluruh perilaku helping Phase 2–3 tetap diuji sebagai regresi.
+
+Hardening penutup Phase 4 menambahkan eksekusi WorkShare paralel tanpa menahan lock selama capability berjalan, cancel aktif untuk helper `RUNNING`, dan batch collection maksimum 64 item yang dapat dilanjutkan dari status `PARTIAL`. Snapshot inventory sekarang menyediakan `inventorySlotsUsed`, `inventorySlotsFree`, serta `freeItemCapacity` dari slot Minecraft nyata termasuk stack parsial. Stall monitor memakai `progressStallThresholdMs`, tool suitability memeriksa kategori serta tier tool dari inventory, dan parent completion saat rebalance mencapai target selalu memakai lifecycle resmi GoalService.
