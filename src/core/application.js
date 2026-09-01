@@ -37,6 +37,8 @@ import { createStructureObserver } from '../world/structure-observer.js';
 import { createLogisticsService } from '../logistics/logistics-service.js';
 import { createAcquisitionService } from '../logistics/acquisition/acquisition-service.js';
 import { createRecoveryJobService } from '../logistics/recovery/index.js';
+import { calculateRecoveryCost, createDeathManifest, evaluateRecoveryItems, mergeDeathInventory, selectRecoveryBot, verifyRecovery } from '../logistics/recovery/index.js';
+import { randomUUID } from 'node:crypto';
 import { createFleetTransferService } from '../logistics/fleet-transfer-service.js';
 import { createCoordinationMonitor, createHelpCommandService, createHelpService } from '../help/index.js';
 import { createSurvivalService } from '../survival/index.js';
@@ -83,7 +85,7 @@ export class Application {
     this.botProfiles = new BotProfileManager({ repository: repository('bots'), botManager: this.bots });
     this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, coordinator: this.coordinator, helpCommands: this.helpCommands, navigation: this.navigation, config: config.commands ?? { enabled: false, admins: [] }, logger: this.logger });
     this.taskReporter = createTaskReporter({ events: this.events, bots: this.bots, logger: this.logger });
-    this.events.subscribe('bot.death', async event => { const affected = await this.acquisition.handleBotDeath(event.payload.botId); const helpSessions = await this.help.handleBotDeath(event.payload.botId); if (affected.length) await this.events.publish('acquisition.recovery.required', { botId: event.payload.botId, requestIds: affected.map(request => request.id) }, { source: 'acquisition', correlationId: event.payload.botId }); if (helpSessions.length) await this.events.publish('help.recovery.required', { botId: event.payload.botId, sessionIds: helpSessions.map(session => session.id) }, { source: 'help', correlationId: event.payload.botId }); });
+    this.events.subscribe('bot.death', async event => { const affected = await this.acquisition.handleBotDeath(event.payload.botId); const helpSessions = await this.help.handleBotDeath(event.payload.botId); if (affected.length) await this.events.publish('acquisition.recovery.required', { botId: event.payload.botId, requestIds: affected.map(request => request.id) }, { source: 'acquisition', correlationId: event.payload.botId }); if (helpSessions.length) await this.events.publish('help.recovery.required', { botId: event.payload.botId, sessionIds: helpSessions.map(session => session.id) }, { source: 'help', correlationId: event.payload.botId }); try { await runDeathRecovery(this, event.payload); } catch (error) { this.logger.error('death-recovery.failed', { botId: event.payload.botId, error: error.message }); await this.events.publish('logistics.recovery.failed', { botId: event.payload.botId, error: { code: error.code ?? 'DEATH_RECOVERY_FAILED', message: error.message } }, { source: 'death-recovery', correlationId: event.payload.botId }); } });
     this.events.subscribe('task.cancelled', async event => { const reason = event.payload.error?.message ?? 'Parent task cancelled'; if (reason.startsWith(COLLABORATIVE_TAKEOVER_PREFIX)) return; await this.help.cancelForParent(event.payload.id, reason); });
     this.bots.onCreated(runtime => { this.chatCommands.attach(runtime); this.structureObserver.attach(runtime); this.survival.attach(runtime); });
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
@@ -164,7 +166,7 @@ export class Application {
     const next = this.recovery.settings ? this.recovery.settings() : this.config.recovery;
     const normalized = createRecoveryJobService({ repository: this._repositoryFactory('recovery-jobs'), events: this.events, config: input ?? next }).settings();
     this.config.recovery = normalized;
-    this.recovery = createRecoveryJobService({ repository: this._repositoryFactory('recovery-jobs'), events: this.events, config: normalized });
+    this.recovery = createRecoveryJobService({ repository: this._repositoryFactory('recovery-jobs'), events: this.events, bots: this.bots, resourceReservations: this.resourceReservations, config: normalized });
     this.container.register('recovery', this.recovery, { replace: true });
     return normalized;
   }
@@ -184,3 +186,31 @@ function defaultMemorySettings(config) {
 }
 
 function defaultSurvivalSettings() { return { enabled: true, autoEquipArmor: true, minimumDurabilityPercent: 10, preferProtection: true, preferDurability: false, allowBindingCurse: false, allowAnimalKill: false, minimumSheepReserve: 2, minimumCowReserve: 2, interactionCooldownMs: 500, entitySearchDistance: 48 }; }
+
+async function runDeathRecovery(application, death) {
+  const dead = application.bots.get(death.botId); const settings = application.recovery.settings(); const position = death.position;
+  if (!position || ![position.x, position.y, position.z].every(Number.isFinite)) throw new ValidationError(`Death recovery requires a valid death position for '${death.botId}'`);
+  const worldKey = serverKey(dead.options); const transfer = await application.logistics.deathContext({ botId: death.botId });
+  const items = mergeDeathInventory({ lastKnownInventory: death.inventory ?? [], eventInventory: death.inventory ?? [], transferItems: transfer.cargo ?? [] });
+  const manifest = createDeathManifest({ botId: death.botId, worldKey, dimension: String(death.dimension ?? dead.adapter.snapshot().dimension ?? 'overworld'), position, items, relatedTransferId: transfer.relatedTransferId, cause: death.cause ?? 'unknown', keepInventory: death.keepInventory ?? 'UNKNOWN' }, { id: randomUUID(), createdAt: death.detectedAt ?? new Date().toISOString() });
+  await application.logistics.markDeathRecovery({ botId: death.botId, manifestId: manifest.id });
+  await application.events.publish('logistics.recovery.death.recorded', manifest, { source: 'death-recovery', correlationId: manifest.id });
+  const selection = selectRecoveryBot({ candidates: recoveryCandidates(application, manifest), death: { deadBotId: manifest.botId, worldKey: manifest.worldKey, dimension: manifest.dimension, position: manifest.position, danger: 0 }, requiredSlots: requiredSlots(items), config: settings });
+  const cost = calculateRecoveryCost({ distance: selection.selected?.distance ?? settings.maxDistance, danger: 0, workload: 0, risk: 0, remainingDespawnTicks: settings.despawnTicks }, settings);
+  const evaluation = evaluateRecoveryItems({ manifest, signals: [], cost, config: settings });
+  if (!evaluation.shouldRecover) { await application.events.publish('logistics.recovery.skipped', { manifest, evaluation }, { source: 'death-recovery', correlationId: manifest.id }); return null; }
+  if (!selection.selected) throw new ValidationError(`No eligible recovery bot for death manifest '${manifest.id}'`);
+  let job = await application.recovery.create({ manifest, evaluation, chunkActive: true }); job = await application.recovery.assign({ jobId: job.id, botId: selection.selected.botId });
+  const recoveryRuntime = application.bots.get(selection.selected.botId); const beforeInventory = recoveryRuntime.adapter.snapshot().inventorySummary;
+  try {
+    job = await application.recovery.transition({ jobId: job.id, status: 'TRAVELLING' }); await recoveryRuntime.adapter.smartMove({ x: manifest.position.x, y: manifest.position.y, z: manifest.position.z, range: 2 });
+    job = await application.recovery.transition({ jobId: job.id, status: 'SEARCHING' }); const expected = job.items.filter(item => item.decision !== 'IGNORE'); const names = expected.map(item => item.name); const drops = recoveryRuntime.adapter.findDroppedItems({ position: manifest.position, radius: 12, names });
+    job = await application.recovery.transition({ jobId: job.id, status: 'COLLECTING' }); for (const drop of drops) await recoveryRuntime.adapter.collectDroppedItem({ entityId: drop.entityId, item: drop.item, count: drop.count, timeoutMs: 15_000, position: manifest.position, radius: 12 });
+    job = await application.recovery.transition({ jobId: job.id, status: 'VERIFYING' }); const verification = verifyRecovery({ expectedItems: job.items, beforeInventory, afterInventory: recoveryRuntime.adapter.snapshot().inventorySummary }); const completed = await application.recovery.complete({ jobId: job.id, verification }); await application.logistics.reconcileDeathRecovery({ manifestId: manifest.id, status: completed.status, recoveryBotId: selection.selected.botId, recoveredItems: verification.items.filter(item => item.recoveredCount > 0), lostItems: verification.items.filter(item => item.missingCount > 0) }); return completed;
+  } catch (error) { await application.recovery.recordFailure({ jobId: job.id, code: recoveryFailureCode(error), message: error.message }); throw error; }
+}
+
+function recoveryCandidates(application, manifest) { return application.bots.list().filter(bot => bot.id !== manifest.botId).map(bot => ({ botId: bot.id, worldKey: serverKey(application.bots.get(bot.id).options), dimension: String(bot.runtime.dimension ?? 'overworld'), position: bot.runtime.position ?? { x: 0, y: 0, z: 0 }, alive: ['READY', 'ACTIVE'].includes(bot.status), available: ['READY', 'ACTIVE'].includes(bot.status), health: Number(bot.runtime.health ?? 0), food: Number(bot.runtime.food ?? 0), freeSlots: Math.max(0, 36 - (bot.runtime.inventorySummary?.length ?? 0)), equipmentScore: 0, workload: 0 })); }
+function requiredSlots(items) { return Math.max(1, Math.ceil(items.reduce((sum, item) => sum + item.count, 0) / 64)); }
+function serverKey(options) { return `${String(options?.host ?? 'localhost').toLowerCase()}:${Number(options?.port ?? 25565)}`; }
+function recoveryFailureCode(error) { if (error?.code === 'ITEMS_DESPAWNED') return 'ITEMS_DESPAWNED'; if (/inventory|slot/i.test(error?.message ?? '')) return 'INVENTORY_FULL'; if (/path|route|navigate/i.test(error?.message ?? '')) return 'PATHFINDER_FAILED'; return 'ITEMS_MISSING'; }
