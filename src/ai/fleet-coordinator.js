@@ -11,7 +11,7 @@ export class FleetCoordinator {
   #busy = new Map();
   #operationTails = new Map();
   #operationWaiting = new Map();
-  constructor({ gateway, bots, goals, memory, semanticMemory, discovery, logistics, acquisition, ml, hive, events, logger, maxQueuePerBot }) { if (!Number.isInteger(maxQueuePerBot) || maxQueuePerBot < 1) throw new ValidationError('Coordinator queue limit must be a positive integer'); this.gateway = gateway; this.bots = bots; this.goals = goals; this.memory = memory; this.semanticMemory = semanticMemory; this.discovery = discovery; this.logistics = logistics; this.acquisition = acquisition ?? null; this.ml = ml; this.hive = hive; this.events = events; this.logger = logger; this.maxQueuePerBot = maxQueuePerBot; }
+  constructor({ gateway, bots, goals, memory, semanticMemory, discovery, logistics, acquisition, ml, hive, events, logger, maxQueuePerBot, navigationSettings }) { if (!Number.isInteger(maxQueuePerBot) || maxQueuePerBot < 1) throw new ValidationError('Coordinator queue limit must be a positive integer'); this.gateway = gateway; this.bots = bots; this.goals = goals; this.memory = memory; this.semanticMemory = semanticMemory; this.discovery = discovery; this.logistics = logistics; this.acquisition = acquisition ?? null; this.ml = ml; this.hive = hive; this.events = events; this.logger = logger; this.maxQueuePerBot = maxQueuePerBot; this.navigationSettings = navigationSettings; }
   status() { const depths = [...this.#operationWaiting.values()]; const maximumDepth = Math.max(0, ...depths); return { llm: this.gateway.status(), bots: this.bots.list().length, coordination: 'semantic-ml-hivemind-resource-planning', queuedOperations: depths.reduce((sum, count) => sum + count, 0), queues: Object.fromEntries(this.#operationWaiting), maxQueuePerBot: this.maxQueuePerBot, maximumDepth, saturation: maximumDepth / this.maxQueuePerBot }; }
   fleetView() {
     const bots = this.bots.list();
@@ -49,9 +49,10 @@ export class FleetCoordinator {
     const runtime = this.bots.get(botId); const adapter = runtime.adapter;
     if (intent.intent === 'status') return runtime.snapshot();
     if (intent.intent === 'converse') return { reply: intent.reply };
-    if (intent.intent === 'follow') return adapter.followPlayer({ username: intent.player });
-    if (intent.intent === 'come') return adapter.comeToPlayer({ username: intent.player });
-    if (intent.intent === 'move') return adapter.smartMove({ x: intent.x, y: intent.y, z: intent.z });
+    const movement = this.navigationSettings.resolve({ botId });
+    if (intent.intent === 'follow') return adapter.followPlayer({ username: intent.player, movement });
+    if (intent.intent === 'come') return adapter.comeToPlayer({ username: intent.player, movement });
+    if (intent.intent === 'move') return adapter.smartMove({ x: intent.x, y: intent.y, z: intent.z, movement });
     if (intent.intent === 'set_home') return adapter.setHome({ name: intent.home });
     if (intent.intent === 'home') return adapter.goHome({ name: intent.home });
     if (intent.intent === 'survey') {
@@ -63,7 +64,7 @@ export class FleetCoordinator {
     if (intent.intent === 'stock') { const server = serverIdentity(runtime.options); return { storages: await this.logistics.stock({ worldKey: `${server.host}:${server.port}`, dimension: adapter.snapshot().dimension }) }; }
     if (intent.intent === 'remember') { const snapshot = adapter.snapshot(); return this.memory.remember({ ...runtime.options, dimension: snapshot.dimension, position: snapshot.position, name: intent.name, type: intent.type, sourceBotId: botId }); }
     if (intent.intent === 'place') { const places = await this.memory.forBot(runtime, { name: intent.name, limit: 1 }); if (!places.length) throw new ConflictError(`Shared memory '${intent.name}' was not found in this world`); return { memory: places[0], movement: await adapter.smartMove({ ...places[0].position, range: 2 }) }; }
-    if (intent.intent === 'farm') { const requirements = typeof adapter.farmRequirements === 'function' ? await adapter.farmRequirements({ crop: intent.crop, count: intent.count }) : { needsHoe: true, needsSeed: false }; const equipment = requirements.needsHoe ? await this.#ensureEquipment(botId, HOES) : null; const seed = requirements.needsSeed ? await this.#acquireItem(botId, requirements.seed, 1, new Set()) : null; return { requirements, equipment, seed, farming: await adapter.farm({ crop: intent.crop, count: intent.count }) }; }
+    if (intent.intent === 'farm') { applyCommandMovementPolicy(adapter, movement); const requirements = typeof adapter.farmRequirements === 'function' ? await adapter.farmRequirements({ crop: intent.crop, count: intent.count }) : { needsHoe: true, needsSeed: false }; const equipment = requirements.needsHoe ? await this.#ensureEquipment(botId, HOES) : null; const seed = requirements.needsSeed ? await this.#acquireItem(botId, requirements.seed, 1, new Set()) : null; return { requirements, equipment, seed, farming: await adapter.farm({ crop: intent.crop, count: intent.count }) }; }
     if (intent.intent === 'deforest') { const equipment = await this.#ensureEquipment(botId, AXES); const result = await adapter.deforest({ log: intent.block ?? 'any', count: intent.count, replant: intent.replant }); for (const [index, site] of result.sites.entries()) await this.memory.remember({ ...runtime.options, dimension: adapter.snapshot().dimension, position: site, name: `tree-site-${Date.now()}-${index}`, type: 'tree_site', sourceBotId: botId, metadata: { log: site.log, replantRequested: intent.replant } }); return { equipment, ...result }; }
     if (intent.intent === 'reforest') { const sites = await this.memory.forBot(runtime, { type: 'tree_site', limit: intent.count }); return adapter.reforest({ count: intent.count, sites: sites.map(site => ({ ...site.position, log: site.metadata?.log })) }); }
     if (intent.intent === 'combat') { const equipment = await this.#ensureEquipment(botId, SWORDS); const snapshot = adapter.snapshot(); let position = intent.mode === 'guard' ? snapshot.position : undefined; if (intent.mode === 'guard' && intent.name) { const place = (await this.memory.forBot(runtime, { name: intent.name, limit: 1 }))[0]; if (!place) throw new ConflictError(`Guard place '${intent.name}' was not found in shared memory`); position = place.position; } return { equipment, combat: await adapter.startCombat({ mode: intent.mode, position, radius: intent.radius }) }; }
@@ -71,7 +72,7 @@ export class FleetCoordinator {
     if (intent.intent === 'smelt') return this.#prepareSmelt(botId, intent.item, intent.count, new Set());
     if (intent.intent === 'collect') {
       const preparation = await this.#ensureToolForBlock(botId, intent.block, new Set());
-      const goal = this.goals.create({ description: `Coordinator collect ${intent.count} ${intent.block}`, priority: 70, constraints: { preferredBot: botId }, steps: [{ type: 'collect', input: { block: intent.block, count: intent.count }, requiredCapabilities: ['minecraft.collection'], timeout: 300_000, retries: 1, reportLifecycle: false }] });
+      applyCommandMovementPolicy(adapter, movement); const goal = this.goals.create({ description: `Coordinator collect ${intent.count} ${intent.block}`, priority: 70, constraints: { preferredBot: botId }, steps: [{ type: 'collect', input: { block: intent.block, count: intent.count }, requiredCapabilities: ['minecraft.collection'], timeout: 300_000, retries: 1, reportLifecycle: false }] });
       return { preparation, goal: await this.goals.run(goal.id) };
     }
     throw new ValidationError(`Unsupported coordinator intent '${intent.intent}'`);
@@ -186,6 +187,7 @@ function toolTier(name) { const material = Object.keys(TOOL_TIER).find(value => 
 function serverIdentity(options = {}) { return { host: options.host ?? 'localhost', port: Number(options.port ?? 25565) }; }
 function sameServer(left = {}, right = {}) { const a = serverIdentity(left); const b = serverIdentity(right); return String(a.host).toLowerCase() === String(b.host).toLowerCase() && a.port === b.port; }
 function distribute(total, slots) { const base = Math.floor(total / slots); const remainder = total % slots; return Array.from({ length: slots }, (_, index) => base + (index < remainder ? 1 : 0)); }
+function applyCommandMovementPolicy(adapter, policy) { if (typeof adapter.setCommandMovementPolicy === 'function') adapter.setCommandMovementPolicy(policy); }
 async function rankByPrediction(bots, intent, ml) { const candidates = await Promise.all(bots.map(async (bot, index) => ({ bot, index, prediction: await ml.predict({ botId: bot.id, intent, features: botFeatures(bot, intent, bots.length) }) }))); return candidates.sort((left, right) => right.prediction.prediction - left.prediction.prediction || left.index - right.index).map(candidate => candidate.bot); }
 function botFeatures(bot, intent, fleetSize) { const inventory = bot.runtime?.inventorySummary ?? []; return { intent, className: String(bot.metadata?.className ?? 'worker'), healthBand: band(bot.runtime?.health, 5), foodBand: band(bot.runtime?.food, 5), inventoryStacks: inventory.length, hasTool: inventory.some(item => /_(pickaxe|axe|hoe|sword)$/.test(item.name)), fleetSize }; }
 function band(value, size) { const number = Number(value); return Number.isFinite(number) ? Math.floor(number / size) * size : -1; }

@@ -77,6 +77,7 @@ export function createNavigationMovements({ Movements, bot, policy }) {
     }
 
     #canTraverseRoute(node, dir, dy, dz, options) {
+      const routePolicy = { allowSwimming: this.allowSwimming, allowEnterWater: this.allowEnterWater, allowDeepWater: this.allowDeepWater, allowUnderwaterRoute: this.allowUnderwaterRoute, ...options };
       const target = this.getBlock(node, dir.x, dy, dir.z ?? dz);
       const current = this.getBlock(node, 0, 0, 0);
       const head = this.getBlock(node, 0, 1, 0);
@@ -87,12 +88,12 @@ export function createNavigationMovements({ Movements, bot, policy }) {
       const targetIsWater = isWater(target);
       const targetIsOpenWater = targetIsWater && targetWaterDepth >= 1;
 
-      if ((currentSubmerged || isWater(head)) && !options.allowSwimming) return false;
-      if (targetIsWater && !options.allowEnterWater) return false;
+      if ((currentSubmerged || isWater(head)) && !routePolicy.allowSwimming) return false;
+      if (targetIsWater && !routePolicy.allowEnterWater) return false;
       if (targetWaterDepth > this.maxWaterDepth) return false;
-      if (targetIsOpenWater && !options.allowDeepWater && targetWaterDepth > 1) return false;
-      if ((currentSubmerged || targetSubmerged) && !options.allowUnderwaterRoute) return false;
-      if (options.parkour && (currentSubmerged || targetSubmerged || isWater(targetHead))) return false;
+      if (targetIsOpenWater && !routePolicy.allowDeepWater && targetWaterDepth > 1) return false;
+      if ((currentSubmerged || targetSubmerged) && !routePolicy.allowUnderwaterRoute) return false;
+      if (routePolicy.parkour && (currentSubmerged || targetSubmerged || isWater(targetHead))) return false;
       return true;
     }
   }(bot);

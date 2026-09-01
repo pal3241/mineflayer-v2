@@ -28,7 +28,7 @@ const SURVEY_MARKERS = Object.freeze([
 ]);
 
 export class MineflayerAdapter extends EventEmitter {
-  constructor({ factory, plugins = true, autoEat = {} } = {}) { super(); this.factory = factory; this.plugins = plugins; this.autoEatConfig = { enabled: true, minHunger: 15, ...autoEat }; this.client = null; this.status = 'DISCONNECTED'; this.pluginStatus = {}; this.homes = new Map(); this.combatState = { mode: 'OFF', status: 'IDLE' }; this.lastAliveState = null; this.alive = false; this.interactionCooldowns = new Map(); this.currentSleepState = { state: 'IDLE', bed: null, error: null }; }
+  constructor({ factory, plugins = true, autoEat = {} } = {}) { super(); this.factory = factory; this.plugins = plugins; this.autoEatConfig = { enabled: true, minHunger: 15, ...autoEat }; this.client = null; this.status = 'DISCONNECTED'; this.pluginStatus = {}; this.homes = new Map(); this.combatState = { mode: 'OFF', status: 'IDLE' }; this.lastAliveState = null; this.alive = false; this.interactionCooldowns = new Map(); this.currentSleepState = { state: 'IDLE', bed: null, error: null }; this.commandMovementPolicy = null; }
 
   async connect(options) {
     if (this.client) return;
@@ -57,7 +57,7 @@ export class MineflayerAdapter extends EventEmitter {
   async #configureMovement() {
     if (!this.client?.pathfinder || !this.pathfinderModule) return;
     const Movements = this.pathfinderModule.Movements ?? this.pathfinderModule.default?.Movements;
-    if (Movements) this.#applyMovementPolicy({ allow1by1towers: false, allowBridge: false, allowParkour: false, allowSprinting: true, allowFreeMotion: false, maxDropDown: 3, placeCost: Number.POSITIVE_INFINITY, scaffoldItems: [], water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: false, allowUnderwaterRoute: false, maxDepth: 6, maxUnderwaterDurationMs: 10_000 } });
+    if (Movements) this.#applyMovementPolicy(safeMovementPolicy());
     if (this.autoEatLoader && !this.client.autoEat) {
       this.client.loadPlugin(this.autoEatLoader); this.client.autoEat.setOpts({ minHunger: this.autoEatConfig.minHunger }); this.client.autoEat.enableAuto(); this.pluginStatus.autoEat = 'HEALTHY';
     }
@@ -67,7 +67,7 @@ export class MineflayerAdapter extends EventEmitter {
     if (!this.client?.pathfinder || !this.pathfinderModule) return;
     const Movements = this.pathfinderModule.Movements ?? this.pathfinderModule.default?.Movements; if (!Movements) return;
     const movements = createNavigationMovements({ Movements, bot: this.client, policy });
-    movements.allow1by1towers = Boolean(policy.allow1by1towers);
+    movements.allow1by1towers = Boolean(policy.allow1by1towers ?? (policy.allowTower && policy.allowScaffolding));
     movements.allowParkour = Boolean(policy.allowParkour);
     movements.allowSprinting = Boolean(policy.allowSprinting);
     movements.allowFreeMotion = Boolean(policy.allowFreeMotion);
@@ -79,8 +79,9 @@ export class MineflayerAdapter extends EventEmitter {
     movements.maxWaterDepth = Number(policy.water?.maxDepth ?? 6);
     movements.maxUnderwaterDurationMs = Number(policy.water?.maxUnderwaterDurationMs ?? 10_000);
     movements.maxDropDown = Math.min(Number(policy.maxDropDown ?? 3), movements.maxDropDown);
-    movements.placeCost = Number(policy.placeCost);
-    movements.scafoldingBlocks = (policy.scaffoldItems ?? []).map(item => this.client.registry?.itemsByName?.[item]?.id).filter(Number.isInteger);
+    const scaffoldItems = policy.scaffoldItems ?? (policy.allowScaffolding ? policy.scaffoldPreference ?? [] : []);
+    movements.scafoldingBlocks = scaffoldItems.map(item => this.client.registry?.itemsByName?.[item]?.id).filter(Number.isInteger);
+    movements.placeCost = Number.isFinite(Number(policy.placeCost)) ? Number(policy.placeCost) : movements.scafoldingBlocks.length ? 1 : Number.POSITIVE_INFINITY;
     configureDoorNavigation(movements, this.client.registry);
     this.client.pathfinder.setMovements(movements);
     if (this.client.collectBlock) this.client.collectBlock.movements = movements;
@@ -91,12 +92,13 @@ export class MineflayerAdapter extends EventEmitter {
   #abort(signal, action) { if (!signal) return () => {}; const handler = () => action(); if (signal.aborted) handler(); else signal.addEventListener('abort', handler, { once: true }); return () => signal.removeEventListener('abort', handler); }
 
   async chat(message) { const bot = this.#ready('chat'); bot.chat(String(message).slice(0, 240)); return { sent: true }; }
-  async navigate(input, context) { return this.navigateTo({ position: { x: input?.x, y: input?.y, z: input?.z }, tolerance: input?.range }, context); }
+  setCommandMovementPolicy(policy) { this.commandMovementPolicy = structuredClone(policy); return { configured: true }; }
+  async navigate(input, context) { return this.navigateTo({ position: { x: input?.x, y: input?.y, z: input?.z }, tolerance: input?.range, movement: input?.movement, policy: input?.policy }, context); }
   async navigateTo(input, context) {
     const position = input?.position; const signal = context?.signal;
     const bot = this.#ready('navigation'); if (!bot.pathfinder) throw new ValidationError('Pathfinder plugin is unavailable');
     for (const value of [position?.x, position?.y, position?.z]) if (!Number.isFinite(Number(value))) throw new ValidationError('Navigation requires numeric x, y, z');
-    this.#applyMovementPolicy(input?.movement ?? input?.policy?.movement ?? { allow1by1towers: false, allowBridge: false, allowParkour: false, allowSprinting: true, allowFreeMotion: false, maxDropDown: 3, placeCost: Number.POSITIVE_INFINITY, scaffoldItems: [], water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: false, allowUnderwaterRoute: false, maxDepth: 6, maxUnderwaterDurationMs: 10_000 } }); const destination = { x: Number(position.x), y: Number(position.y), z: Number(position.z) }; const acceptedRange = boundedDistance(input?.tolerance ?? 1, 0, 64, 'Navigation range'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const goal = new goals.GoalNear(destination.x, destination.y, destination.z, acceptedRange);
+    this.#applyMovementPolicy(input?.movement ?? input?.policy?.movement ?? safeMovementPolicy()); const destination = { x: Number(position.x), y: Number(position.y), z: Number(position.z) }; const acceptedRange = boundedDistance(input?.tolerance ?? 1, 0, 64, 'Navigation range'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const goal = new goals.GoalNear(destination.x, destination.y, destination.z, acceptedRange);
     const cleanupAbort = this.#abort(signal, () => bot.pathfinder.setGoal(null)); const guard = navigationGuard(bot, destination, acceptedRange, 10_000, Boolean((input?.movement?.scaffoldItems ?? []).length), input?.movement ?? input?.policy?.movement);
     try { await Promise.race([bot.pathfinder.goto(goal), guard.promise]); const finalPosition = this.snapshot().position; if (!finalPosition || distance3(finalPosition, destination) > acceptedRange + 1) throw new ValidationError(`Navigation ended outside target range: target ${destination.x},${destination.y},${destination.z}, actual ${formatPosition(finalPosition)}`); return { position: finalPosition }; }
     catch (error) { bot.pathfinder.setGoal(null); throw error; } finally { guard.stop(); cleanupAbort(); this.#applyMovementPolicy(safeMovementPolicy()); }
@@ -117,14 +119,14 @@ export class MineflayerAdapter extends EventEmitter {
     if (type === 'ENTITY') { const entity = Object.values(bot.entities ?? {}).find(value => String(value?.id) === String(target.entityId)); if (!entity?.position) throw new NotFoundError('Entity', target.entityId); return validRecoveryPosition(entity.position); }
     throw new ValidationError(`Unsupported adapter navigation target '${type}'`);
   }
-  async followPlayer({ username, range = 2 }, { signal } = {}) {
+  async followPlayer({ username, range = 2, movement }, { signal } = {}) {
     const bot = this.#ready('follow-player'); const actualName = Object.keys(bot.players ?? {}).find(name => name.toLowerCase() === String(username).toLowerCase()); const entity = bot.players?.[actualName]?.entity;
     if (!entity) throw new ValidationError(`Player '${username}' is not visible`);
     if (!bot.pathfinder) throw new ValidationError('Pathfinder plugin is unavailable');
-    this.#applyMovementPolicy(safeMovementPolicy()); const acceptedRange = boundedDistance(range, 1, 64, 'Follow range'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; bot.pathfinder.setGoal(new goals.GoalFollow(entity, acceptedRange), true);
+    this.#applyMovementPolicy(movement ?? safeMovementPolicy()); const acceptedRange = boundedDistance(range, 1, 64, 'Follow range'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; bot.pathfinder.setGoal(new goals.GoalFollow(entity, acceptedRange), true);
     this.#abort(signal, () => { bot.pathfinder.setGoal(null); this.#applyMovementPolicy(safeMovementPolicy()); }); return { following: actualName, range };
   }
-  async comeToPlayer({ username, range = 1 }, context = {}) { const bot = this.#ready('come'); const actualName = Object.keys(bot.players ?? {}).find(name => name.toLowerCase() === String(username).toLowerCase()); const entity = bot.players?.[actualName]?.entity; if (!entity) throw new ValidationError(`Player '${username}' is not visible`); return this.navigate({ x: entity.position.x, y: entity.position.y, z: entity.position.z, range }, context); }
+  async comeToPlayer({ username, range = 1, movement }, context = {}) { const bot = this.#ready('come'); const actualName = Object.keys(bot.players ?? {}).find(name => name.toLowerCase() === String(username).toLowerCase()); const entity = bot.players?.[actualName]?.entity; if (!entity) throw new ValidationError(`Player '${username}' is not visible`); return this.navigate({ x: entity.position.x, y: entity.position.y, z: entity.position.z, range, movement }, context); }
   async setHome({ name = 'home' } = {}) { const position = this.#ready('set-home').entity.position; const home = { x: position.x, y: position.y, z: position.z, dimension: this.client.game?.dimension }; this.homes.set(name, home); return { name, ...home }; }
   async goHome({ name = 'home', range = 1 } = {}, context = {}) { const home = this.homes.get(name); if (!home) throw new ValidationError(`Home '${name}' has not been set`); if (home.dimension && this.client.game?.dimension !== home.dimension) throw new ValidationError(`Home '${name}' is in ${home.dimension}`); return this.navigate({ ...home, range }, context); }
   async smartMove(input, context = {}) {
@@ -155,7 +157,7 @@ export class MineflayerAdapter extends EventEmitter {
       const dropIds = Array.isArray(block.drops) ? block.drops : [];
       return dropIds.some(dropId => Number(dropId) === itemId || bot.registry.items?.[Number(dropId)]?.name === item || block.name === item);
     });
-    return [...new Set(candidates.map(block => block.name))].sort((left, right) => left.localeCompare(right));
+    return [...new Set(candidates.map(block => block.name))].sort(sourceBlockOrder);
   }
   async survey({ maxDistance }) {
     const bot = this.#ready('survey'); const radius = boundedDistance(maxDistance, 8, 128, 'Survey distance');
@@ -196,29 +198,29 @@ export class MineflayerAdapter extends EventEmitter {
       await furnace.takeOutput(); const outputAfter = inventoryCount(bot, item); if (outputAfter - outputBefore !== amount) throw new ValidationError(`Smelting verification failed for '${item}': inventory delta ${outputAfter - outputBefore}, expected ${amount}`); return { item, input: inputName, count: amount, fuel: selectedFuel, inventory: this.snapshot().inventorySummary };
     } finally { furnace.close(); }
   }
-  async collect({ block, count = 1, maxDistance = 64 }, { signal } = {}) {
+  async collect({ block, count = 1, maxDistance = 64, movement }, { signal } = {}) {
     const bot = this.#ready('collection'); if (!bot.collectBlock) throw new ValidationError('CollectBlock plugin is unavailable');
     const definition = bot.registry?.blocksByName?.[block]; if (!definition) throw new ValidationError(`Unknown block '${block}'`);
     const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1));
     const radius = boundedDistance(maxDistance, 1, 128, 'Collection distance');
-    const positions = bot.findBlocks({ matching: candidate => candidate && candidate.name === block, maxDistance: radius, count: amount });
+    const positions = bot.findBlocks({ matching: candidate => candidate && candidate.name === block, maxDistance: radius, count: Math.min(256, amount * 8) });
     const blocks = positions.map(position => bot.blockAt(position)).filter(Boolean); if (!blocks.length) throw new ValidationError(`No '${block}' found within ${maxDistance} blocks`);
-    this.#applyMovementPolicy(safeMovementPolicy()); const cleanup = this.#abort(signal, () => { void bot.collectBlock.cancelTask(); });
-    try { await bot.collectBlock.collect(blocks); return { block, requested: amount, collectedTargets: blocks.length, inventory: this.snapshot().inventorySummary }; } finally { cleanup(); this.#applyMovementPolicy(safeMovementPolicy()); }
+    this.#applyMovementPolicy(movement ?? this.commandMovementPolicy ?? safeMovementPolicy()); const cleanup = this.#abort(signal, () => { void bot.collectBlock.cancelTask(); }); let collectedTargets = 0; let lastError = null;
+    try { for (const target of blocks) { if (collectedTargets >= amount || signal?.aborted) break; try { await bot.collectBlock.collect(target); collectedTargets++; } catch (error) { lastError = error; } } if (!collectedTargets) throw new ValidationError(`No reachable '${block}' found within ${maxDistance} blocks${lastError ? `: ${lastError.message}` : ''}`); return { block, requested: amount, collectedTargets, inventory: this.snapshot().inventorySummary }; } finally { cleanup(); this.#applyMovementPolicy(safeMovementPolicy()); }
   }
   async #withStorage(position, capability, operation) { const bot = this.#ready(capability); const { Vec3 } = await import('vec3'); const target = new Vec3(Number(position.x), Number(position.y), Number(position.z)); await this.smartMove({ x: target.x, y: target.y, z: target.z, range: 2 }); const block = bot.blockAt(target); if (!block || !isStorageBlock(block.name)) throw new NotFoundError('Storage block', `${target.x},${target.y},${target.z}`); const container = await bot.openContainer(block); try { return await operation(container); } finally { container.close(); } }
-  async farm({ crop = 'wheat', count = 16, maxDistance = 32 } = {}, { signal } = {}) {
-    const bot = this.#ready('farming'); const seedName = CROP_ITEMS[crop]; const age = CROP_AGE[crop]; if (!seedName || !bot.registry.blocksByName?.[crop]) throw new ValidationError(`Unsupported crop '${crop}'`); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1)); let harvested = 0; let planted = 0;
-    const mature = bot.findBlocks({ matching: block => block.name === crop && Number(block.getProperties?.().age ?? -1) >= age, maxDistance, count: amount }).map(position => bot.blockAt(position)).filter(Boolean);
-    if (mature.length) { const cleanup = this.#abort(signal, () => void bot.collectBlock.cancelTask()); try { await bot.collectBlock.collect(mature); harvested = mature.length; } finally { cleanup(); } }
+  async farm({ crop = 'wheat', count = 16, maxDistance = 32, movement } = {}, { signal } = {}) {
+    const bot = this.#ready('farming'); if (!bot.collectBlock) throw new ValidationError('CollectBlock plugin is unavailable'); const seedName = CROP_ITEMS[crop]; const age = CROP_AGE[crop]; if (!seedName || !bot.registry.blocksByName?.[crop]) throw new ValidationError(`Unsupported crop '${crop}'`); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1)); let harvested = 0; let planted = 0; const harvestFailures = [];
+    this.#applyMovementPolicy(movement ?? this.commandMovementPolicy ?? safeMovementPolicy()); const mature = bot.findBlocks({ matching: block => block.name === crop && Number(block.getProperties?.().age ?? -1) >= age, maxDistance, count: amount }).map(position => bot.blockAt(position)).filter(Boolean);
+    if (mature.length) { const cleanup = this.#abort(signal, () => void bot.collectBlock.cancelTask()); try { for (const target of mature) { try { await bot.collectBlock.collect(target); harvested++; } catch (error) { harvestFailures.push({ position: validRecoveryPosition(target.position), error: error.message }); } } } finally { cleanup(); } }
     const farmland = bot.findBlocks({ matching: bot.registry.blocksByName.farmland.id, maxDistance, count: amount * 2 });
     for (const position of farmland) { if (planted >= amount || inventoryCount(bot, seedName) < 1) break; const block = bot.blockAt(position); const above = bot.blockAt(position.offset(0, 1, 0)); if (!block || !isAir(above)) continue; await bot.equip(bot.inventory.items().find(item => item.name === seedName), 'hand'); await bot.placeBlock(block, new (await import('vec3')).Vec3(0, 1, 0)); planted++; }
     if (planted < amount && inventoryCount(bot, seedName) > 0) {
       const hoe = bestItem(bot, item => item.name.endsWith('_hoe')); if (!hoe) throw new ValidationError('Farming requires a hoe to prepare new soil'); const dirt = bot.findBlocks({ matching: block => ['dirt', 'grass_block'].includes(block.name) && isAir(bot.blockAt(block.position.offset(0, 1, 0))), maxDistance, count: amount - planted });
       const { Vec3 } = await import('vec3'); await bot.equip(hoe, 'hand');
-      for (const position of dirt) { if (planted >= amount || inventoryCount(bot, seedName) < 1) break; await this.navigate({ x: position.x, y: position.y, z: position.z, range: 3 }, { signal }); const soil = bot.blockAt(position); await bot.activateBlock(soil, new Vec3(0, 1, 0)); await delay(150); const prepared = bot.blockAt(position); if (prepared?.name !== 'farmland') continue; await bot.equip(bot.inventory.items().find(item => item.name === seedName), 'hand'); await bot.placeBlock(prepared, new Vec3(0, 1, 0)); planted++; await bot.equip(hoe, 'hand'); }
+      for (const position of dirt) { if (planted >= amount || inventoryCount(bot, seedName) < 1) break; await this.navigate({ x: position.x, y: position.y, z: position.z, range: 3, movement }, { signal }); const soil = bot.blockAt(position); await bot.activateBlock(soil, new Vec3(0, 1, 0)); await delay(150); const prepared = bot.blockAt(position); if (prepared?.name !== 'farmland') continue; await bot.equip(bot.inventory.items().find(item => item.name === seedName), 'hand'); await bot.placeBlock(prepared, new Vec3(0, 1, 0)); planted++; await bot.equip(hoe, 'hand'); }
     }
-    return { crop, requested: amount, harvested, planted, inventory: this.snapshot().inventorySummary };
+    if (!harvested && !planted && harvestFailures.length) throw new ValidationError(`No reachable mature '${crop}' crop could be farmed: ${harvestFailures[0].error}`); return { crop, requested: amount, harvested, planted, harvestFailures, inventory: this.snapshot().inventorySummary };
   }
   async farmRequirements({ crop = 'wheat', count = 16, maxDistance = 32 } = {}) {
     const bot = this.#ready('farm-planning'); const seed = CROP_ITEMS[crop]; const age = CROP_AGE[crop]; if (!seed) throw new ValidationError(`Unsupported crop '${crop}'`); const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1)); const mature = bot.findBlocks({ matching: block => block.name === crop && Number(block.getProperties?.().age ?? -1) >= age, maxDistance, count: amount }).length; const emptyFarmland = bot.findBlocks({ matching: block => block.name === 'farmland' && isAir(bot.blockAt(block.position.offset(0, 1, 0))), maxDistance, count: amount }).length;
@@ -464,7 +466,8 @@ function sleepTime(bot) { if (bot.time?.isNight === true) return true; const tim
 async function setOpenableState(adapter, input, open, kind) { const expected = input?.block; if (expected && !isOpenableKind(String(expected), kind)) throw new ValidationError(`Expected block '${expected}' is not a ${kind}`); const client = adapter.client; if (!client || adapter.status !== 'READY') throw new ValidationError(`Cannot use '${kind}' interaction while bot is ${adapter.status}`); const position = validRecoveryPosition(input?.position); const block = client.blockAt(await blockVector(position)); if (!block || !isOpenableKind(block.name, kind)) throw survivalError('BLOCK_NOT_FOUND', `${kind} was not found at ${formatPosition(position)}`, `minecraft.${open ? 'open' : 'close'}-${kind}`, { position, actual: block?.name ?? null }); if (block.name === `iron_${kind}`) throw survivalError('CAPABILITY_UNAVAILABLE', `Iron ${kind}s require a redstone mechanism and cannot be directly activated`, `minecraft.${open ? 'open' : 'close'}-${kind}`, { position, block: block.name }); return adapter.interactBlock({ position, expectedBlock: block.name, action: open ? 'OPEN' : 'CLOSE', cooldownMs: input?.cooldownMs ?? 500 }); }
 function isOpenableKind(name, kind) { return kind === 'door' ? name.endsWith('_door') && !name.endsWith('_trapdoor') : name.endsWith('_trapdoor'); }
 function configureDoorNavigation(movements, registry) { movements.canOpenDoors = true; if (!(movements.openable instanceof Set)) return; for (const block of registry?.blocksArray ?? Object.values(registry?.blocksByName ?? {})) if (block?.name && isOpenableKind(block.name, 'door') && block.name !== 'iron_door' && Number.isInteger(block.id)) movements.openable.add(block.id); }
-function safeMovementPolicy() { return { allow1by1towers: false, allowBridge: false, allowParkour: false, allowSprinting: true, allowFreeMotion: false, maxDropDown: 3, placeCost: Number.POSITIVE_INFINITY, scaffoldItems: [] }; }
+function safeMovementPolicy() { return { allow1by1towers: false, allowBridge: false, allowJump: true, allowParkour: false, allowSprinting: true, allowFreeMotion: false, maxDropDown: 3, placeCost: Number.POSITIVE_INFINITY, scaffoldItems: [], water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: false, allowUnderwaterRoute: false, maxDepth: 6, maxUnderwaterDurationMs: 10_000 } }; }
+function sourceBlockOrder(left, right) { const leftDeepslate = left.startsWith('deepslate_'); const rightDeepslate = right.startsWith('deepslate_'); return Number(leftDeepslate) - Number(rightDeepslate) || left.localeCompare(right); }
 function positiveAmount(value, minimum, maximum, label) { const amount = Number(value); if (!Number.isInteger(amount) || amount < minimum || amount > maximum) throw new ValidationError(`${label} must be an integer between ${minimum} and ${maximum}`); return amount; }
 function nonNegativeAmount(value, minimum, maximum, label) { return positiveAmount(value, minimum, maximum, label); }
 function smeltingCount(value) { const count = Number(value); if (!Number.isInteger(count) || count < 1 || count > 64) throw new ValidationError('Smelting count must be an integer between 1 and 64'); return count; }

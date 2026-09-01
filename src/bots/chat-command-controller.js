@@ -45,7 +45,7 @@ export class ChatCommandController {
       if (command === 'home') { await runtime.adapter.goHome({ name: args[0] ?? 'home' }); return this.#reply(runtime, 'going home'); }
       if (command === 'stop') { await runtime.adapter.stopActions(); for (const task of this.goals.allTasks().filter(task => task.assignedBot === runtime.bot.id && ['ASSIGNED', 'RUNNING'].includes(task.status))) this.executor.cancel(task.id, `Stopped by ${username}`); return this.#reply(runtime, 'running and queued actions stopped'); }
       let step;
-      if (command === 'follow') step = { type: 'follow-player', input: { username: args[0] ?? username }, requiredCapabilities: ['minecraft.follow-player'], timeout: 120_000 };
+      if (command === 'follow') step = { type: 'follow-player', input: { username: args[0] ?? username, movement: this.navigation.policyForBot(runtime.bot.id) }, requiredCapabilities: ['minecraft.follow-player'], timeout: 120_000 };
       else if (command === 'shear') step = { type: 'shear-nearest', input: {}, requiredCapabilities: ['minecraft.shear-nearest'], timeout: 120_000 };
       else if (command === 'milk') step = { type: 'milk-nearest', input: {}, requiredCapabilities: ['minecraft.milk-nearest'], timeout: 120_000 };
       else if (command === 'sleep') step = { type: 'sleep', input: {}, requiredCapabilities: ['minecraft.sleep'], timeout: 120_000 };

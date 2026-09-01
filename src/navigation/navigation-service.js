@@ -63,7 +63,8 @@ export function createNavigationService({ bots, capabilities, events, metrics, r
   const stop = async () => Promise.all([...active.keys()].map(botId => cancel({ botId, reason: 'Application shutdown' })));
   const status = () => ({ status: 'HEALTHY', active: active.size, sessions: [...active.values()].map(sessionView), recent: history.map(sessionView) });
   const statusForBot = botId => { const session = active.get(String(botId)); return session ? sessionView(session) : null; };
-  return Object.freeze({ moveTo, cancel, stop, status, statusForBot, reservations: resourceReservations, scaffoldLedger });
+  const policyForBot = botId => settings.resolve({ botId: String(botId) });
+  return Object.freeze({ moveTo, cancel, stop, status, statusForBot, policyForBot, reservations: resourceReservations, scaffoldLedger });
 }
 
 async function executeMonitoredNavigation({ capabilities, events, runtime, session, target, movement, controller }) {
