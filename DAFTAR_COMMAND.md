@@ -722,6 +722,36 @@ $body = @{
 Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/navigation/group/move" -Headers $headers -ContentType 'application/json' -Body $body
 ```
 
+#### Territory
+
+| Method | Endpoint | Fungsi |
+| --- | --- | --- |
+| `GET` | `/api/v1/territory/map?worldKey=localhost:25565&dimension=overworld` | Ringkasan dan seluruh region pada satu peta world. |
+| `GET` | `/api/v1/territory/regions` | Daftar region; dapat difilter dengan `worldKey`, `dimension`, dan `type`. |
+| `POST` | `/api/v1/territory/regions` | Membuat region baru. |
+| `GET` | `/api/v1/territory/regions/:id` | Membaca satu region. |
+| `PATCH` | `/api/v1/territory/regions/:id` | Memperbarui region dan menaikkan version. |
+| `DELETE` | `/api/v1/territory/regions/:id` | Menghapus region. |
+| `GET` | `/api/v1/territory/at?worldKey=localhost:25565&dimension=overworld&x=0&y=64&z=0` | Mencari region yang mencakup suatu posisi. |
+
+Contoh membuat Resource Zone:
+
+```powershell
+$body = @{
+  worldKey = 'localhost:25565'
+  dimension = 'overworld'
+  name = 'Tambang Besi Utara'
+  type = 'RESOURCE'
+  center = @{ x = 120; y = 20; z = -80 }
+  radius = 32
+  resources = @('iron_ore', 'coal_ore')
+  dangerLevel = 0.25
+  explored = $true
+} | ConvertTo-Json -Depth 4
+
+Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/territory/regions" -Headers $headers -ContentType 'application/json' -Body $body
+```
+
 #### Manual helping
 
 | Method | Endpoint | Fungsi |

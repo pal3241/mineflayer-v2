@@ -44,6 +44,7 @@ import { createCoordinationMonitor, createHelpCommandService, createHelpService 
 import { createSurvivalService } from '../survival/index.js';
 import { createTaskReporter } from '../tasks/task-reporter.js';
 import { createNavigationService, createNavigationSettingsService, createResourceReservationService, createResourceReservationCoordinator } from '../navigation/index.js';
+import { createTerritoryService } from '../territory/index.js';
 
 export class Application {
   constructor(config, overrides = {}) {
@@ -62,6 +63,7 @@ export class Application {
     this._repositoryFactory = name => config.profile === 'test' ? new MemoryRepository() : this.database ? this.database.repository(name) : new JsonRepository(join(resolve(config.dataPath), `${name}.json`));
     const repository = name => this._repositoryFactory(name);
     this.navigationSettings = createNavigationSettingsService({ repository: repository('navigation-settings') });
+    this.territory = createTerritoryService({ repository: repository('territory-regions'), events: this.events });
     this.worldMemory = new WorldMemoryService({ repository: repository('world-memory'), events: this.events, logger: this.logger });
     this.semanticMemory = createSemanticMemory({ repository: repository('semantic-memory'), events: this.events, embeddingProvider: createHashEmbeddingProvider({ dimensions: config.semanticMemory.dimensions, version: '1' }), maxRecords: config.semanticMemory.maxRecords, shortTermMaxRecords: config.semanticMemory.shortTermMaxRecords, shortTermTtlMs: config.semanticMemory.shortTermTtlMs, promotionAccesses: config.semanticMemory.promotionAccesses, promotionImportance: config.semanticMemory.promotionImportance });
     this.memoryLifecycle = createMemoryLifecycle({ memory: this.semanticMemory, logger: this.logger, intervalMs: config.semanticMemory.consolidationIntervalMs ?? 60_000 });
@@ -89,7 +91,7 @@ export class Application {
     this.events.subscribe('task.cancelled', async event => { const reason = event.payload.error?.message ?? 'Parent task cancelled'; if (reason.startsWith(COLLABORATIVE_TAKEOVER_PREFIX)) return; await this.help.cancelForParent(event.payload.id, reason); });
     this.bots.onCreated(runtime => { this.chatCommands.attach(runtime); this.structureObserver.attach(runtime); this.survival.attach(runtime); });
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
-    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, helpCommands: this.helpCommands, coordination: this.coordination, navigation: this.navigation, resourceReservations: this.resourceReservations, resourceReservationCoordinator: this.resourceReservationCoordinator, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
+    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, helpCommands: this.helpCommands, coordination: this.coordination, navigation: this.navigation, territory: this.territory, resourceReservations: this.resourceReservations, resourceReservationCoordinator: this.resourceReservationCoordinator, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
     this.health.register('application', async () => ({ status: ['READY', 'RUNNING'].includes(this.state) ? 'HEALTHY' : 'DEGRADED' }), { critical: true });
     this.health.register('bots', async () => ({ status: this.bots.list().some(bot => ['FAILED', 'DEGRADED'].includes(bot.status)) ? 'DEGRADED' : 'HEALTHY' }));
     this.health.register('database', async () => this.database?.health() ?? { status: 'HEALTHY', driver: config.profile === 'test' ? 'memory' : 'json' }, { critical: true });
@@ -105,6 +107,7 @@ export class Application {
     this.health.register('help', async () => this.help.status());
     this.health.register('coordination', async () => this.coordination.status());
     this.health.register('navigation', async () => { const status = this.navigation.status(); return { status: 'HEALTHY', activeSessions: status.active, failedRecent: status.recent.filter(session => session.status === 'FAILED').length }; });
+    this.health.register('territory', async () => this.territory.status());
     this.health.register('taskQueue', async () => { const tasks = this.executor.status(); const coordinator = this.coordinator.status(); const saturation = Math.max(tasks.saturation, coordinator.saturation); return { status: saturation >= 0.8 ? 'DEGRADED' : 'HEALTHY', saturation, tasks, coordinator: { queuedOperations: coordinator.queuedOperations, maximumDepth: coordinator.maximumDepth, maxQueuePerBot: coordinator.maxQueuePerBot } }; });
   }
 
@@ -171,7 +174,7 @@ export class Application {
     return normalized;
   }
   configureSurvival(input) { return this.survival.configure(input); }
-  status() { return { name: 'MineHive', version: '0.7.4', phase: 'Stuck Recovery & Safe Scaffolding Phase 2', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
+  status() { return { name: 'MineHive', version: '0.8.0', phase: 'Territory Foundation Phase 1', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
 }
 
 function portAvailable(port) {

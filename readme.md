@@ -37,6 +37,11 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
   - Phase 3 — Terrain & Safety Navigation — Implemented
   - Phase 4 — Precision Movement — Implemented
   - Phase 5 — Multi-Bot Navigation — Implemented
-- v0.8.0 — Territory Foundation — Planned
+- v0.8.0 — Autonomous Territory & Expansion
+  - Phase 1 — Territory Map & Region Model — Implemented
+  - Phase 2 — Resource & Danger Intelligence
+  - Phase 3 — Exploration & Scout Assignment
+  - Phase 4 — Expansion Proposal & Deterministic Validation
+  - Phase 5 — Territory Logistics, Defense & Resilience
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Roadmap hanya menampilkan phase yang belum selesai; histori phase yang selesai tersimpan permanen di folder [`updates/`](updates/README.md).
