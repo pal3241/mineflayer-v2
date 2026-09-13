@@ -22,6 +22,7 @@ Folder ini menyimpan histori lengkap setiap release, phase, dan update fitur Min
 - [`v0.7.4 Phase 2 — Stuck Recovery & Safe Scaffolding`](v0.7.4/phase-2-stuck-recovery-safe-scaffolding.md)
 - [`v0.7.4 Phase 1 — Advanced Navigation & Movement: Navigation Foundation`](v0.7.4/phase-1-navigation-foundation.md)
 - [`v0.7.4 Phase 3 — Terrain & Safety Navigation`](v0.7.4/phase-3-terrain-safety-navigation.md)
+- [`v0.7.4 Phase 4 — Precision Movement`](v0.7.4/phase-4-precision-movement.md)
 
 ## Daftar update fitur
 

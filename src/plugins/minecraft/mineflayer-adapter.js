@@ -105,6 +105,18 @@ export class MineflayerAdapter extends EventEmitter {
     catch (error) { bot.pathfinder.setGoal(null); throw error; } finally { guard.stop(); cleanupAbort(); this.#applyMovementPolicy(safeMovementPolicy()); }
   }
   async stopNavigation() { const bot = this.#ready('navigation-stop'); bot.pathfinder?.setGoal(null); return { stopped: true }; }
+  async precisionNavigate({ target, precision, movement }, { signal } = {}) {
+    const bot = this.#ready('navigation-precision'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const tolerance = Number(precision.exactTolerance); let attempts = 0; let lastPosition;
+    this.#applyMovementPolicy({ ...(movement ?? safeMovementPolicy()), allowSprinting: false, allowParkour: false });
+    try {
+      while (attempts++ < precision.maxAttempts) { if (signal?.aborted) throw signal.reason; await bot.pathfinder.goto(new goals.GoalNear(target.x, target.y, target.z, tolerance)); lastPosition = this.snapshot().position; if (lastPosition && distance3(lastPosition, target) <= tolerance) break; }
+      if (!lastPosition || distance3(lastPosition, target) > tolerance) throw new NavigationError('PRECISION_POSITION_FAILED', `Bot did not reach precision tolerance ${tolerance}`, { target, position: lastPosition, attempts });
+      let stableSamples = 0; const required = Math.ceil(precision.stableDurationMs / precision.sampleIntervalMs); let previous = lastPosition;
+      while (stableSamples < required) { await cancellableDelay(precision.sampleIntervalMs, signal); const current = this.snapshot().position; if (!current || distance3(current, target) > tolerance || distance3(current, previous) > 0.08) throw new NavigationError('PRECISION_UNSTABLE', 'Bot moved during precision stabilization', { target, position: current, stableSamples }); previous = current; stableSamples++; }
+      let aligned = false; if (precision.alignFacing && precision.facing && bot.lookAt) { await bot.lookAt(precision.facing, true); aligned = true; }
+      return { position: previous, distance: distance3(previous, target), stableSamples, attempts, aligned, verified: true };
+    } finally { this.#applyMovementPolicy(safeMovementPolicy()); }
+  }
   inspectNavigationTerrain({ position, safety = {} } = {}) {
     const bot = this.#ready('navigation-terrain-scan'); const terrain = inspectTerrainPosition(bot, position, safety); const hazards = [...terrain.hazards];
     if (Number(bot.health ?? 20) < Number(safety.minimumHealth ?? 0)) hazards.push({ type: 'LOW_HEALTH', value: Number(bot.health ?? 0), minimum: Number(safety.minimumHealth) });

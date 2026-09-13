@@ -35,7 +35,7 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
   - Phase 1 — Navigation Foundation — Implemented
   - Phase 2 — Stuck Recovery & Safe Scaffolding — Implemented
   - Phase 3 — Terrain & Safety Navigation — Implemented
-  - Phase 4 — Precision Movement
+  - Phase 4 — Precision Movement — Implemented
   - Phase 5 — Multi-Bot Navigation
 - v0.8.0 — Territory Foundation — Planned
 

@@ -9,6 +9,7 @@ function setup(options) {
     if (name === 'minecraft.navigation-stop') { calls.stopped.push(context.botId); return { stopped: true }; }
     if (name === 'minecraft.navigation-target') return options?.targets?.[input.target.type] ?? { x: 4, y: 64, z: 0 };
     if (name === 'minecraft.navigation-terrain-scan') return options?.terrain?.({ input, context, state, calls }) ?? { position: input.position, hazards: [], fallDistance: 0, safe: true, blockedTypes: [] };
+    if (name === 'minecraft.navigation-precision') { const result = options?.precision?.({ input, context, state, calls }) ?? { position: input.target, distance: 0, stableSamples: 5, attempts: 1, aligned: false, verified: true }; state[context.botId] = { ...result.position }; return result; }
     if (name === 'minecraft.navigation-recovery') return options?.recovery?.({ input, context, state, calls }) ?? { action: input.action, displacement: 1, verified: true };
     if (name === 'minecraft.navigation-pillar') return options?.pillar?.({ input, context, state, calls }) ?? { position: { x: 0, y: 64, z: 0 }, verified: true };
     if (name === 'minecraft.navigation-bridge') return options?.bridge?.({ input, context, state, calls }) ?? { position: { x: 1, y: 63, z: 0 }, verified: true };
@@ -65,6 +66,17 @@ test('navigation rejects an unsafe target before pathfinder starts', async () =>
   context.events.subscribe('navigation.terrain.rejected', event => rejected.push(event.payload));
   await assert.rejects(context.service.moveTo({ botId: 'bot1', target: { x: 4, y: 64, z: 0 }, timeout: 1000, source: 'TASK' }), error => error.code === 'TERRAIN_UNSAFE');
   assert.equal(context.calls.navigation.length, 0); assert.equal(rejected.length, 1); assert.equal(context.metrics.snapshot().counters['navigation.safety.rejected'], 1);
+});
+
+test('PRECISE mode performs a verified stable final approach', async () => {
+  const completed = []; const context = setup({ navigate: async ({ input, context: capabilityContext, state }) => { state[capabilityContext.botId] = { x: input.target.x + 0.8, y: input.target.y, z: input.target.z }; return {}; } }); context.events.subscribe('navigation.precision.completed', event => completed.push(event.payload));
+  const result = await context.service.moveTo({ botId: 'bot1', target: { x: 4, y: 64, z: 0 }, mode: 'PRECISE', timeout: 1000, source: 'TASK' });
+  assert.equal(result.status, 'ARRIVED'); assert.equal(result.distanceRemaining, 0); assert.equal(result.diagnostics.precision.verified, true); assert.equal(completed.length, 1);
+});
+
+test('precision policy rejects unsafe tolerances and invalid facing targets', () => {
+  assert.throws(() => normalizeNavigationPolicy({ mode: 'PRECISE', precision: { exactTolerance: 2 } }), error => error.code === 'INVALID_POLICY');
+  assert.throws(() => normalizeNavigationPolicy({ mode: 'PRECISE', precision: { facing: { x: 1, y: NaN, z: 2 } } }), error => error.code === 'INVALID_POLICY');
 });
 
 test('resource leases protect reserved quantities and prevent concurrent scaffold consumption', () => {
