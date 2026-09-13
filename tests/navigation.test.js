@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../src/core/event-bus.js';
 import { MetricsManager } from '../src/core/health.js';
-import { alternateApproaches, createNavigationService, createResourceReservationService, inspectTerrainPosition, microEscapeAction, normalizeNavigationPolicy } from '../src/navigation/index.js';
+import { alternateApproaches, createNavigationService, createResourceReservationService, inspectTerrainPosition, microEscapeAction, normalizeNavigationPolicy, planFormationTargets } from '../src/navigation/index.js';
 
 function setup(options) {
   const state = { bot1: { x: 0, y: 64, z: 0 }, bot2: { x: 10, y: 64, z: 0 } }; const runtimes = Object.fromEntries(Object.keys(state).map(id => [id, { id, status: options?.statuses?.[id] ?? 'READY', adapter: { snapshot: () => ({ position: { ...state[id] }, inventorySummary: structuredClone(options?.inventory?.[id] ?? []) }) } }])); const calls = { navigation: [], stopped: [] }; const capabilities = { execute: async (name, input, context) => {
@@ -77,6 +77,22 @@ test('PRECISE mode performs a verified stable final approach', async () => {
 test('precision policy rejects unsafe tolerances and invalid facing targets', () => {
   assert.throws(() => normalizeNavigationPolicy({ mode: 'PRECISE', precision: { exactTolerance: 2 } }), error => error.code === 'INVALID_POLICY');
   assert.throws(() => normalizeNavigationPolicy({ mode: 'PRECISE', precision: { facing: { x: 1, y: NaN, z: 2 } } }), error => error.code === 'INVALID_POLICY');
+});
+
+test('formation planner assigns deterministic separated targets', () => {
+  const line = planFormationTargets({ botIds: ['bot1', 'bot2'], anchor: { x: 10, y: 64, z: 10 }, formation: 'LINE', spacing: 2 }); assert.deepEqual(line.targets.map(target => target.position.x), [9, 11]); assert.equal(line.targets[0].position.z, 10);
+  const wedge = planFormationTargets({ botIds: ['a', 'b', 'c'], anchor: { x: 0, y: 64, z: 0 }, formation: 'WEDGE', spacing: 3 }); assert.deepEqual(wedge.targets.map(target => target.position), [{ x: 0, y: 64, z: 0 }, { x: -3, y: 64, z: 3 }, { x: 3, y: 64, z: 3 }]);
+  assert.throws(() => planFormationTargets({ botIds: ['bot1', 'bot1'], anchor: { x: 0, y: 64, z: 0 } }), error => error.code === 'INVALID_GROUP');
+});
+
+test('group navigation moves bots concurrently into formation', async () => {
+  const context = setup(); const events = []; context.events.subscribe('navigation.group.arrived', event => events.push(event.payload)); const group = await context.service.moveGroup({ botIds: ['bot1', 'bot2'], anchor: { x: 5, y: 64, z: 5 }, formation: 'LINE', spacing: 2, timeout: 1000 });
+  assert.equal(group.status, 'ARRIVED'); assert.equal(group.results.length, 2); assert.equal(events.length, 1); assert.equal(context.service.status().recentGroups[0].id, group.id); assert.notDeepEqual(context.state.bot1, context.state.bot2);
+});
+
+test('group navigation cancels peers and reports an atomic group failure', async () => {
+  const context = setup({ navigate: async ({ input, context: capabilityContext, state }) => { if (capabilityContext.botId === 'bot1') throw Object.assign(new Error('route blocked'), { code: 'PATH_NOT_FOUND' }); return new Promise((_resolve, reject) => capabilityContext.signal.addEventListener('abort', () => reject(capabilityContext.signal.reason), { once: true })); } });
+  await assert.rejects(context.service.moveGroup({ botIds: ['bot1', 'bot2'], anchor: { x: 5, y: 64, z: 5 }, timeout: 1000 }), error => error.code === 'GROUP_NAVIGATION_FAILED' && error.details.group.status === 'FAILED'); assert.equal(context.service.status().active, 0); assert.equal(context.service.status().recentGroups[0].results.length, 2);
 });
 
 test('resource leases protect reserved quantities and prevent concurrent scaffold consumption', () => {

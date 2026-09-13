@@ -690,6 +690,7 @@ Gunakan `{"clearOpenRouterKeys":true}` atau `{"clearNvidiaKeys":true}` untuk men
 | `GET` | `/api/v1/navigation/status` | Status NavigationSession aktif dan riwayat runtime terbaru. |
 | `GET` | `/api/v1/navigation/bots/:botId` | Session navigation aktif untuk satu bot, atau `null`. |
 | `POST` | `/api/v1/navigation/move` | Memulai perpindahan terverifikasi. |
+| `POST` | `/api/v1/navigation/group/move` | Memindahkan 2–32 bot secara bersamaan ke formasi `LINE`, `COLUMN`, `WEDGE`, atau `GRID`. |
 | `POST` | `/api/v1/navigation/cancel` | Membatalkan session aktif dengan `botId` atau `sessionId`. |
 
 Contoh request move:
@@ -705,6 +706,20 @@ $body = @{
 } | ConvertTo-Json -Depth 3
 
 Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/navigation/move" -Headers $headers -ContentType 'application/json' -Body $body
+```
+
+Contoh request formasi grup:
+
+```powershell
+$body = @{
+  botIds = @('bot1', 'bot2', 'bot3')
+  anchor = @{ x = 100; y = 64; z = -30 }
+  formation = 'WEDGE'
+  spacing = 3
+  timeout = 120000
+} | ConvertTo-Json -Depth 3
+
+Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/navigation/group/move" -Headers $headers -ContentType 'application/json' -Body $body
 ```
 
 #### Manual helping

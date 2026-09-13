@@ -36,7 +36,7 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
   - Phase 2 — Stuck Recovery & Safe Scaffolding — Implemented
   - Phase 3 — Terrain & Safety Navigation — Implemented
   - Phase 4 — Precision Movement — Implemented
-  - Phase 5 — Multi-Bot Navigation
+  - Phase 5 — Multi-Bot Navigation — Implemented
 - v0.8.0 — Territory Foundation — Planned
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Roadmap hanya menampilkan phase yang belum selesai; histori phase yang selesai tersimpan permanen di folder [`updates/`](updates/README.md).

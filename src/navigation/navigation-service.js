@@ -8,10 +8,12 @@ import { createMovementPolicy } from './movement-policy-factory.js';
 import { createResourceReservationService } from './resource-reservation-service.js';
 import { createScaffoldLedger } from './scaffold-ledger.js';
 import { alternateApproaches, microEscapeAction } from './recovery-strategy.js';
+import { planFormationTargets } from './formation-planner.js';
+import { randomUUID } from 'node:crypto';
 
 export function createNavigationService({ bots, capabilities, events, metrics, reservations, settings }) {
   if (!bots || !capabilities || !metrics) throw new NavigationError('NAVIGATION_CONFIGURATION_INVALID', 'Navigation service requires bots, capabilities, and metrics', {});
-  const active = new Map(); const controllers = new Map(); const history = []; const resourceReservations = reservations ?? createResourceReservationService(); const scaffoldLedger = createScaffoldLedger();
+  const active = new Map(); const controllers = new Map(); const history = []; const groups = new Map(); const groupHistory = []; const resourceReservations = reservations ?? createResourceReservationService(); const scaffoldLedger = createScaffoldLedger();
   const moveTo = async input => {
     input = { ...input, policy: { ...(settings?.resolve({ botId: input?.botId }) ?? {}), ...(input?.policy ?? {}) } };
     const request = normalizeNavigationRequest(input); const runtime = resolveRuntime(bots, request.botId); ensureReady(runtime, request.botId); if (active.has(request.botId)) throw new NavigationError('NAVIGATION_BUSY', `Bot '${request.botId}' already has active navigation '${active.get(request.botId).id}'`, { botId: request.botId, sessionId: active.get(request.botId).id });
@@ -63,11 +65,17 @@ export function createNavigationService({ bots, capabilities, events, metrics, r
     } finally { clearTimeout(timer); unlink(); const leaseId = session.diagnostics?.scaffold?.leaseId; if (leaseId) resourceReservations.release({ leaseId }); controllers.delete(session.id); if (active.get(request.botId)?.id === session.id) active.delete(request.botId); remember(history, session); }
   };
   const cancel = async input => { const session = findSession(active, input); const controller = controllers.get(session.id); if (!controller) throw new NavigationError('NAVIGATION_NOT_ACTIVE', `Navigation '${session.id}' is not active`, { sessionId: session.id }); const reason = String(input.reason ?? 'Navigation cancelled').trim() || 'Navigation cancelled'; controller.abort(new NavigationError('NAVIGATION_CANCELLED', reason, { botId: session.botId, sessionId: session.id })); await stopNavigation(capabilities, session.botId); return sessionView(active.get(session.botId) ?? session); };
+  const moveGroup = async input => {
+    const plan = planFormationTargets({ botIds: input?.botIds, anchor: input?.anchor, formation: input?.formation, spacing: input?.spacing }); for (const target of plan.targets) if (active.has(target.botId)) throw new NavigationError('NAVIGATION_BUSY', `Bot '${target.botId}' is already navigating`, { botId: target.botId });
+    const id = `GROUP-${randomUUID()}`; const startedAt = new Date().toISOString(); const controller = new AbortController(); let group = { id, status: 'MOVING', ...plan, startedAt, finishedAt: null, results: [], failure: null }; groups.set(id, group); metrics.increment('navigation.groups.requests'); await events?.publish('navigation.group.started', structuredClone(group), { source: 'navigation', correlationId: id });
+    const operations = plan.targets.map(target => moveTo({ botId: target.botId, target: target.position, mode: input.mode ?? 'SAFE', policy: input.policy, timeout: input.timeout, source: 'GROUP', signal: controller.signal }).catch(error => { if (!controller.signal.aborted) controller.abort(new NavigationError('GROUP_NAVIGATION_CANCELLED', `Group '${id}' cancelled after '${target.botId}' failed`, { groupId: id, failedBotId: target.botId })); throw error; }));
+    const settled = await Promise.allSettled(operations); const failure = settled.find(result => result.status === 'rejected'); group = { ...group, status: failure ? 'FAILED' : 'ARRIVED', finishedAt: new Date().toISOString(), results: settled.map((result, index) => result.status === 'fulfilled' ? { botId: plan.targets[index].botId, status: 'ARRIVED', result: result.value } : { botId: plan.targets[index].botId, status: 'FAILED', error: { code: result.reason.code ?? 'NAVIGATION_FAILED', message: result.reason.message } }), failure: failure ? { code: failure.reason.code ?? 'GROUP_NAVIGATION_FAILED', message: failure.reason.message } : null }; groups.delete(id); remember(groupHistory, group); metrics.increment(failure ? 'navigation.groups.failed' : 'navigation.groups.success'); await events?.publish(failure ? 'navigation.group.failed' : 'navigation.group.arrived', structuredClone(group), { source: 'navigation', correlationId: id }); if (failure) throw new NavigationError('GROUP_NAVIGATION_FAILED', `Group '${id}' did not arrive`, { group }); return structuredClone(group);
+  };
   const stop = async () => Promise.all([...active.keys()].map(botId => cancel({ botId, reason: 'Application shutdown' })));
-  const status = () => ({ status: 'HEALTHY', active: active.size, sessions: [...active.values()].map(sessionView), recent: history.map(sessionView) });
+  const status = () => ({ status: 'HEALTHY', active: active.size, sessions: [...active.values()].map(sessionView), recent: history.map(sessionView), activeGroups: [...groups.values()].map(value => structuredClone(value)), recentGroups: groupHistory.map(value => structuredClone(value)) });
   const statusForBot = botId => { const session = active.get(String(botId)); return session ? sessionView(session) : null; };
   const policyForBot = botId => settings.resolve({ botId: String(botId) });
-  return Object.freeze({ moveTo, cancel, stop, status, statusForBot, policyForBot, reservations: resourceReservations, scaffoldLedger });
+  return Object.freeze({ moveTo, moveGroup, cancel, stop, status, statusForBot, policyForBot, reservations: resourceReservations, scaffoldLedger });
 }
 
 async function executeMonitoredNavigation({ capabilities, events, runtime, session, target, movement, controller }) {

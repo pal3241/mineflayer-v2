@@ -3,7 +3,7 @@ import { NavigationError } from './navigation-error.js';
 import { normalizeNavigationPolicy } from './navigation-policy.js';
 import { normalizeNavigationTarget } from './navigation-target.js';
 
-const SOURCES = new Set(['CHAT_COMMAND', 'TASK', 'HELPING', 'ACQUISITION', 'LOGISTICS', 'RECOVERY', 'AUTONOMY', 'SYSTEM']);
+const SOURCES = new Set(['CHAT_COMMAND', 'TASK', 'HELPING', 'ACQUISITION', 'LOGISTICS', 'RECOVERY', 'AUTONOMY', 'GROUP', 'SYSTEM']);
 
 export function normalizeNavigationRequest(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new NavigationError('INVALID_REQUEST', 'Navigation request must be an object', { input });

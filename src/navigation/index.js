@@ -11,3 +11,4 @@ export { createResourceReservationCoordinator } from './resource-reservation-coo
 export { microEscapeAction, alternateApproaches } from './recovery-strategy.js';
 export { createNavigationSettingsService } from './navigation-settings-service.js';
 export { inspectTerrainPosition, enabledAvoidances } from './terrain-safety.js';
+export { planFormationTargets } from './formation-planner.js';
