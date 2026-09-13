@@ -44,7 +44,7 @@ import { createCoordinationMonitor, createHelpCommandService, createHelpService 
 import { createSurvivalService } from '../survival/index.js';
 import { createTaskReporter } from '../tasks/task-reporter.js';
 import { createNavigationService, createNavigationSettingsService, createResourceReservationService, createResourceReservationCoordinator } from '../navigation/index.js';
-import { createTerritoryIntelligenceService, createTerritoryService } from '../territory/index.js';
+import { createExplorationService, createTerritoryIntelligenceService, createTerritoryService } from '../territory/index.js';
 
 export class Application {
   constructor(config, overrides = {}) {
@@ -84,6 +84,7 @@ export class Application {
     this.autonomy = createAutonomyService({ repository: repository('autonomy-objectives'), coordinator: this.coordinator, hive: this.hive, bots: this.bots, health: this.health, events: this.events, logger: this.logger, enabled: config.autonomy.enabled, intervalMs: config.autonomy.intervalMs, maxActionsPerHour: config.autonomy.maxActionsPerHour });
     registerMinecraftCapabilities(this.capabilities, this.bots, this.survival);
     this.resourceReservationCoordinator = createResourceReservationCoordinator({ events: this.events, bots: this.bots, reservations: this.resourceReservations }); this.navigation = createNavigationService({ bots: this.bots, capabilities: this.capabilities, events: this.events, metrics: this.metrics, reservations: this.resourceReservations, settings: this.navigationSettings });
+    this.exploration = createExplorationService({ repository: repository('exploration-missions'), territory: this.territory, bots: this.bots, navigation: this.navigation, discovery: this.discovery, events: this.events });
     this.admins = new AdminManager({ repository: repository('admins'), bootstrap: [...(config.commands?.admins ?? [])], target: config.commands?.admins ?? [] });
     this.botProfiles = new BotProfileManager({ repository: repository('bots'), botManager: this.bots });
     this.chatCommands = new ChatCommandController({ goalService: this.goals, executor: this.executor, capabilities: this.capabilities, coordinator: this.coordinator, helpCommands: this.helpCommands, navigation: this.navigation, config: config.commands ?? { enabled: false, admins: [] }, logger: this.logger });
@@ -94,7 +95,7 @@ export class Application {
     this.events.subscribe('logistics.recovery.death.recorded', event => this.territoryIntelligence.ingestDeath(event.payload));
     this.bots.onCreated(runtime => { this.chatCommands.attach(runtime); this.structureObserver.attach(runtime); this.survival.attach(runtime); });
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
-    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, helpCommands: this.helpCommands, coordination: this.coordination, navigation: this.navigation, territory: this.territory, territoryIntelligence: this.territoryIntelligence, resourceReservations: this.resourceReservations, resourceReservationCoordinator: this.resourceReservationCoordinator, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
+    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, helpCommands: this.helpCommands, coordination: this.coordination, navigation: this.navigation, territory: this.territory, territoryIntelligence: this.territoryIntelligence, exploration: this.exploration, resourceReservations: this.resourceReservations, resourceReservationCoordinator: this.resourceReservationCoordinator, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
     this.health.register('application', async () => ({ status: ['READY', 'RUNNING'].includes(this.state) ? 'HEALTHY' : 'DEGRADED' }), { critical: true });
     this.health.register('bots', async () => ({ status: this.bots.list().some(bot => ['FAILED', 'DEGRADED'].includes(bot.status)) ? 'DEGRADED' : 'HEALTHY' }));
     this.health.register('database', async () => this.database?.health() ?? { status: 'HEALTHY', driver: config.profile === 'test' ? 'memory' : 'json' }, { critical: true });
@@ -112,6 +113,7 @@ export class Application {
     this.health.register('navigation', async () => { const status = this.navigation.status(); return { status: 'HEALTHY', activeSessions: status.active, failedRecent: status.recent.filter(session => session.status === 'FAILED').length }; });
     this.health.register('territory', async () => this.territory.status());
     this.health.register('territoryIntelligence', async () => this.territoryIntelligence.status());
+    this.health.register('exploration', async () => this.exploration.status());
     this.health.register('taskQueue', async () => { const tasks = this.executor.status(); const coordinator = this.coordinator.status(); const saturation = Math.max(tasks.saturation, coordinator.saturation); return { status: saturation >= 0.8 ? 'DEGRADED' : 'HEALTHY', saturation, tasks, coordinator: { queuedOperations: coordinator.queuedOperations, maximumDepth: coordinator.maximumDepth, maxQueuePerBot: coordinator.maxQueuePerBot } }; });
   }
 
@@ -119,7 +121,7 @@ export class Application {
   async initialize() {
     if (this.state !== 'CREATED') return;
     this.state = 'BOOTSTRAPPING'; this.logger.info('application.bootstrapping'); this.state = 'INITIALIZING';
-    await this.admins.initialize(); this.restoredProfiles = await this.botProfiles.initialize(); await this.navigationSettings.initialize(); await this.acquisition.initialize(); await this.help.initialize();
+    await this.admins.initialize(); this.restoredProfiles = await this.botProfiles.initialize(); await this.navigationSettings.initialize(); await this.acquisition.initialize(); await this.help.initialize(); await this.exploration.initialize();
     await this.modules.run('initialize', this.context()); await this.plugins.run('initialize', this.context()); this.state = 'READY';
     await this.events.publish('application.ready', {}, { source: 'application' });
   }
@@ -178,7 +180,7 @@ export class Application {
     return normalized;
   }
   configureSurvival(input) { return this.survival.configure(input); }
-  status() { return { name: 'MineHive', version: '0.8.0', phase: 'Resource & Danger Intelligence Phase 2', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
+  status() { return { name: 'MineHive', version: '0.8.0', phase: 'Exploration & Scout Assignment Phase 3', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
 }
 
 function portAvailable(port) {

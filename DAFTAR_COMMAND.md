@@ -737,6 +737,13 @@ Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/navigation/group/move" -Hea
 | `GET` | `/api/v1/territory/signals` | Riwayat signal; dapat difilter dengan `worldKey`, `dimension`, dan `kind`. |
 | `POST` | `/api/v1/territory/signals/resource` | Mencatat resource evidence manual atau dari integrasi eksternal. |
 | `POST` | `/api/v1/territory/signals/danger` | Mencatat danger evidence manual atau dari integrasi eksternal. |
+| `POST` | `/api/v1/territory/frontiers/seed` | Membuat Frontier di delapan arah dari origin. |
+| `GET` | `/api/v1/exploration/status` | Status dan jumlah ExplorationMission. |
+| `GET` | `/api/v1/exploration/missions` | Daftar mission; dapat difilter dengan `status` atau `botId`. |
+| `POST` | `/api/v1/exploration/missions` | Merencanakan Frontier dan menetapkan scout terbaik. |
+| `GET` | `/api/v1/exploration/missions/:id` | Detail satu exploration mission. |
+| `POST` | `/api/v1/exploration/missions/:id/execute` | Menjalankan navigation dan survey mission. |
+| `POST` | `/api/v1/exploration/missions/:id/cancel` | Membatalkan mission aktif. |
 
 Contoh membuat Resource Zone:
 
