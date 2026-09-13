@@ -32,8 +32,9 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 - [v0.7.2 — Universal Automatic Item Acquisition](updates/0.7.2-universal-automatic-item-acquisition.md) — Implemented
 - v0.7.3 — Helping — Implemented
 - v0.7.4 — Advanced Navigation & Movement
-  - Phase 2 — Stuck Recovery & Safe Scaffolding
-  - Phase 3 — Terrain & Safety Navigation
+  - Phase 1 — Navigation Foundation — Implemented
+  - Phase 2 — Stuck Recovery & Safe Scaffolding — Implemented
+  - Phase 3 — Terrain & Safety Navigation — Implemented
   - Phase 4 — Precision Movement
   - Phase 5 — Multi-Bot Navigation
 - v0.8.0 — Territory Foundation — Planned

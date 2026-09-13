@@ -1,4 +1,5 @@
 import { NavigationError } from './navigation-error.js';
+import { inspectTerrainPosition } from './terrain-safety.js';
 
 export function createNavigationMovements({ Movements, bot, policy }) {
   if (typeof Movements !== 'function') throw new NavigationError('MOVEMENTS_UNAVAILABLE', 'Pathfinder Movements constructor is unavailable', {});
@@ -20,6 +21,8 @@ export function createNavigationMovements({ Movements, bot, policy }) {
       this.allowUnderwaterRoute = Boolean(this.waterPolicy.allowUnderwaterRoute);
       this.maxWaterDepth = Number(this.waterPolicy.maxDepth ?? 6);
       this.maxUnderwaterDurationMs = Number(this.waterPolicy.maxUnderwaterDurationMs ?? 10_000);
+      this.safetyPolicy = structuredClone(normalizedPolicy.safety ?? { enabled: false });
+      if (this.safetyPolicy.enabled !== false && this.safetyPolicy.avoidHostileMobs !== false && this.entitiesToAvoid?.add) for (const name of HOSTILE_MOBS) this.entitiesToAvoid.add(name);
     }
 
     getMoveDiagonal(node, dir, neighbors) {
@@ -88,6 +91,8 @@ export function createNavigationMovements({ Movements, bot, policy }) {
       const targetIsWater = isWater(target);
       const targetIsOpenWater = targetIsWater && targetWaterDepth >= 1;
 
+      if (this.safetyPolicy.enabled !== false && !inspectTerrainPosition(this.bot, target.position ?? { x: node.x + dir.x, y: node.y + dy, z: node.z + (dir.z ?? dz) }, this.safetyPolicy).safe) return false;
+
       if ((currentSubmerged || isWater(head)) && !routePolicy.allowSwimming) return false;
       if (targetIsWater && !routePolicy.allowEnterWater) return false;
       if (targetWaterDepth > this.maxWaterDepth) return false;
@@ -112,6 +117,8 @@ const diagonalDirections = Object.freeze([
   { x: 1, z: -1 },
   { x: 1, z: 1 }
 ]);
+
+const HOSTILE_MOBS = Object.freeze(['zombie', 'husk', 'drowned', 'skeleton', 'stray', 'creeper', 'spider', 'cave_spider', 'witch', 'pillager', 'vindicator', 'evoker', 'ravager', 'warden', 'blaze', 'ghast', 'magma_cube', 'slime', 'hoglin', 'zoglin', 'piglin_brute', 'enderman', 'endermite', 'silverfish', 'phantom', 'guardian', 'elder_guardian', 'shulker', 'vex']);
 
 function trimAscendingMoves(neighbors, before, startY) {
   const added = neighbors.splice(before);

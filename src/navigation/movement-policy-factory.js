@@ -12,6 +12,7 @@ export function createMovementPolicy({ policy, lease }) {
     allowFreeMotion: Boolean(policy.allowFreeMotion),
     maxDropDown: policy.maxDropDown,
     water: structuredClone(policy.water),
+    safety: structuredClone(policy.safety),
     placeCost: policy.allowPlace && lease ? 1 : Number.POSITIVE_INFINITY,
     scaffoldItems,
     scaffoldLeaseId: lease?.id ?? null

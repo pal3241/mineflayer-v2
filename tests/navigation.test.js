@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../src/core/event-bus.js';
 import { MetricsManager } from '../src/core/health.js';
-import { alternateApproaches, createNavigationService, createResourceReservationService, microEscapeAction, normalizeNavigationPolicy } from '../src/navigation/index.js';
+import { alternateApproaches, createNavigationService, createResourceReservationService, inspectTerrainPosition, microEscapeAction, normalizeNavigationPolicy } from '../src/navigation/index.js';
 
 function setup(options) {
   const state = { bot1: { x: 0, y: 64, z: 0 }, bot2: { x: 10, y: 64, z: 0 } }; const runtimes = Object.fromEntries(Object.keys(state).map(id => [id, { id, status: options?.statuses?.[id] ?? 'READY', adapter: { snapshot: () => ({ position: { ...state[id] }, inventorySummary: structuredClone(options?.inventory?.[id] ?? []) }) } }])); const calls = { navigation: [], stopped: [] }; const capabilities = { execute: async (name, input, context) => {
     if (name === 'minecraft.navigation-stop') { calls.stopped.push(context.botId); return { stopped: true }; }
     if (name === 'minecraft.navigation-target') return options?.targets?.[input.target.type] ?? { x: 4, y: 64, z: 0 };
+    if (name === 'minecraft.navigation-terrain-scan') return options?.terrain?.({ input, context, state, calls }) ?? { position: input.position, hazards: [], fallDistance: 0, safe: true, blockedTypes: [] };
     if (name === 'minecraft.navigation-recovery') return options?.recovery?.({ input, context, state, calls }) ?? { action: input.action, displacement: 1, verified: true };
     if (name === 'minecraft.navigation-pillar') return options?.pillar?.({ input, context, state, calls }) ?? { position: { x: 0, y: 64, z: 0 }, verified: true };
     if (name === 'minecraft.navigation-bridge') return options?.bridge?.({ input, context, state, calls }) ?? { position: { x: 1, y: 63, z: 0 }, verified: true };
@@ -42,6 +43,28 @@ test('navigation rejects invalid targets, unavailable bots, and pathfinder failu
 test('navigation policy keeps scaffolding, towering, and bridging opt-in', () => {
   const safe = normalizeNavigationPolicy({ mode: 'SAFE' }); assert.equal(safe.allowPlace, false); assert.equal(safe.allowTower, false); assert.equal(safe.allowBridge, false); awaitInvalidPolicy();
   function awaitInvalidPolicy() { assert.throws(() => normalizeNavigationPolicy({ mode: 'SAFE', allowTower: true }), error => error.code === 'INVALID_POLICY'); }
+});
+
+test('Phase 3 safety policy enables conservative terrain limits by default', () => {
+  const policy = normalizeNavigationPolicy({ mode: 'SAFE' });
+  assert.equal(policy.safety.enabled, true); assert.equal(policy.safety.avoidLava, true); assert.equal(policy.safety.avoidHostileMobs, true); assert.equal(policy.safety.maxFallDistance, policy.maxDropDown);
+  assert.throws(() => normalizeNavigationPolicy({ safety: { minimumHealth: 21 } }), error => error.code === 'INVALID_POLICY');
+});
+
+test('terrain inspection classifies direct hazards and unsafe falls', () => {
+  const blocks = new Map([['1,64,0', 'lava'], ['0,63,0', 'stone']]);
+  const bot = { blockAt: position => ({ name: blocks.get(`${position.x},${position.y},${position.z}`) ?? 'air' }) };
+  const lava = inspectTerrainPosition(bot, { x: 0, y: 64, z: 0 }, { avoidLava: true, maxFallDistance: 3 });
+  assert.equal(lava.safe, false); assert.ok(lava.hazards.some(hazard => hazard.type === 'LAVA'));
+  const voidReport = inspectTerrainPosition(bot, { x: 5, y: 64, z: 0 }, { maxFallDistance: 2 });
+  assert.equal(voidReport.safe, false); assert.ok(voidReport.hazards.some(hazard => hazard.type === 'FALL'));
+});
+
+test('navigation rejects an unsafe target before pathfinder starts', async () => {
+  const context = setup({ terrain: ({ input }) => ({ position: input.position, hazards: [{ type: 'LAVA', location: 'FEET' }], safe: false, blockedTypes: ['LAVA'] }) }); const rejected = [];
+  context.events.subscribe('navigation.terrain.rejected', event => rejected.push(event.payload));
+  await assert.rejects(context.service.moveTo({ botId: 'bot1', target: { x: 4, y: 64, z: 0 }, timeout: 1000, source: 'TASK' }), error => error.code === 'TERRAIN_UNSAFE');
+  assert.equal(context.calls.navigation.length, 0); assert.equal(rejected.length, 1); assert.equal(context.metrics.snapshot().counters['navigation.safety.rejected'], 1);
 });
 
 test('resource leases protect reserved quantities and prevent concurrent scaffold consumption', () => {
