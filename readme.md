@@ -34,7 +34,7 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 - v0.7.4 — Advanced Navigation & Movement
 - v0.8.0 — Autonomous Territory & Expansion
   - Phase 1 — Territory Map & Region Model — Implemented
-  - Phase 2 — Resource & Danger Intelligence
+  - Phase 2 — Resource & Danger Intelligence — Implemented
   - Phase 3 — Exploration & Scout Assignment
   - Phase 4 — Expansion Proposal & Deterministic Validation
   - Phase 5 — Territory Logistics, Defense & Resilience

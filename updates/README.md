@@ -25,6 +25,7 @@ Folder ini menyimpan histori lengkap setiap release, phase, dan update fitur Min
 - [`v0.7.4 Phase 4 — Precision Movement`](v0.7.4/phase-4-precision-movement.md)
 - [`v0.7.4 Phase 5 — Multi-Bot Navigation`](v0.7.4/phase-5-multi-bot-navigation.md)
 - [`v0.8.0 Phase 1 — Territory Map & Region Model`](v0.8.0/phase-1-territory-map-region-model.md)
+- [`v0.8.0 Phase 2 — Resource & Danger Intelligence`](v0.8.0/phase-2-resource-danger-intelligence.md)
 
 ## Daftar update fitur
 
