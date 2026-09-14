@@ -44,9 +44,17 @@ export class ChatCommandController {
       if (command === 'sethome') { const result = await runtime.adapter.setHome({ name: args[0] ?? 'home' }); return this.#reply(runtime, `home ${result.name} saved`); }
       if (command === 'home') { await runtime.adapter.goHome({ name: args[0] ?? 'home' }); return this.#reply(runtime, 'going home'); }
       if (command === 'stop') { await runtime.adapter.stopActions(); for (const task of this.goals.allTasks().filter(task => task.assignedBot === runtime.bot.id && ['ASSIGNED', 'RUNNING'].includes(task.status))) this.executor.cancel(task.id, `Stopped by ${username}`); return this.#reply(runtime, 'running and queued actions stopped'); }
+      // Following is intentionally long-running.  A goal step finishes as soon as
+      // GoalFollow is installed, which made the dashboard/chat report a completed
+      // task while the bot was only beginning to follow.  Start it directly and
+      // keep it active until the normal `stop` command clears pathfinder.
+      if (command === 'follow') {
+        const player = args[0] ?? username;
+        await runtime.adapter.followPlayer({ username: player, range: 2, movement: this.navigation.policyForBot(runtime.bot.id) });
+        return this.#reply(runtime, `following ${player}; use !${alias} stop to stop`);
+      }
       let step;
-      if (command === 'follow') step = { type: 'follow-player', input: { username: args[0] ?? username, movement: this.navigation.policyForBot(runtime.bot.id) }, requiredCapabilities: ['minecraft.follow-player'], timeout: 120_000 };
-      else if (command === 'shear') step = { type: 'shear-nearest', input: {}, requiredCapabilities: ['minecraft.shear-nearest'], timeout: 120_000 };
+      if (command === 'shear') step = { type: 'shear-nearest', input: {}, requiredCapabilities: ['minecraft.shear-nearest'], timeout: 120_000 };
       else if (command === 'milk') step = { type: 'milk-nearest', input: {}, requiredCapabilities: ['minecraft.milk-nearest'], timeout: 120_000 };
       else if (command === 'sleep') step = { type: 'sleep', input: {}, requiredCapabilities: ['minecraft.sleep'], timeout: 120_000 };
       else {
