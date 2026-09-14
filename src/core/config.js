@@ -7,7 +7,7 @@ export function loadConfig(env = process.env) {
   const profile = env.MINEHIVE_PROFILE ?? 'development';
   const memoryMaxRecords = integer(env.MINEHIVE_MEMORY_MAX_RECORDS, 10_000);
   const openRouterKeys = providerKeys([env.OPENROUTER_API_KEY_1, env.OPENROUTER_API_KEY_2, env.OPENROUTER_API_KEY_3, env.OPENROUTER_API_KEY], 'OpenRouter'); const nvidiaKeys = providerKeys([env.NVIDIA_API_KEY_1, env.NVIDIA_API_KEY_2, env.NVIDIA_API_KEY_3, env.NVIDIA_API_KEY, env.MINEHIVE_LOCAL_LLM_API_KEY], 'NVIDIA NIM');
-  const nvidiaEndpoint = env.MINEHIVE_NVIDIA_NIM_ENDPOINT ?? env.MINEHIVE_LOCAL_LLM_ENDPOINT ?? 'https://integrate.api.nvidia.com/v1'; const nvidiaModel = env.MINEHIVE_NVIDIA_NIM_MODEL ?? env.MINEHIVE_LOCAL_LLM_MODEL ?? 'nvidia/nvidia-nemotron-nano-9b-v2'; const nvidiaConfigured = nvidiaKeys.length > 0 || Boolean((env.MINEHIVE_NVIDIA_NIM_ENDPOINT ?? env.MINEHIVE_LOCAL_LLM_ENDPOINT) && (env.MINEHIVE_NVIDIA_NIM_MODEL ?? env.MINEHIVE_LOCAL_LLM_MODEL));
+  const nvidiaEndpoint = env.MINEHIVE_NVIDIA_NIM_ENDPOINT ?? env.MINEHIVE_LOCAL_LLM_ENDPOINT ?? 'https://integrate.api.nvidia.com/v1'; const nvidiaModel = env.MINEHIVE_NVIDIA_NIM_MODEL ?? env.MINEHIVE_LOCAL_LLM_MODEL ?? 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning'; const nvidiaConfigured = nvidiaKeys.length > 0 || Boolean((env.MINEHIVE_NVIDIA_NIM_ENDPOINT ?? env.MINEHIVE_LOCAL_LLM_ENDPOINT) && (env.MINEHIVE_NVIDIA_NIM_MODEL ?? env.MINEHIVE_LOCAL_LLM_MODEL));
   const config = {
     profile,
     log: { level: env.MINEHIVE_LOG_LEVEL ?? 'info', directory: env.MINEHIVE_LOG_DIRECTORY, maxFiles: 3 },
