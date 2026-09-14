@@ -17,7 +17,7 @@ export class BotRuntime {
       STOPPING: { on: { STOPPED: 'OFFLINE', FAIL: 'FAILED' } }, OFFLINE: { on: { START: 'CONNECTING' } }
     }});
     adapter.on('login', () => this.#enqueueTransition('CONNECTED'));
-    adapter.on('spawn', () => { this.reconnectAttempts = 0; this.#enqueueTransition('READY'); });
+    adapter.on('spawn', () => { this.reconnectAttempts = 0; void this.#enqueueTransition('READY').then(() => this.eventBus?.publish('bot.ready', { botId: this.bot.id, runtime: this.snapshot() }, { source: `bot:${this.bot.id}`, correlationId: this.bot.id })); });
     adapter.on('error', error => this.#fail(error));
     adapter.on('pluginError', failure => this.#fail(new Error(`Plugin '${failure.plugin}' failed: ${failure.error.message}`, { cause: failure.error })));
     adapter.on('combatError', error => this.#fail(error));
