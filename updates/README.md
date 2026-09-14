@@ -32,6 +32,7 @@ Folder ini menyimpan histori lengkap setiap release, phase, dan update fitur Min
 - [`v0.9.0 Phase 1 — Short & Long-Term Memory Hardening`](v0.9.0/phase-1-short-long-memory-hardening.md)
 - [`v0.9.0 Phase 2 — Working Memory`](v0.9.0/phase-2-working-memory.md)
 - [`v0.9.0 Phase 3 — Episodic Memory`](v0.9.0/phase-3-episodic-memory.md)
+- [`v0.9.0 Phase 4 — Procedural & Strategic Knowledge`](v0.9.0/phase-4-procedural-strategic-knowledge.md)
 
 ## Daftar update fitur
 

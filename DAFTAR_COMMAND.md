@@ -825,6 +825,12 @@ Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/territory/regions" -Headers
 | `GET` | `/api/v1/memory/episodic` | Mencari pengalaman berdasarkan teks, bot, world, dimension, tipe, outcome, dan limit. |
 | `POST` | `/api/v1/memory/episodic` | Menyimpan episode atau observasi terstruktur secara manual. |
 | `GET` | `/api/v1/memory/episodic/:id` | Membaca satu episode lengkap beserta lesson dan evidence. |
+| `GET` | `/api/v1/memory/knowledge` | Mencari procedure/strategy berdasarkan teks, intent, status, dan scope. |
+| `POST` | `/api/v1/memory/knowledge` | Menyimpan procedure atau strategy terversi. |
+| `GET` | `/api/v1/memory/knowledge/:id` | Membaca satu knowledge record. |
+| `PATCH` | `/api/v1/memory/knowledge/:id` | Merevisi knowledge dengan optimistic `expectedVersion`. |
+| `POST` | `/api/v1/memory/knowledge/:id/feedback` | Memperbarui confidence menggunakan outcome terverifikasi. |
+| `POST` | `/api/v1/memory/knowledge/synthesize` | Membentuk strategi deterministik dari episode suatu action. |
 | `POST` | `/api/v1/memory/semantic` | Menambah semantic memory. |
 | `DELETE` | `/api/v1/memory/semantic/:id` | Menghapus satu semantic memory. |
 | `GET` | `/api/v1/memory/short-term` | Mencari short-term memory. |

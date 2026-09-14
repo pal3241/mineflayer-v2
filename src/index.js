@@ -24,6 +24,7 @@ export { createMemoryLifecycle } from './memory/memory-lifecycle.js';
 export { createMemoryGovernanceService } from './memory/memory-governance-service.js';
 export { createWorkingMemoryService } from './memory/working-memory-service.js';
 export { createEpisodicMemoryService } from './memory/episodic-memory-service.js';
+export { createKnowledgeService } from './memory/knowledge-service.js';
 export { createAdaptiveModel } from './ml/adaptive-model.js';
 export { createHiveService } from './hivemind/hive-service.js';
 export { createAutonomyService } from './autonomy/autonomy-service.js';
