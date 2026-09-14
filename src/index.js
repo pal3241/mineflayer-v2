@@ -42,3 +42,4 @@ export { NavigationError, createNavigationService, normalizeNavigationPolicy, no
 export { DEFAULT_EXPANSION_POLICY, EXPANSION_DIRECTIONS, TERRITORY_TYPES, containsPosition, createExpansionService, createExplorationService, createTerritoryIntelligenceService, createTerritoryService, normalizeExpansionProposal, normalizeTerritoryRegion, validateExpansion } from './territory/index.js';
 export { DEFAULT_TERRITORY_LOGISTICS_WEIGHTS, THREAT_LEVELS, createTerritoryLogisticsService, createThreatService, scoreThreat } from './territory/index.js';
 export { EMERGENCY_TYPES, SYSTEM_MODES, createResilienceService } from './resilience/index.js';
+export { createMemoryIntegrityService } from './memory/memory-integrity-service.js';
