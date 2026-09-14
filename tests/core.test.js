@@ -82,3 +82,7 @@ test('configuration validates procedural and strategic knowledge policy', () => 
 test('configuration validates unified memory event stream capacity', () => {
   assert.equal(loadConfig({ MINEHIVE_MEMORY_EVENT_STREAM_MAX_RECORDS: '250' }).semanticMemory.eventStreamMaxRecords, 250); assert.throws(() => loadConfig({ MINEHIVE_MEMORY_EVENT_STREAM_MAX_RECORDS: '99' }), /memory lifecycle/);
 });
+
+test('configuration validates conflict verification and recovery policy', () => {
+  const config = loadConfig({ MINEHIVE_MEMORY_MINIMUM_CONFIDENCE: '0.8', MINEHIVE_MEMORY_MINIMUM_CONFIRMATIONS: '3', MINEHIVE_MEMORY_MAX_RECOVERY_ATTEMPTS: '4' }); assert.equal(config.semanticMemory.integrityMinimumConfidence, 0.8); assert.equal(config.semanticMemory.integrityMinimumConfirmations, 3); assert.equal(config.semanticMemory.integrityMaxRecoveryAttempts, 4); assert.throws(() => loadConfig({ MINEHIVE_MEMORY_MINIMUM_CONFIDENCE: '2' }), /memory lifecycle/); assert.throws(() => loadConfig({ MINEHIVE_MEMORY_MAX_RECOVERY_ATTEMPTS: '11' }), /memory lifecycle/);
+});

@@ -836,6 +836,15 @@ Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/territory/regions" -Headers
 | `POST` | `/api/v1/memory/events/replay` | Mengambil ulang event tervalidasi dari rentang sequence. |
 | `POST` | `/api/v1/memory/events/checkpoints` | Menyimpan checkpoint monotonik untuk satu consumer. |
 | `GET` | `/api/v1/memory/events/checkpoints/:consumerId` | Membaca checkpoint consumer. |
+| `GET` | `/api/v1/memory/integrity/status` | Melihat kandidat, authoritative claims, verification queue, recovery, dan dead-letter. |
+| `GET` | `/api/v1/memory/integrity/candidates` | Membaca kandidat klaim berdasarkan claim key atau status. |
+| `POST` | `/api/v1/memory/integrity/candidates` | Mengajukan kandidat memory untuk verifikasi deterministik. |
+| `POST` | `/api/v1/memory/integrity/candidates/:id/verify` | Menerima atau menolak kandidat dengan verifier dan evidence. |
+| `POST` | `/api/v1/memory/integrity/resolve` | Menjalankan ulang resolusi konflik untuk suatu claim key. |
+| `GET` | `/api/v1/memory/integrity/context` | Mengambil maksimal lima authoritative memories sesuai visibility. |
+| `GET` | `/api/v1/memory/integrity/decisions` | Membaca histori keputusan resolusi konflik. |
+| `GET` | `/api/v1/memory/integrity/recovery` | Membaca recovery queue dan dead-letter. |
+| `POST` | `/api/v1/memory/integrity/recovery/:id/retry` | Memulihkan kandidat dengan data koreksi dalam retry budget. |
 | `POST` | `/api/v1/memory/semantic` | Menambah semantic memory. |
 | `DELETE` | `/api/v1/memory/semantic/:id` | Menghapus satu semantic memory. |
 | `GET` | `/api/v1/memory/short-term` | Mencari short-term memory. |

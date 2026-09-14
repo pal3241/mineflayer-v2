@@ -34,6 +34,5 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 - v0.7.4 — Advanced Navigation & Movement
 - v0.8.0 — Autonomous Territory & Expansion
 - v0.9.0 — Unified Hive Shared Memory
-  - Phase 6 — Conflict, Verification & Recovery
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Roadmap hanya menampilkan phase yang belum selesai; histori phase yang selesai tersimpan permanen di folder [`updates/`](updates/README.md).

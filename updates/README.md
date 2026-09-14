@@ -34,6 +34,7 @@ Folder ini menyimpan histori lengkap setiap release, phase, dan update fitur Min
 - [`v0.9.0 Phase 3 — Episodic Memory`](v0.9.0/phase-3-episodic-memory.md)
 - [`v0.9.0 Phase 4 — Procedural & Strategic Knowledge`](v0.9.0/phase-4-procedural-strategic-knowledge.md)
 - [`v0.9.0 Phase 5 — Unified Memory Event Stream`](v0.9.0/phase-5-unified-memory-event-stream.md)
+- [`v0.9.0 Phase 6 — Conflict, Verification & Recovery`](v0.9.0/phase-6-conflict-verification-recovery.md)
 
 ## Daftar update fitur
 
