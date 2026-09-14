@@ -7,7 +7,7 @@ MineHive dirancang agar keputusan AI tetap berada di belakang validasi determini
 ## Cakupan proyek
 
 - Runtime Mineflayer multi-bot dengan lifecycle dan bounded reconnect
-- Dashboard untuk join, monitoring, viewer first-person/3D, command, admin, browser serta lifecycle settings memory, dan logistik
+- Dashboard untuk join, monitoring, viewer first-person/3D, command, admin, browser serta lifecycle settings memory, logistik, dan blueprint building
 - Command individual, kelompok, dan global melalui alias bot atau class
 - Movement, follow, home, collect, crafting, smelting, farming, forestry, combat, auto armor, animal resources, sleep, serta door/trapdoor interaction
 - Koordinator OpenRouter atau NVIDIA NIM dengan tiga-key failover terpisah
@@ -34,5 +34,7 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 - v0.7.4 — Advanced Navigation & Movement
 - v0.8.0 — Autonomous Territory & Expansion
 - v0.9.0 — Unified Hive Shared Memory
+  - Phase 6 — Conflict, Verification & Recovery
+- v0.9.1 — Blueprint & Cooperative Construction — Implemented
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Roadmap hanya menampilkan phase yang belum selesai; histori phase yang selesai tersimpan permanen di folder [`updates/`](updates/README.md).

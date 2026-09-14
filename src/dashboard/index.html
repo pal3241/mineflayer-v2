@@ -20,6 +20,7 @@
       <button class="nav" data-view="recovery">✚ <span>Recovery</span></button>
       <button class="nav" data-view="memory">◫ <span>Memory</span></button>
       <button class="nav" data-view="movement">➤ <span>Movement</span></button>
+      <button class="nav" data-view="building">▧ <span>Building</span></button>
       <button class="nav" data-view="admins">♙ <span>Admins</span></button>
       <button class="nav" data-view="settings">⚙ <span>Settings</span></button>
     </nav>
@@ -222,6 +223,15 @@
         <div class="full"><p id="movementEffectiveStatus" class="hint">Loading effective policy…</p><div id="movementDifferences" class="hint"></div></div>
         <div class="actions full"><button id="movementApplyPreset" class="button secondary" type="button">Apply preset</button><button id="movementReset" class="button secondary" type="button">Reset draft</button><button id="movementRemoveOverride" class="button danger" type="button">Reset bot override</button><button class="button primary" type="submit">Save changes</button></div>
       </form></section>
+    </section>
+
+    <section id="building" class="view">
+      <div class="panel-title"><div><p class="eyebrow">v0.9.1 COOPERATIVE CONSTRUCTION</p><h2>Blueprint Building</h2></div><span id="buildingStatus" class="badge">Loading</span></div>
+      <div class="split form-split">
+        <section class="panel"><div class="panel-title"><div><p class="eyebrow">IMPORT</p><h2>Blueprint JSON</h2></div></div><form id="buildingImportForm" class="form-grid"><label>Nama blueprint<input id="buildingName" required maxlength="80" placeholder="Base utama"></label><label>File JSON<input id="buildingFile" type="file" accept=".json,.schem,.litematic" required></label><label>Target X<input id="buildingTargetX" type="number" required value="0"></label><label>Target Y<input id="buildingTargetY" type="number" required value="64"></label><label>Target Z<input id="buildingTargetZ" type="number" required value="0"></label><button class="button primary full" type="submit">Import blueprint</button></form><p class="hint">JSON MineHive diproses langsung. `.schem`/`.litematic` sudah disiapkan sebagai adapter untuk mod client; file biner perlu decoder adapter.</p></section>
+        <section class="panel"><div class="panel-title"><div><p class="eyebrow">SETTINGS</p><h2>Safety & cooperation</h2></div></div><form id="buildingSettingsForm" class="form-grid"><label class="check"><input id="buildingApproval" type="checkbox"><span>Wajib approval sebelum build</span></label><label>Max bot<input id="buildingMaxBots" type="number" min="1" max="32"></label><label>Delay per blok (ms)<input id="buildingDelay" type="number" min="0"></label><label>Max retry<input id="buildingAttempts" type="number" min="1" max="20"></label><label class="check"><input id="buildingReplace" type="checkbox"><span>Izinkan ganti blok target</span></label><label class="check"><input id="buildingScaffold" type="checkbox"><span>Izinkan scaffold</span></label><button class="button primary full" type="submit">Save building settings</button></form></section>
+      </div>
+      <div class="split form-split"><section class="panel"><div class="panel-title"><div><p class="eyebrow">PROJECTS</p><h2>Build queue</h2></div></div><div id="buildingList" class="timeline"></div></section><section class="panel"><div class="panel-title"><div><p class="eyebrow">PREVIEW</p><h2 id="buildingPreviewTitle">Select a blueprint</h2></div></div><label>Layer<input id="buildingLayer" type="number" value="0"></label><pre id="buildingPreview" class="runtime-logs">No blueprint selected.</pre></section></div>
     </section>
 
     <section id="settings" class="view">

@@ -35,6 +35,24 @@ export class ApiServer {
         if (req.method === 'GET' && url.pathname === '/health') return send(200, await this.application.health.check());
         if (this.application.config.api.token && req.headers.authorization !== `Bearer ${this.application.config.api.token}`) return send(401, { error: { code: 'UNAUTHORIZED', message: 'Valid bearer token required', requestId } });
         if (req.method === 'GET' && url.pathname === '/api/v1/system/status') return send(200, this.application.status());
+        if (req.method === 'GET' && url.pathname === '/api/v1/building/protocol') return send(200, { data: this.application.building.protocol() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/building/status') return send(200, { data: await this.application.building.status() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/building/settings') return send(200, { data: this.application.building.settings() });
+        if (req.method === 'PATCH' && url.pathname === '/api/v1/building/settings') return send(200, { data: await this.application.building.configure(await body(req)) });
+        if (req.method === 'GET' && url.pathname === '/api/v1/building/blueprints') return send(200, { data: await this.application.building.list() });
+        if (req.method === 'POST' && url.pathname === '/api/v1/building/import') return send(201, { data: await this.application.building.import(await body(req)) });
+        if (parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'building' && parts[3] === 'blueprints' && parts[4]) {
+          const blueprintId = decodeURIComponent(parts[4]);
+          if (req.method === 'GET' && parts.length === 5) return send(200, { data: await this.application.building.get(blueprintId) });
+          if (req.method === 'GET' && parts[5] === 'preview') return send(200, { data: await this.application.building.preview(blueprintId, url.searchParams.get('layer') ?? undefined) });
+          if (req.method === 'GET' && parts[5] === 'snapshot') return send(200, { data: await this.application.building.snapshot(blueprintId) });
+          if (req.method === 'GET' && parts[5] === 'deltas') return send(200, { data: await this.application.building.deltas(blueprintId, url.searchParams.get('afterRevision') ?? 0) });
+          if (req.method === 'POST' && parts[5] === 'approve') return send(200, { data: await this.application.building.approve(blueprintId, await body(req)) });
+          if (req.method === 'POST' && parts[5] === 'build') return send(200, { data: await this.application.building.build(blueprintId, await body(req)) });
+          if (req.method === 'POST' && parts[5] === 'pause') return send(200, { data: await this.application.building.pause(blueprintId) });
+          if (req.method === 'POST' && parts[5] === 'resume') return send(200, { data: await this.application.building.build(blueprintId, await body(req)) });
+          if (req.method === 'POST' && parts[5] === 'cancel') return send(200, { data: await this.application.building.cancel(blueprintId) });
+        }
         if (req.method === 'GET' && url.pathname === '/api/v1/navigation/status') return send(200, { data: this.application.navigation.status() });
         if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'navigation' && parts[3] === 'bots' && parts[4] && parts.length === 5) return send(200, { data: this.application.navigation.statusForBot(parts[4]) });
         if (req.method === 'POST' && url.pathname === '/api/v1/navigation/move') return send(200, { data: await this.application.navigation.moveTo(await body(req)) });
@@ -127,15 +145,6 @@ export class ApiServer {
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/events/replay') return send(200, { data: await this.application.memoryEventStream.replay(await body(req)) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/events/checkpoints') { const input = await body(req); return send(200, { data: await this.application.memoryEventStream.checkpoint(input.consumerId, input.sequence) }); }
         if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3] === 'events' && parts[4] === 'checkpoints' && parts[5] && parts.length === 6) return send(200, { data: await this.application.memoryEventStream.getCheckpoint(decodeURIComponent(parts[5])) });
-        if (req.method === 'GET' && url.pathname === '/api/v1/memory/integrity/status') return send(200, { data: await this.application.memoryIntegrity.status() });
-        if (req.method === 'GET' && url.pathname === '/api/v1/memory/integrity/candidates') return send(200, { data: await this.application.memoryIntegrity.candidates({ claimKey: url.searchParams.get('claimKey') ?? undefined, status: url.searchParams.get('status') ?? undefined, limit: url.searchParams.get('limit') ?? 100 }) });
-        if (req.method === 'POST' && url.pathname === '/api/v1/memory/integrity/candidates') return send(201, { data: await this.application.memoryIntegrity.submit(await body(req)) });
-        if (req.method === 'POST' && url.pathname === '/api/v1/memory/integrity/resolve') return send(200, { data: await this.application.memoryIntegrity.resolve((await body(req)).claimKey) });
-        if (req.method === 'GET' && url.pathname === '/api/v1/memory/integrity/context') return send(200, { data: await this.application.memoryIntegrity.retrieve({ actorBotId: url.searchParams.get('actorBotId') ?? undefined, teamId: url.searchParams.get('teamId') ?? undefined, worldKey: url.searchParams.get('worldKey') ?? undefined, dimension: url.searchParams.get('dimension') ?? undefined }) });
-        if (req.method === 'GET' && url.pathname === '/api/v1/memory/integrity/decisions') return send(200, { data: await this.application.memoryIntegrity.decisions(url.searchParams.get('limit') ?? 100) });
-        if (req.method === 'GET' && url.pathname === '/api/v1/memory/integrity/recovery') return send(200, { data: await this.application.memoryIntegrity.recovery(url.searchParams.get('limit') ?? 100) });
-        if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3] === 'integrity' && parts[4] === 'candidates' && parts[5] && parts[6] === 'verify' && parts.length === 7) return send(200, { data: await this.application.memoryIntegrity.verify(decodeURIComponent(parts[5]), await body(req)) });
-        if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3] === 'integrity' && parts[4] === 'recovery' && parts[5] && parts[6] === 'retry' && parts.length === 7) return send(200, { data: await this.application.memoryIntegrity.retry(decodeURIComponent(parts[5]), await body(req)) });
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/semantic') return send(200, { data: await this.application.semanticMemory.search({ text: url.searchParams.get('q') ?? '', worldKey: url.searchParams.get('worldKey') ?? undefined, dimension: url.searchParams.get('dimension') ?? undefined, type: url.searchParams.get('type') ?? undefined, limit: url.searchParams.get('limit') ?? 10 }) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/semantic') return send(201, { data: await this.application.semanticMemory.remember(await body(req)) });
         if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3] === 'semantic' && parts[4] && parts.length === 5) return send(200, { data: await deleteMemory(this.application.semanticMemory, 'Semantic memory', decodeURIComponent(parts[4]), 'semantic') });

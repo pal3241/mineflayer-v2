@@ -1,5 +1,5 @@
 export const MINECRAFT_CAPABILITIES = Object.freeze([
-  'minecraft.navigation-recovery',
+  'minecraft.blueprint-place', 'minecraft.navigation-recovery',
   'minecraft.navigation-terrain-scan',
   'minecraft.navigation-precision',
   'minecraft.navigation', 'minecraft.navigation-stop', 'minecraft.navigation-target', 'minecraft.navigation-pillar', 'minecraft.navigation-bridge', 'minecraft.smart-movement', 'minecraft.follow-player', 'minecraft.come', 'minecraft.set-home', 'minecraft.home', 'minecraft.crafting', 'minecraft.craft-planning', 'minecraft.smelting', 'minecraft.block-analysis', 'minecraft.resource-analysis', 'minecraft.survey', 'minecraft.storage-discovery', 'minecraft.storage-inspection', 'minecraft.storage-deposit', 'minecraft.storage-withdraw', 'minecraft.collection', 'minecraft.farming', 'minecraft.deforestation', 'minecraft.reforestation', 'minecraft.combat', 'minecraft.drop-item', 'minecraft.pickup-item', 'minecraft.equip', 'minecraft.unequip', 'minecraft.use-item', 'minecraft.interact-entity', 'minecraft.interact-block', 'minecraft.entity-search', 'minecraft.armor.inspect', 'minecraft.armor.equip', 'minecraft.armor.auto-equip', 'minecraft.sheep-search', 'minecraft.shear', 'minecraft.shear-nearest', 'minecraft.acquire-wool', 'minecraft.cow-search', 'minecraft.milk', 'minecraft.milk-nearest', 'minecraft.acquire-milk', 'minecraft.bed-search', 'minecraft.sleep', 'minecraft.wake', 'minecraft.sleep-status', 'minecraft.open-door', 'minecraft.close-door', 'minecraft.open-trapdoor', 'minecraft.close-trapdoor', 'minecraft.chat', 'minecraft.observation', 'minecraft.inventory', 'minecraft.stop'
@@ -8,6 +8,7 @@ export const MINECRAFT_CAPABILITIES = Object.freeze([
 export function registerMinecraftCapabilities(registry, botManager, survival) {
   const adapter = context => botManager.get(context.botId).adapter;
   const runtime = context => botManager.get(context.botId);
+  registry.register({ name: 'minecraft.blueprint-place', execute: (input, context) => adapter(context).placeBlueprintBlock(input, context) });
   registry.register({ name: 'minecraft.navigation', execute: (input, context) => adapter(context).navigateTo({ position: input.target ?? input.position ?? input, tolerance: input.tolerance ?? input.range, mode: input.mode, policy: input.policy, movement: input.movement }, context) });
   registry.register({ name: 'minecraft.navigation-stop', execute: (_input, context) => adapter(context).stopNavigation() });
   registry.register({ name: 'minecraft.navigation-target', execute: (input, context) => adapter(context).resolveNavigationTarget(input.target) });
