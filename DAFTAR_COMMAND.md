@@ -822,6 +822,9 @@ Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/territory/regions" -Headers
 | `GET` | `/api/v1/memory/working/:taskId` | Membaca workspace sementara suatu task. |
 | `PATCH` | `/api/v1/memory/working/:taskId` | Memperbarui action, target, progress, inventory/cargo, route, lease, atau checkpoint. |
 | `DELETE` | `/api/v1/memory/working/:taskId` | Melepas working memory task secara eksplisit. |
+| `GET` | `/api/v1/memory/episodic` | Mencari pengalaman berdasarkan teks, bot, world, dimension, tipe, outcome, dan limit. |
+| `POST` | `/api/v1/memory/episodic` | Menyimpan episode atau observasi terstruktur secara manual. |
+| `GET` | `/api/v1/memory/episodic/:id` | Membaca satu episode lengkap beserta lesson dan evidence. |
 | `POST` | `/api/v1/memory/semantic` | Menambah semantic memory. |
 | `DELETE` | `/api/v1/memory/semantic/:id` | Menghapus satu semantic memory. |
 | `GET` | `/api/v1/memory/short-term` | Mencari short-term memory. |

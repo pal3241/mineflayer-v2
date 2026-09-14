@@ -70,3 +70,7 @@ test('configuration validates working memory bounds', () => {
   const config = loadConfig({ MINEHIVE_WORKING_MEMORY_MAX_RECORDS: '25', MINEHIVE_WORKING_MEMORY_TTL_MS: '5000' }); assert.equal(config.semanticMemory.workingMemoryMaxRecords, 25); assert.equal(config.semanticMemory.workingMemoryTtlMs, 5000);
   assert.throws(() => loadConfig({ MINEHIVE_WORKING_MEMORY_MAX_RECORDS: '0' }), /memory lifecycle/); assert.throws(() => loadConfig({ MINEHIVE_WORKING_MEMORY_TTL_MS: '999' }), /memory lifecycle/);
 });
+
+test('configuration validates episodic memory capacity', () => {
+  assert.equal(loadConfig({ MINEHIVE_EPISODIC_MEMORY_MAX_RECORDS: '250' }).semanticMemory.episodicMemoryMaxRecords, 250); assert.throws(() => loadConfig({ MINEHIVE_EPISODIC_MEMORY_MAX_RECORDS: '0' }), /memory lifecycle/);
+});
