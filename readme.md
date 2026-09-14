@@ -33,10 +33,5 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 - v0.7.3 — Helping — Implemented
 - v0.7.4 — Advanced Navigation & Movement
 - v0.8.0 — Autonomous Territory & Expansion
-  - Phase 1 — Territory Map & Region Model — Implemented
-  - Phase 2 — Resource & Danger Intelligence — Implemented
-  - Phase 3 — Exploration & Scout Assignment — Implemented
-  - Phase 4 — Expansion Proposal & Deterministic Validation — Implemented
-  - Phase 5 — Territory Logistics, Defense & Resilience — Implemented
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Roadmap hanya menampilkan phase yang belum selesai; histori phase yang selesai tersimpan permanen di folder [`updates/`](updates/README.md).
