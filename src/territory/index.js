@@ -4,3 +4,5 @@ export { createTerritoryIntelligenceService } from './territory-intelligence-ser
 export { createExplorationService } from './exploration-service.js';
 export { DEFAULT_EXPANSION_POLICY, EXPANSION_DIRECTIONS, normalizeExpansionProposal, validateExpansion } from './expansion-validator.js';
 export { createExpansionService } from './expansion-service.js';
+export { DEFAULT_TERRITORY_LOGISTICS_WEIGHTS, createTerritoryLogisticsService } from './territory-logistics-service.js';
+export { THREAT_LEVELS, createThreatService, scoreThreat } from './threat-service.js';

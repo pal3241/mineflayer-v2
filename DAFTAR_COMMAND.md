@@ -752,6 +752,19 @@ Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/navigation/group/move" -Hea
 | `POST` | `/api/v1/territory/expansions/:id/approve` | Persetujuan manusia untuk ekspansi besar. |
 | `POST` | `/api/v1/territory/expansions/:id/apply` | Membentuk Frontier/Outpost dari proposal approved. |
 | `POST` | `/api/v1/territory/expansions/:id/cancel` | Membatalkan proposal yang belum diterapkan. |
+| `POST` | `/api/v1/territory/logistics/rank` | Ranking storage berdasarkan distance, danger, route, traffic, utilization, dan reservation pressure. |
+| `GET` | `/api/v1/territory/threats/status` | Ringkasan ancaman territory aktif. |
+| `GET` | `/api/v1/territory/threats` | Daftar ancaman; filter `status` dan `level`. |
+| `POST` | `/api/v1/territory/threats` | Deteksi, klasifikasi, dan pilih respons defense. |
+| `GET` | `/api/v1/territory/threats/:id` | Detail ancaman dan skor deterministik. |
+| `POST` | `/api/v1/territory/threats/:id/resolve` | Tutup ancaman setelah kondisi diverifikasi aman. |
+| `GET` | `/api/v1/resilience/status` | Mode sistem, dependency health, circuit, dan antrean pemulihan. |
+| `GET` | `/api/v1/resilience/incidents` | Audit seluruh emergency incident. |
+| `GET` | `/api/v1/resilience/dead-letters` | Operasi yang menghabiskan retry budget. |
+| `GET` | `/api/v1/resilience/recovery` | Antrean pekerjaan recovery. |
+| `POST` | `/api/v1/resilience/emergencies` | Naikkan emergency yang idempotent. |
+| `POST` | `/api/v1/resilience/emergencies/:id/resolve` | Tandai emergency telah stabil. |
+| `POST` | `/api/v1/resilience/dependencies` | Perbarui health dependency dan degraded mode. |
 
 Contoh membuat Resource Zone:
 

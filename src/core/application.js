@@ -44,7 +44,8 @@ import { createCoordinationMonitor, createHelpCommandService, createHelpService 
 import { createSurvivalService } from '../survival/index.js';
 import { createTaskReporter } from '../tasks/task-reporter.js';
 import { createNavigationService, createNavigationSettingsService, createResourceReservationService, createResourceReservationCoordinator } from '../navigation/index.js';
-import { createExpansionService, createExplorationService, createTerritoryIntelligenceService, createTerritoryService } from '../territory/index.js';
+import { createExpansionService, createExplorationService, createTerritoryIntelligenceService, createTerritoryLogisticsService, createTerritoryService, createThreatService } from '../territory/index.js';
+import { createResilienceService } from '../resilience/index.js';
 
 export class Application {
   constructor(config, overrides = {}) {
@@ -65,13 +66,16 @@ export class Application {
     this.navigationSettings = createNavigationSettingsService({ repository: repository('navigation-settings') });
     this.territory = createTerritoryService({ repository: repository('territory-regions'), events: this.events });
     this.territoryIntelligence = createTerritoryIntelligenceService({ territory: this.territory, repository: repository('territory-signals'), events: this.events });
+    this.territoryLogistics = createTerritoryLogisticsService({ territory: this.territory, events: this.events });
+    this.threats = createThreatService({ repository: repository('territory-threats'), events: this.events });
+    this.resilience = createResilienceService({ repositories: { incidents: repository('resilience-incidents'), deadLetters: repository('resilience-dead-letters'), recovery: repository('resilience-recovery'), commands: repository('resilience-commands') }, events: this.events });
     this.worldMemory = new WorldMemoryService({ repository: repository('world-memory'), events: this.events, logger: this.logger });
     this.semanticMemory = createSemanticMemory({ repository: repository('semantic-memory'), events: this.events, embeddingProvider: createHashEmbeddingProvider({ dimensions: config.semanticMemory.dimensions, version: '1' }), maxRecords: config.semanticMemory.maxRecords, shortTermMaxRecords: config.semanticMemory.shortTermMaxRecords, shortTermTtlMs: config.semanticMemory.shortTermTtlMs, promotionAccesses: config.semanticMemory.promotionAccesses, promotionImportance: config.semanticMemory.promotionImportance });
     this.memoryLifecycle = createMemoryLifecycle({ memory: this.semanticMemory, logger: this.logger, intervalMs: config.semanticMemory.consolidationIntervalMs ?? 60_000 });
     this.discovery = createDiscoveryService({ worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, events: this.events }); this.structureObserver = createStructureObserver({ discovery: this.discovery, logger: this.logger, intervalMs: 15_000, minimumDistance: 16, maxDistance: 64 });
     this.ml = createAdaptiveModel({ outcomeRepository: repository('ml-outcomes'), modelRepository: repository('ml-models'), events: this.events, minimumSamples: config.ml.minimumSamples });
     this.hive = createHiveService({ repositories: { messages: repository('hive-messages'), state: repository('hive-state'), locks: repository('hive-locks'), decisions: repository('hive-decisions') }, events: this.events, ml: this.ml, heartbeatTimeoutMs: config.hive.heartbeatTimeoutMs });
-    this.logistics = createLogisticsService({ repositories: { storages: repository('logistics-storages'), reservations: repository('logistics-reservations'), transfers: repository('logistics-transfers') }, hive: this.hive, events: this.events, resourceReservations: this.resourceReservations });
+    this.logistics = createLogisticsService({ repositories: { storages: repository('logistics-storages'), reservations: repository('logistics-reservations'), transfers: repository('logistics-transfers') }, hive: this.hive, events: this.events, resourceReservations: this.resourceReservations, territoryLogistics: this.territoryLogistics });
     this.fleetTransfer = createFleetTransferService({ events: this.events });
     this.acquisition = createAcquisitionService({ bots: this.bots, logistics: this.logistics, events: this.events, logger: this.logger, repository: repository('acquisition-requests'), fleetTransfer: this.fleetTransfer, config: config.acquisition ?? { enabled: true, maxDepth: 8, maxSubtasks: 32, maxAttempts: 3, maxDistance: 2000, storageFirst: true, allowFleet: true, allowCraft: true, allowSmelt: true, allowCollect: true, allowPartial: false, toolPreservation: true } });
     this.help = createHelpService({ repository: repository('help-sessions'), workShareRepository: repository('help-work-shares'), contributionRepository: repository('help-contributions'), bots: this.bots, fleetTransfer: this.fleetTransfer, logistics: this.logistics, goals: this.goals, executor: this.executor, events: this.events, metrics: this.metrics, maxHelpersPerSession: 4, minimumChunk: 4, coordination: { minRebalanceIntervalMs: 5000, minimumTransferUnits: 4, minimumBenefitRatio: 0.15, maxRebalancesPerSession: 20, progressStallThresholdMs: 30000 } });
@@ -94,9 +98,10 @@ export class Application {
     this.events.subscribe('task.cancelled', async event => { const reason = event.payload.error?.message ?? 'Parent task cancelled'; if (reason.startsWith(COLLABORATIVE_TAKEOVER_PREFIX)) return; await this.help.cancelForParent(event.payload.id, reason); });
     this.events.subscribe('world.structures.discovered', event => this.territoryIntelligence.ingestDiscoveries(event.payload));
     this.events.subscribe('logistics.recovery.death.recorded', event => this.territoryIntelligence.ingestDeath(event.payload));
+    this.events.subscribe('bot.death', event => this.resilience.raise({ type: 'BOT_DEATH', severity: 'HIGH', sourceId: event.payload.botId, details: event.payload }));
     this.bots.onCreated(runtime => { this.chatCommands.attach(runtime); this.structureObserver.attach(runtime); this.survival.attach(runtime); });
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
-    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, helpCommands: this.helpCommands, coordination: this.coordination, navigation: this.navigation, territory: this.territory, territoryIntelligence: this.territoryIntelligence, exploration: this.exploration, expansion: this.expansion, resourceReservations: this.resourceReservations, resourceReservationCoordinator: this.resourceReservationCoordinator, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
+    Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, helpCommands: this.helpCommands, coordination: this.coordination, navigation: this.navigation, territory: this.territory, territoryIntelligence: this.territoryIntelligence, territoryLogistics: this.territoryLogistics, threats: this.threats, exploration: this.exploration, expansion: this.expansion, resilience: this.resilience, resourceReservations: this.resourceReservations, resourceReservationCoordinator: this.resourceReservationCoordinator, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
     this.health.register('application', async () => ({ status: ['READY', 'RUNNING'].includes(this.state) ? 'HEALTHY' : 'DEGRADED' }), { critical: true });
     this.health.register('bots', async () => ({ status: this.bots.list().some(bot => ['FAILED', 'DEGRADED'].includes(bot.status)) ? 'DEGRADED' : 'HEALTHY' }));
     this.health.register('database', async () => this.database?.health() ?? { status: 'HEALTHY', driver: config.profile === 'test' ? 'memory' : 'json' }, { critical: true });
@@ -116,6 +121,9 @@ export class Application {
     this.health.register('territoryIntelligence', async () => this.territoryIntelligence.status());
     this.health.register('exploration', async () => this.exploration.status());
     this.health.register('territoryExpansion', async () => this.expansion.status());
+    this.health.register('territoryLogistics', async () => this.territoryLogistics.status());
+    this.health.register('territoryDefense', async () => this.threats.status());
+    this.health.register('resilience', async () => this.resilience.status());
     this.health.register('taskQueue', async () => { const tasks = this.executor.status(); const coordinator = this.coordinator.status(); const saturation = Math.max(tasks.saturation, coordinator.saturation); return { status: saturation >= 0.8 ? 'DEGRADED' : 'HEALTHY', saturation, tasks, coordinator: { queuedOperations: coordinator.queuedOperations, maximumDepth: coordinator.maximumDepth, maxQueuePerBot: coordinator.maxQueuePerBot } }; });
   }
 
@@ -182,7 +190,7 @@ export class Application {
     return normalized;
   }
   configureSurvival(input) { return this.survival.configure(input); }
-  status() { return { name: 'MineHive', version: '0.8.0', phase: 'Expansion Proposal & Deterministic Validation Phase 4', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
+  status() { return { name: 'MineHive', version: '0.8.0', phase: 'Territory Logistics, Defense & Resilience Phase 5', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
 }
 
 function portAvailable(port) {
