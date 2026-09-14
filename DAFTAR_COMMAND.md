@@ -831,6 +831,11 @@ Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/territory/regions" -Headers
 | `PATCH` | `/api/v1/memory/knowledge/:id` | Merevisi knowledge dengan optimistic `expectedVersion`. |
 | `POST` | `/api/v1/memory/knowledge/:id/feedback` | Memperbarui confidence menggunakan outcome terverifikasi. |
 | `POST` | `/api/v1/memory/knowledge/synthesize` | Membentuk strategi deterministik dari episode suatu action. |
+| `GET` | `/api/v1/memory/events` | Membaca event memory berurutan dengan filter sequence, type, layer, dan correlation ID. |
+| `GET` | `/api/v1/memory/events/status` | Melihat integrity hash-chain, sequence terbaru, retention, dan jumlah checkpoint. |
+| `POST` | `/api/v1/memory/events/replay` | Mengambil ulang event tervalidasi dari rentang sequence. |
+| `POST` | `/api/v1/memory/events/checkpoints` | Menyimpan checkpoint monotonik untuk satu consumer. |
+| `GET` | `/api/v1/memory/events/checkpoints/:consumerId` | Membaca checkpoint consumer. |
 | `POST` | `/api/v1/memory/semantic` | Menambah semantic memory. |
 | `DELETE` | `/api/v1/memory/semantic/:id` | Menghapus satu semantic memory. |
 | `GET` | `/api/v1/memory/short-term` | Mencari short-term memory. |

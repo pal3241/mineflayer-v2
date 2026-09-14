@@ -31,6 +31,7 @@ import { createMemoryGovernanceService } from '../memory/memory-governance-servi
 import { createWorkingMemoryService } from '../memory/working-memory-service.js';
 import { createEpisodicMemoryService } from '../memory/episodic-memory-service.js';
 import { createKnowledgeService } from '../memory/knowledge-service.js';
+import { createMemoryEventStream } from '../memory/memory-event-stream.js';
 import { createAdaptiveModel } from '../ml/adaptive-model.js';
 import { createHiveService } from '../hivemind/hive-service.js';
 import { createAutonomyService } from '../autonomy/autonomy-service.js';
@@ -76,6 +77,7 @@ export class Application {
     this.worldMemory = new WorldMemoryService({ repository: repository('world-memory'), events: this.events, logger: this.logger });
     const semanticMemoryRepository = repository('semantic-memory'); const embeddingProvider = createHashEmbeddingProvider({ dimensions: config.semanticMemory.dimensions, version: '1' });
     this.memoryGovernance = createMemoryGovernanceService({ repositories: { memory: semanticMemoryRepository, audit: repository('memory-audit'), quarantine: repository('memory-quarantine'), archive: repository('memory-archive') }, embeddingProvider, shortTermTtlMs: config.semanticMemory.shortTermTtlMs });
+    this.memoryEventStream = createMemoryEventStream({ repository: repository('memory-event-stream'), checkpointRepository: repository('memory-event-checkpoints'), events: this.events, maxRecords: config.semanticMemory.eventStreamMaxRecords ?? 50_000 });
     this.workingMemory = createWorkingMemoryService({ repository: repository('working-memory'), events: this.events, governance: this.memoryGovernance, maxRecords: config.semanticMemory.workingMemoryMaxRecords ?? 1000, ttlMs: config.semanticMemory.workingMemoryTtlMs ?? 1_800_000 });
     this.episodicMemory = createEpisodicMemoryService({ repository: repository('episodic-memory'), events: this.events, governance: this.memoryGovernance, embeddingProvider, maxRecords: config.semanticMemory.episodicMemoryMaxRecords ?? config.semanticMemory.maxRecords });
     this.knowledge = createKnowledgeService({ repository: repository('memory-knowledge'), episodicMemory: this.episodicMemory, embeddingProvider, events: this.events, governance: this.memoryGovernance, maxRecords: config.semanticMemory.knowledgeMaxRecords ?? 5000, minimumEvidence: config.semanticMemory.knowledgeMinimumEvidence ?? 3 });
@@ -111,7 +113,7 @@ export class Application {
     this.bots.onCreated(runtime => { this.chatCommands.attach(runtime); this.structureObserver.attach(runtime); this.survival.attach(runtime); });
     this.api = new ApiServer({ application: this, ...config.api, logger: this.logger });
     Object.entries({ config, logger: this.logger, logStore: this.logStore, eventBus: this.events, health: this.health, metrics: this.metrics, database: this.database, bots: this.bots, capabilities: this.capabilities, goals: this.goals, scheduler: this.scheduler, checkpoints: this.checkpoints, admins: this.admins, botProfiles: this.botProfiles, worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, memoryLifecycle: this.memoryLifecycle, discovery: this.discovery, structureObserver: this.structureObserver, logistics: this.logistics, fleetTransfer: this.fleetTransfer, acquisition: this.acquisition, help: this.help, helpCommands: this.helpCommands, coordination: this.coordination, navigation: this.navigation, territory: this.territory, territoryIntelligence: this.territoryIntelligence, territoryLogistics: this.territoryLogistics, threats: this.threats, exploration: this.exploration, expansion: this.expansion, resilience: this.resilience, resourceReservations: this.resourceReservations, resourceReservationCoordinator: this.resourceReservationCoordinator, recovery: this.recovery, survival: this.survival, ml: this.ml, hive: this.hive, autonomy: this.autonomy, llm: this.llm, coordinator: this.coordinator, taskReporter: this.taskReporter }).filter(([, value]) => value !== null).forEach(([name, value]) => this.container.register(name, value));
-    this.container.register('workingMemory', this.workingMemory); this.container.register('episodicMemory', this.episodicMemory); this.container.register('knowledge', this.knowledge); this.container.register('memoryGovernance', this.memoryGovernance);
+    this.container.register('workingMemory', this.workingMemory); this.container.register('episodicMemory', this.episodicMemory); this.container.register('knowledge', this.knowledge); this.container.register('memoryGovernance', this.memoryGovernance); this.container.register('memoryEventStream', this.memoryEventStream);
     this.health.register('application', async () => ({ status: ['READY', 'RUNNING'].includes(this.state) ? 'HEALTHY' : 'DEGRADED' }), { critical: true });
     this.health.register('bots', async () => ({ status: this.bots.list().some(bot => ['FAILED', 'DEGRADED'].includes(bot.status)) ? 'DEGRADED' : 'HEALTHY' }));
     this.health.register('database', async () => this.database?.health() ?? { status: 'HEALTHY', driver: config.profile === 'test' ? 'memory' : 'json' }, { critical: true });
@@ -120,6 +122,7 @@ export class Application {
     this.health.register('workingMemory', async () => this.workingMemory.status());
     this.health.register('episodicMemory', async () => this.episodicMemory.status());
     this.health.register('knowledge', async () => this.knowledge.status());
+    this.health.register('memoryEventStream', async () => this.memoryEventStream.status());
     this.health.register('memoryLifecycle', async () => this.memoryLifecycle.status());
     this.health.register('ml', async () => this.ml.status());
     this.health.register('hivemind', async () => this.hive.status());
@@ -145,7 +148,7 @@ export class Application {
   async initialize() {
     if (this.state !== 'CREATED') return;
     this.state = 'BOOTSTRAPPING'; this.logger.info('application.bootstrapping'); this.state = 'INITIALIZING';
-    await this.memoryGovernance.initialize(); await this.workingMemory.initialize(); await this.episodicMemory.initialize(); await this.knowledge.initialize(); await this.admins.initialize(); this.restoredProfiles = await this.botProfiles.initialize(); await this.navigationSettings.initialize(); await this.acquisition.initialize(); await this.help.initialize(); await this.exploration.initialize();
+    await this.memoryEventStream.initialize(); await this.memoryGovernance.initialize(); await this.workingMemory.initialize(); await this.episodicMemory.initialize(); await this.knowledge.initialize(); await this.admins.initialize(); this.restoredProfiles = await this.botProfiles.initialize(); await this.navigationSettings.initialize(); await this.acquisition.initialize(); await this.help.initialize(); await this.exploration.initialize();
     await this.modules.run('initialize', this.context()); await this.plugins.run('initialize', this.context()); this.state = 'READY';
     await this.events.publish('application.ready', {}, { source: 'application' });
   }
@@ -163,7 +166,7 @@ export class Application {
   }
   async stop() {
     if (['STOPPED', 'CREATED'].includes(this.state)) { this.state = 'STOPPED'; await this.logStore?.flush(); return; }
-    this.state = 'SHUTTING_DOWN'; this.autonomy.stop(); this.memoryLifecycle.stop(); this.workingMemory.dispose(); this.episodicMemory.dispose(); this.knowledge.dispose(); this.coordination.dispose(); this.structureObserver.stop(); this.survival.stop(); this.taskReporter.stop(); await this.navigation.stop(); await this.api.stop(); await this.goals.stop(); await this.bots.stopAll();
+    this.state = 'SHUTTING_DOWN'; this.autonomy.stop(); this.memoryLifecycle.stop(); this.workingMemory.dispose(); this.episodicMemory.dispose(); this.knowledge.dispose(); this.memoryEventStream.dispose(); this.coordination.dispose(); this.structureObserver.stop(); this.survival.stop(); this.taskReporter.stop(); await this.navigation.stop(); await this.api.stop(); await this.goals.stop(); await this.bots.stopAll();
     await this.plugins.run('stop', this.context(), { reverse: true }); await this.modules.run('stop', this.context(), { reverse: true });
     this.state = 'STOPPED'; await this.events.publish('application.stopped', {}, { source: 'application' }); this.events.clear(); this.database?.close(); this.logger.info('application.stopped'); await this.logStore?.flush();
   }
@@ -173,7 +176,7 @@ export class Application {
     const result = await runtime.adapter.startViewer({ port, firstPerson: viewMode === 'first_person', viewDistance: this.config.viewer?.viewDistance ?? 6, mode: viewMode }); return { ...result, mode: viewMode, botId };
   }
   async stopCamera(botId) { const result = await this.bots.get(botId).adapter.stopViewer(); this.cameraPorts.delete(botId); return { ...result, botId }; }
-  async memorySettings() { const [semantic, working, episodic, knowledge] = await Promise.all([this.semanticMemory.status(), this.workingMemory.status(), this.episodicMemory.status(), this.knowledge.status()]); return { maxRecords: semantic.maxRecords, ...semantic.policy, workingMemoryMaxRecords: working.maxRecords, workingMemoryTtlMs: working.ttlMs, episodicMemoryMaxRecords: episodic.maxRecords, knowledgeMaxRecords: knowledge.maxRecords, knowledgeMinimumEvidence: knowledge.minimumEvidence, consolidationIntervalMs: this.memoryLifecycle.status().intervalMs, embedding: semantic.embedding }; }
+  async memorySettings() { const [semantic, working, episodic, knowledge, eventStream] = await Promise.all([this.semanticMemory.status(), this.workingMemory.status(), this.episodicMemory.status(), this.knowledge.status(), this.memoryEventStream.status()]); return { maxRecords: semantic.maxRecords, ...semantic.policy, workingMemoryMaxRecords: working.maxRecords, workingMemoryTtlMs: working.ttlMs, episodicMemoryMaxRecords: episodic.maxRecords, knowledgeMaxRecords: knowledge.maxRecords, knowledgeMinimumEvidence: knowledge.minimumEvidence, eventStreamMaxRecords: eventStream.maxRecords, consolidationIntervalMs: this.memoryLifecycle.status().intervalMs, embedding: semantic.embedding }; }
   async configureMemory(input) {
     const consolidationIntervalMs = Number(input?.consolidationIntervalMs); if (!Number.isInteger(consolidationIntervalMs) || consolidationIntervalMs < 5000) throw new ValidationError('Memory consolidation interval must be an integer of at least 5000ms');
     const semantic = await this.semanticMemory.configure(input); const lifecycle = this.memoryLifecycle.configure({ intervalMs: consolidationIntervalMs }); const settings = await this.memorySettings(); this.logger.info('memory.settings.configured', { maxRecords: settings.maxRecords, shortTermMaxRecords: settings.shortTermMaxRecords, shortTermTtlMs: settings.shortTermTtlMs, promotionAccesses: settings.promotionAccesses, promotionImportance: settings.promotionImportance, consolidationIntervalMs: settings.consolidationIntervalMs }); return { settings, semantic, lifecycle };
@@ -204,7 +207,7 @@ export class Application {
     return normalized;
   }
   configureSurvival(input) { return this.survival.configure(input); }
-  status() { return { name: 'MineHive', version: '0.9.0', phase: 'Procedural & Strategic Knowledge Phase 4', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
+  status() { return { name: 'MineHive', version: '0.9.0', phase: 'Unified Memory Event Stream Phase 5', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
 }
 
 function portAvailable(port) {
@@ -215,7 +218,7 @@ function portAvailable(port) {
 }
 
 function defaultMemorySettings(config) {
-  const maxRecords = config.maxRecords; return { maxRecords, longTermMaxRecords: config.longTermMaxRecords ?? maxRecords, workingMemoryMaxRecords: config.workingMemoryMaxRecords ?? 1000, workingMemoryTtlMs: config.workingMemoryTtlMs ?? 1_800_000, episodicMemoryMaxRecords: config.episodicMemoryMaxRecords ?? maxRecords, knowledgeMaxRecords: config.knowledgeMaxRecords ?? 5000, knowledgeMinimumEvidence: config.knowledgeMinimumEvidence ?? 3, shortTermMaxRecords: config.shortTermMaxRecords ?? Math.min(1000, maxRecords), shortTermTtlMs: config.shortTermTtlMs ?? 86_400_000, promotionAccesses: config.promotionAccesses ?? 3, promotionImportance: config.promotionImportance ?? 0.8, consolidationIntervalMs: config.consolidationIntervalMs ?? 60_000 };
+  const maxRecords = config.maxRecords; return { maxRecords, longTermMaxRecords: config.longTermMaxRecords ?? maxRecords, workingMemoryMaxRecords: config.workingMemoryMaxRecords ?? 1000, workingMemoryTtlMs: config.workingMemoryTtlMs ?? 1_800_000, episodicMemoryMaxRecords: config.episodicMemoryMaxRecords ?? maxRecords, knowledgeMaxRecords: config.knowledgeMaxRecords ?? 5000, knowledgeMinimumEvidence: config.knowledgeMinimumEvidence ?? 3, eventStreamMaxRecords: config.eventStreamMaxRecords ?? 50_000, shortTermMaxRecords: config.shortTermMaxRecords ?? Math.min(1000, maxRecords), shortTermTtlMs: config.shortTermTtlMs ?? 86_400_000, promotionAccesses: config.promotionAccesses ?? 3, promotionImportance: config.promotionImportance ?? 0.8, consolidationIntervalMs: config.consolidationIntervalMs ?? 60_000 };
 }
 
 function defaultSurvivalSettings() { return { enabled: true, autoEquipArmor: true, minimumDurabilityPercent: 10, preferProtection: true, preferDurability: false, allowBindingCurse: false, allowAnimalKill: false, minimumSheepReserve: 2, minimumCowReserve: 2, interactionCooldownMs: 500, entitySearchDistance: 48 }; }

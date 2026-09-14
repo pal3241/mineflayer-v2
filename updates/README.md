@@ -33,6 +33,7 @@ Folder ini menyimpan histori lengkap setiap release, phase, dan update fitur Min
 - [`v0.9.0 Phase 2 — Working Memory`](v0.9.0/phase-2-working-memory.md)
 - [`v0.9.0 Phase 3 — Episodic Memory`](v0.9.0/phase-3-episodic-memory.md)
 - [`v0.9.0 Phase 4 — Procedural & Strategic Knowledge`](v0.9.0/phase-4-procedural-strategic-knowledge.md)
+- [`v0.9.0 Phase 5 — Unified Memory Event Stream`](v0.9.0/phase-5-unified-memory-event-stream.md)
 
 ## Daftar update fitur
 

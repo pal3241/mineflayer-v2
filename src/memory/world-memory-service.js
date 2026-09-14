@@ -12,7 +12,7 @@ export class WorldMemoryService {
     return (await this.repository.list()).filter(item => (!worldKey || item.worldKey === worldKey) && (!query.dimension || item.dimension === query.dimension) && (!name || item.name.toLowerCase().includes(name)) && (!type || item.type === type))
       .map(item => ({ ...item, distance: near ? distance(near, item.position) : null })).sort((left, right) => (right.confidence - left.confidence) || ((left.distance ?? 0) - (right.distance ?? 0)) || right.updatedAt.localeCompare(left.updatedAt)).slice(0, limit);
   }
-  async forget(id) { return this.repository.delete(id); }
+  async forget(id) { const removed = await this.repository.delete(id); if (removed) await this.events?.publish('memory.world.forgotten', { id, reason: 'explicit-delete' }, { source: 'world-memory', correlationId: id }); return removed; }
   async all() { return structuredClone(await this.repository.list()); }
   async forBot(runtime, query = {}) { const snapshot = runtime.adapter.snapshot(); return this.search({ ...query, ...server(runtime.options), dimension: snapshot.dimension, near: snapshot.position }); }
 }

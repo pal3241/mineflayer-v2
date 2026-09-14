@@ -78,3 +78,7 @@ test('configuration validates episodic memory capacity', () => {
 test('configuration validates procedural and strategic knowledge policy', () => {
   const config = loadConfig({ MINEHIVE_KNOWLEDGE_MAX_RECORDS: '200', MINEHIVE_KNOWLEDGE_MINIMUM_EVIDENCE: '4' }); assert.equal(config.semanticMemory.knowledgeMaxRecords, 200); assert.equal(config.semanticMemory.knowledgeMinimumEvidence, 4); assert.throws(() => loadConfig({ MINEHIVE_KNOWLEDGE_MINIMUM_EVIDENCE: '1' }), /memory lifecycle/);
 });
+
+test('configuration validates unified memory event stream capacity', () => {
+  assert.equal(loadConfig({ MINEHIVE_MEMORY_EVENT_STREAM_MAX_RECORDS: '250' }).semanticMemory.eventStreamMaxRecords, 250); assert.throws(() => loadConfig({ MINEHIVE_MEMORY_EVENT_STREAM_MAX_RECORDS: '99' }), /memory lifecycle/);
+});
