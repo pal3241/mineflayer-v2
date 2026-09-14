@@ -191,6 +191,11 @@ export class MineflayerAdapter extends EventEmitter {
   async findNearestStorage({ maxDistance }) {
     const bot = this.#ready('storage-discovery'); const radius = Math.max(2, Math.min(64, Number(maxDistance))); if (!Number.isFinite(radius)) throw new ValidationError('Storage search distance must be numeric'); const block = bot.findBlock({ matching: candidate => isStorageBlock(candidate?.name), maxDistance: radius }); if (!block) throw new ValidationError(`No chest or barrel found within ${radius} blocks`); return this.inspectStorage({ position: block.position });
   }
+  async findWorkshops({ kinds = ['crafting_table', 'furnace'], maxDistance = 48 } = {}) {
+    const bot = this.#ready('workshop-discovery'); const allowed = new Set(kinds.map(String)); const ids = [...allowed].map(name => bot.registry.blocksByName?.[name]?.id).filter(Number.isInteger);
+    if (!ids.length) return [];
+    return (bot.findBlocks?.({ matching: ids, maxDistance: Math.max(1, Math.min(256, Number(maxDistance) || 48)), count: 128 }) ?? []).map(position => bot.blockAt(position)).filter(block => block && allowed.has(block.name)).map(block => ({ kind: block.name, position: validRecoveryPosition(block.position), distance: distance3(bot.entity.position, block.position) })).sort((a, b) => a.distance - b.distance);
+  }
   async inspectStorage({ position }) { return this.#withStorage(position, 'storage-inspection', async container => storageSnapshot(container, position)); }
   async depositStorage({ position, item, count }) {
     const bot = this.#ready('storage-deposit'); const definition = bot.registry?.itemsByName?.[item]; const amount = Math.max(1, Math.min(2304, Number(count))); if (!definition || !Number.isInteger(amount)) throw new ValidationError(`Invalid deposit item or count for '${item}'`); const beforeBot = inventoryCount(bot, item); if (beforeBot < amount) throw new ValidationError(`Bot only has ${beforeBot} '${item}', cannot deposit ${amount}`);

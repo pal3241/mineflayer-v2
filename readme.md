@@ -37,5 +37,6 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
   - Phase 6 — Conflict, Verification & Recovery
 - v0.9.1 — Blueprint & Cooperative Construction — Implemented
 - v0.9.2 — Universal Task Memory — Implemented
+- v0.9.3 — Mass Logistics & Workshops — Implemented
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Roadmap hanya menampilkan phase yang belum selesai; histori phase yang selesai tersimpan permanen di folder [`updates/`](updates/README.md).
