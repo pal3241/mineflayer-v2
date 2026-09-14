@@ -33,4 +33,4 @@ export { collectWorkerStates, createCoordinationMonitor, createHelpCommandServic
 export { createSurvivalService, normalizeSurvivalPolicy, SurvivalCapabilityError } from './survival/index.js';
 export { createTaskReporter } from './tasks/task-reporter.js';
 export { NavigationError, createNavigationService, normalizeNavigationPolicy, normalizeNavigationRequest, normalizeNavigationTarget } from './navigation/index.js';
-export { TERRITORY_TYPES, containsPosition, createExplorationService, createTerritoryIntelligenceService, createTerritoryService, normalizeTerritoryRegion } from './territory/index.js';
+export { DEFAULT_EXPANSION_POLICY, EXPANSION_DIRECTIONS, TERRITORY_TYPES, containsPosition, createExpansionService, createExplorationService, createTerritoryIntelligenceService, createTerritoryService, normalizeExpansionProposal, normalizeTerritoryRegion, validateExpansion } from './territory/index.js';

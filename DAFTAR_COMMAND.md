@@ -744,6 +744,14 @@ Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/navigation/group/move" -Hea
 | `GET` | `/api/v1/exploration/missions/:id` | Detail satu exploration mission. |
 | `POST` | `/api/v1/exploration/missions/:id/execute` | Menjalankan navigation dan survey mission. |
 | `POST` | `/api/v1/exploration/missions/:id/cancel` | Membatalkan mission aktif. |
+| `GET` | `/api/v1/territory/expansions/status` | Ringkasan keputusan ekspansi territory. |
+| `GET` | `/api/v1/territory/expansions` | Daftar proposal ekspansi; filter `status` dan `source`. |
+| `POST` | `/api/v1/territory/expansions` | Membuat dan memvalidasi proposal LLM/manual/system. |
+| `GET` | `/api/v1/territory/expansions/:id` | Detail proposal dan audit pemeriksaan. |
+| `POST` | `/api/v1/territory/expansions/:id/revalidate` | Validasi ulang dengan kondisi terbaru. |
+| `POST` | `/api/v1/territory/expansions/:id/approve` | Persetujuan manusia untuk ekspansi besar. |
+| `POST` | `/api/v1/territory/expansions/:id/apply` | Membentuk Frontier/Outpost dari proposal approved. |
+| `POST` | `/api/v1/territory/expansions/:id/cancel` | Membatalkan proposal yang belum diterapkan. |
 
 Contoh membuat Resource Zone:
 

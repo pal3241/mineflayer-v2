@@ -36,7 +36,7 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
   - Phase 1 — Territory Map & Region Model — Implemented
   - Phase 2 — Resource & Danger Intelligence — Implemented
   - Phase 3 — Exploration & Scout Assignment — Implemented
-  - Phase 4 — Expansion Proposal & Deterministic Validation
+  - Phase 4 — Expansion Proposal & Deterministic Validation — Implemented
   - Phase 5 — Territory Logistics, Defense & Resilience
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Roadmap hanya menampilkan phase yang belum selesai; histori phase yang selesai tersimpan permanen di folder [`updates/`](updates/README.md).
