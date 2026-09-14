@@ -636,12 +636,12 @@ Contoh mengatur LLM:
 
 ```powershell
 $body = @{
-  provider = 'openrouter'
+  provider = 'nvidia'
   openRouterEndpoint = 'https://openrouter.ai/api/v1'
   openRouterModel = 'openrouter/auto'
   openRouterApiKeys = @('OR_KEY_1', 'OR_KEY_2', 'OR_KEY_3')
   nvidiaEndpoint = 'https://integrate.api.nvidia.com/v1'
-  nvidiaModel = 'meta/llama-3.1-8b-instruct'
+  nvidiaModel = 'nvidia/nemotron-3-nano-30b-a3b'
   nvidiaApiKeys = @('NV_KEY_1', 'NV_KEY_2', 'NV_KEY_3')
 } | ConvertTo-Json
 

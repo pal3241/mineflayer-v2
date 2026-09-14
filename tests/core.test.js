@@ -42,7 +42,7 @@ test('application boots without Minecraft or API', async () => {
 });
 
 test('configuration loads three keys for both supported LLM providers', () => {
-  const config = loadConfig({ OPENROUTER_API_KEY_1: 'one', OPENROUTER_API_KEY_2: 'two', OPENROUTER_API_KEY_3: 'three', OPENROUTER_API_KEY: 'one', NVIDIA_API_KEY_1: 'nv-one', NVIDIA_API_KEY_2: 'nv-two', NVIDIA_API_KEY_3: 'nv-three' }); assert.deepEqual(config.llm.openRouterApiKeys, ['one', 'two', 'three']); assert.deepEqual(config.llm.nvidiaApiKeys, ['nv-one', 'nv-two', 'nv-three']); assert.equal(config.llm.provider, 'openrouter');
+  const config = loadConfig({ OPENROUTER_API_KEY_1: 'one', OPENROUTER_API_KEY_2: 'two', OPENROUTER_API_KEY_3: 'three', OPENROUTER_API_KEY: 'one', NVIDIA_API_KEY_1: 'nv-one', NVIDIA_API_KEY_2: 'nv-two', NVIDIA_API_KEY_3: 'nv-three' }); assert.deepEqual(config.llm.openRouterApiKeys, ['one', 'two', 'three']); assert.deepEqual(config.llm.nvidiaApiKeys, ['nv-one', 'nv-two', 'nv-three']); assert.equal(config.llm.provider, 'nvidia');
   const gateway = createApplication({ env: { MINEHIVE_PROFILE: 'test', MINEHIVE_LOG_LEVEL: 'silent', OPENROUTER_API_KEY_1: 'one', OPENROUTER_API_KEY_2: 'two', OPENROUTER_API_KEY_3: 'three' } }).llm; assert.equal(gateway.status().keyCount, 3);
   const nvidia = loadConfig({ NVIDIA_API_KEY: 'nvapi-key' }); assert.equal(nvidia.llm.provider, 'nvidia'); assert.equal(nvidia.llm.nvidiaEndpoint, 'https://integrate.api.nvidia.com/v1');
   const legacyAuto = loadConfig({ MINEHIVE_LLM_PROVIDER: 'auto', OPENROUTER_API_KEY: 'legacy-key' }); assert.equal(legacyAuto.llm.provider, 'openrouter');
