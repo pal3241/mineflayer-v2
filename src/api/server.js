@@ -35,6 +35,8 @@ export class ApiServer {
         if (req.method === 'GET' && url.pathname === '/health') return send(200, await this.application.health.check());
         if (this.application.config.api.token && req.headers.authorization !== `Bearer ${this.application.config.api.token}`) return send(401, { error: { code: 'UNAUTHORIZED', message: 'Valid bearer token required', requestId } });
         if (req.method === 'GET' && url.pathname === '/api/v1/system/status') return send(200, this.application.status());
+        if (req.method === 'GET' && url.pathname === '/api/v1/memory/universal/status') return send(200, { data: await this.application.universalMemory.status() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/memory/universal/context') return send(200, { data: await this.application.universalMemory.context({ worldKey: url.searchParams.get('worldKey'), dimension: url.searchParams.get('dimension'), position: url.searchParams.has('x') ? { x: Number(url.searchParams.get('x')), y: Number(url.searchParams.get('y')), z: Number(url.searchParams.get('z')) } : null, limit: url.searchParams.get('limit') ?? 30 }) });
         if (req.method === 'GET' && url.pathname === '/api/v1/building/protocol') return send(200, { data: this.application.building.protocol() });
         if (req.method === 'GET' && url.pathname === '/api/v1/building/status') return send(200, { data: await this.application.building.status() });
         if (req.method === 'GET' && url.pathname === '/api/v1/building/settings') return send(200, { data: this.application.building.settings() });
