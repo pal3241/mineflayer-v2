@@ -27,6 +27,7 @@ import { FleetCoordinator } from '../ai/fleet-coordinator.js';
 import { WorldMemoryService } from '../memory/world-memory-service.js';
 import { createHashEmbeddingProvider, createSemanticMemory } from '../memory/semantic-memory.js';
 import { createMemoryLifecycle } from '../memory/memory-lifecycle.js';
+import { createMemoryGovernanceService } from '../memory/memory-governance-service.js';
 import { createAdaptiveModel } from '../ml/adaptive-model.js';
 import { createHiveService } from '../hivemind/hive-service.js';
 import { createAutonomyService } from '../autonomy/autonomy-service.js';
@@ -70,7 +71,9 @@ export class Application {
     this.threats = createThreatService({ repository: repository('territory-threats'), events: this.events });
     this.resilience = createResilienceService({ repositories: { incidents: repository('resilience-incidents'), deadLetters: repository('resilience-dead-letters'), recovery: repository('resilience-recovery'), commands: repository('resilience-commands') }, events: this.events });
     this.worldMemory = new WorldMemoryService({ repository: repository('world-memory'), events: this.events, logger: this.logger });
-    this.semanticMemory = createSemanticMemory({ repository: repository('semantic-memory'), events: this.events, embeddingProvider: createHashEmbeddingProvider({ dimensions: config.semanticMemory.dimensions, version: '1' }), maxRecords: config.semanticMemory.maxRecords, shortTermMaxRecords: config.semanticMemory.shortTermMaxRecords, shortTermTtlMs: config.semanticMemory.shortTermTtlMs, promotionAccesses: config.semanticMemory.promotionAccesses, promotionImportance: config.semanticMemory.promotionImportance });
+    const semanticMemoryRepository = repository('semantic-memory'); const embeddingProvider = createHashEmbeddingProvider({ dimensions: config.semanticMemory.dimensions, version: '1' });
+    this.memoryGovernance = createMemoryGovernanceService({ repositories: { memory: semanticMemoryRepository, audit: repository('memory-audit'), quarantine: repository('memory-quarantine'), archive: repository('memory-archive') }, embeddingProvider, shortTermTtlMs: config.semanticMemory.shortTermTtlMs });
+    this.semanticMemory = createSemanticMemory({ repository: semanticMemoryRepository, events: this.events, governance: this.memoryGovernance, embeddingProvider, maxRecords: config.semanticMemory.maxRecords, longTermMaxRecords: config.semanticMemory.longTermMaxRecords, shortTermMaxRecords: config.semanticMemory.shortTermMaxRecords, shortTermTtlMs: config.semanticMemory.shortTermTtlMs, promotionAccesses: config.semanticMemory.promotionAccesses, promotionImportance: config.semanticMemory.promotionImportance });
     this.memoryLifecycle = createMemoryLifecycle({ memory: this.semanticMemory, logger: this.logger, intervalMs: config.semanticMemory.consolidationIntervalMs ?? 60_000 });
     this.discovery = createDiscoveryService({ worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, events: this.events }); this.structureObserver = createStructureObserver({ discovery: this.discovery, logger: this.logger, intervalMs: 15_000, minimumDistance: 16, maxDistance: 64 });
     this.ml = createAdaptiveModel({ outcomeRepository: repository('ml-outcomes'), modelRepository: repository('ml-models'), events: this.events, minimumSamples: config.ml.minimumSamples });
@@ -106,6 +109,7 @@ export class Application {
     this.health.register('bots', async () => ({ status: this.bots.list().some(bot => ['FAILED', 'DEGRADED'].includes(bot.status)) ? 'DEGRADED' : 'HEALTHY' }));
     this.health.register('database', async () => this.database?.health() ?? { status: 'HEALTHY', driver: config.profile === 'test' ? 'memory' : 'json' }, { critical: true });
     this.health.register('memory', async () => this.semanticMemory.status());
+    this.health.register('memoryGovernance', async () => this.memoryGovernance.status());
     this.health.register('memoryLifecycle', async () => this.memoryLifecycle.status());
     this.health.register('ml', async () => this.ml.status());
     this.health.register('hivemind', async () => this.hive.status());
@@ -131,7 +135,7 @@ export class Application {
   async initialize() {
     if (this.state !== 'CREATED') return;
     this.state = 'BOOTSTRAPPING'; this.logger.info('application.bootstrapping'); this.state = 'INITIALIZING';
-    await this.admins.initialize(); this.restoredProfiles = await this.botProfiles.initialize(); await this.navigationSettings.initialize(); await this.acquisition.initialize(); await this.help.initialize(); await this.exploration.initialize();
+    await this.memoryGovernance.initialize(); await this.admins.initialize(); this.restoredProfiles = await this.botProfiles.initialize(); await this.navigationSettings.initialize(); await this.acquisition.initialize(); await this.help.initialize(); await this.exploration.initialize();
     await this.modules.run('initialize', this.context()); await this.plugins.run('initialize', this.context()); this.state = 'READY';
     await this.events.publish('application.ready', {}, { source: 'application' });
   }
@@ -190,7 +194,7 @@ export class Application {
     return normalized;
   }
   configureSurvival(input) { return this.survival.configure(input); }
-  status() { return { name: 'MineHive', version: '0.8.0', phase: 'Territory Logistics, Defense & Resilience Phase 5', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
+  status() { return { name: 'MineHive', version: '0.9.0', phase: 'Short & Long-Term Memory Hardening Phase 1', state: this.state, uptimeSeconds: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0, bots: this.bots.list(), goals: this.goals.list(), modules: this.modules.status(), plugins: this.plugins.status(), navigation: this.navigation.status(), autonomy: this.autonomy.status(), acquisition: this.acquisition.status(), survival: this.survival.status() }; }
 }
 
 function portAvailable(port) {
@@ -201,7 +205,7 @@ function portAvailable(port) {
 }
 
 function defaultMemorySettings(config) {
-  const maxRecords = config.maxRecords; return { maxRecords, shortTermMaxRecords: config.shortTermMaxRecords ?? Math.min(1000, maxRecords), shortTermTtlMs: config.shortTermTtlMs ?? 86_400_000, promotionAccesses: config.promotionAccesses ?? 3, promotionImportance: config.promotionImportance ?? 0.8, consolidationIntervalMs: config.consolidationIntervalMs ?? 60_000 };
+  const maxRecords = config.maxRecords; return { maxRecords, longTermMaxRecords: config.longTermMaxRecords ?? maxRecords, shortTermMaxRecords: config.shortTermMaxRecords ?? Math.min(1000, maxRecords), shortTermTtlMs: config.shortTermTtlMs ?? 86_400_000, promotionAccesses: config.promotionAccesses ?? 3, promotionImportance: config.promotionImportance ?? 0.8, consolidationIntervalMs: config.consolidationIntervalMs ?? 60_000 };
 }
 
 function defaultSurvivalSettings() { return { enabled: true, autoEquipArmor: true, minimumDurabilityPercent: 10, preferProtection: true, preferDurability: false, allowBindingCurse: false, allowAnimalKill: false, minimumSheepReserve: 2, minimumCowReserve: 2, interactionCooldownMs: 500, entitySearchDistance: 48 }; }

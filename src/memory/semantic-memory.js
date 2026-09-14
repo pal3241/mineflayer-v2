@@ -9,11 +9,11 @@ export function createHashEmbeddingProvider({ dimensions, version }) {
   return Object.freeze({ model: 'minehive-hash-embedding', version, dimensions, embed: text => hashEmbedding(text, dimensions) });
 }
 
-export function createSemanticMemory({ repository, events, embeddingProvider, maxRecords, shortTermMaxRecords, shortTermTtlMs, promotionAccesses, promotionImportance }) {
+export function createSemanticMemory({ repository, events, embeddingProvider, governance = null, maxRecords, longTermMaxRecords, shortTermMaxRecords, shortTermTtlMs, promotionAccesses, promotionImportance }) {
   if (!repository || typeof repository.list !== 'function') throw new ValidationError('Semantic memory repository is required');
   if (!embeddingProvider || typeof embeddingProvider.embed !== 'function') throw new ValidationError('Semantic memory embedding provider is required');
   if (!Number.isInteger(maxRecords) || maxRecords < 100) throw new ValidationError('Semantic memory maxRecords must be at least 100');
-  let policy = normalizePolicy({ maxRecords, shortTermMaxRecords, shortTermTtlMs, promotionAccesses, promotionImportance });
+  let policy = normalizePolicy({ maxRecords, longTermMaxRecords, shortTermMaxRecords, shortTermTtlMs, promotionAccesses, promotionImportance });
   let cachePromise = null; let mutationQueue = Promise.resolve();
   const loadRecords = () => { cachePromise ??= repository.list(); return cachePromise; };
   const mutate = operation => { const result = mutationQueue.then(operation); mutationQueue = result.then(() => undefined, () => undefined); return result; };
@@ -23,9 +23,10 @@ export function createSemanticMemory({ repository, events, embeddingProvider, ma
     const duplicate = records.find(record => sameScope(record, value) && record.type === value.type && cosine(record.embedding?.vector, vector) >= 0.97);
     const now = new Date().toISOString(); const lifecycle = lifecycleFields(value.type, duplicate, now, policy.shortTermTtlMs);
     const record = duplicate
-      ? await repository.update(duplicate.id, { ...value, ...lifecycle, id: duplicate.id, confidence: Math.max(duplicate.confidence, value.confidence), importance: Math.max(duplicate.importance, value.importance), embedding: embeddingMetadata(embeddingProvider, vector, now), createdAt: duplicate.createdAt, updatedAt: now, version: duplicate.version + 1 })
-      : await repository.create({ ...value, ...lifecycle, id: randomUUID(), embedding: embeddingMetadata(embeddingProvider, vector, now), createdAt: now, updatedAt: now, version: 1 });
-    records = duplicate ? records.map(item => item.id === record.id ? record : item) : [record, ...records]; cachePromise = Promise.resolve(await prune(repository, records, policy, Date.now()));
+      ? await repository.update(duplicate.id, { ...value, ...lifecycle, id: duplicate.id, confidence: Math.max(duplicate.confidence, value.confidence), importance: Math.max(duplicate.importance, value.importance), embedding: embeddingMetadata(embeddingProvider, vector, now), createdAt: duplicate.createdAt, updatedAt: now, version: duplicate.version + 1, schemaVersion: 1 })
+      : await repository.create({ ...value, ...lifecycle, id: randomUUID(), embedding: embeddingMetadata(embeddingProvider, vector, now), createdAt: now, updatedAt: now, version: 1, schemaVersion: 1 });
+    await governance?.record({ action: duplicate ? 'UPDATED' : 'CREATED', memoryId: record.id, details: { type: record.type } });
+    records = duplicate ? records.map(item => item.id === record.id ? record : item) : [record, ...records]; cachePromise = Promise.resolve(await prune(repository, records, policy, Date.now(), governance));
     await events?.publish('memory.semantic.remembered', publicMemory(record), { source: 'semantic-memory' }); return publicMemory(record);
   });
 
@@ -45,31 +46,32 @@ export function createSemanticMemory({ repository, events, embeddingProvider, ma
     for (const record of records) {
       if (record.type !== 'SHORT_TERM') { nextRecords.push(record); continue; }
       const promotable = record.importance >= policy.promotionImportance || Number(record.accessCount ?? 0) >= policy.promotionAccesses;
-      if (promotable) { const promotedRecord = await repository.update(record.id, { type: 'LONG_TERM', expiresAt: null, consolidatedAt: now, updatedAt: now, version: record.version + 1, metadata: { ...record.metadata, consolidatedFrom: 'SHORT_TERM' } }); nextRecords.push(promotedRecord); promoted++; await events?.publish('memory.promoted', publicMemory(promotedRecord), { source: 'semantic-memory' }); continue; }
-      if (isExpired(record, nowMs)) { await repository.delete(record.id); forgotten++; await events?.publish('memory.forgotten', { id: record.id, reason: 'short-term-expired' }, { source: 'semantic-memory' }); continue; }
+      if (promotable) { const promotedRecord = await repository.update(record.id, { type: 'LONG_TERM', expiresAt: null, consolidatedAt: now, updatedAt: now, version: record.version + 1, metadata: { ...record.metadata, consolidatedFrom: 'SHORT_TERM' } }); nextRecords.push(promotedRecord); promoted++; await governance?.record({ action: 'PROMOTED', memoryId: record.id, details: { from: 'SHORT_TERM', to: 'LONG_TERM' } }); await events?.publish('memory.promoted', publicMemory(promotedRecord), { source: 'semantic-memory' }); continue; }
+      if (isExpired(record, nowMs)) { await repository.delete(record.id); forgotten++; await governance?.record({ action: 'EXPIRED_PURGED', memoryId: record.id, reason: 'short-term-expired' }); await events?.publish('memory.forgotten', { id: record.id, reason: 'short-term-expired' }, { source: 'semantic-memory' }); continue; }
       nextRecords.push(record);
     }
-    records = await prune(repository, nextRecords, policy, nowMs); cachePromise = Promise.resolve(records); const result = { promoted, forgotten, retained: records.length, consolidatedAt: now };
+    records = await prune(repository, nextRecords, policy, nowMs, governance); cachePromise = Promise.resolve(records); const result = { promoted, forgotten, retained: records.length, consolidatedAt: now };
     await events?.publish('memory.consolidated', result, { source: 'semantic-memory' }); return result;
   });
 
-  const status = async () => { const records = await loadRecords(); const now = Date.now(); const byType = Object.fromEntries([...TYPES].map(type => [type, records.filter(record => record.type === type && !isExpired(record, now)).length])); return { status: records.length > policy.maxRecords ? 'DEGRADED' : 'HEALTHY', count: records.length, activeCount: records.filter(record => !isExpired(record, now)).length, expiredShortTerm: records.filter(record => record.type === 'SHORT_TERM' && isExpired(record, now)).length, maxRecords: policy.maxRecords, policy: { shortTermMaxRecords: policy.shortTermMaxRecords, shortTermTtlMs: policy.shortTermTtlMs, promotionAccesses: policy.promotionAccesses, promotionImportance: policy.promotionImportance }, embedding: { model: embeddingProvider.model, version: embeddingProvider.version, dimensions: embeddingProvider.dimensions }, byType }; };
+  const status = async () => { const records = await loadRecords(); const now = Date.now(); const byType = Object.fromEntries([...TYPES].map(type => [type, records.filter(record => record.type === type && !isExpired(record, now)).length])); return { status: records.length > policy.maxRecords || byType.LONG_TERM > policy.longTermMaxRecords ? 'DEGRADED' : 'HEALTHY', count: records.length, activeCount: records.filter(record => !isExpired(record, now)).length, expiredShortTerm: records.filter(record => record.type === 'SHORT_TERM' && isExpired(record, now)).length, maxRecords: policy.maxRecords, policy: { longTermMaxRecords: policy.longTermMaxRecords, shortTermMaxRecords: policy.shortTermMaxRecords, shortTermTtlMs: policy.shortTermTtlMs, promotionAccesses: policy.promotionAccesses, promotionImportance: policy.promotionImportance }, embedding: { model: embeddingProvider.model, version: embeddingProvider.version, dimensions: embeddingProvider.dimensions }, byType }; };
   const all = async () => (await loadRecords()).map(publicMemory);
   const configure = input => mutate(async () => {
     const nextPolicy = configuredPolicy(input); policy = nextPolicy;
-    await events?.publish('memory.policy.configured', { maxRecords: policy.maxRecords, shortTermMaxRecords: policy.shortTermMaxRecords, shortTermTtlMs: policy.shortTermTtlMs, promotionAccesses: policy.promotionAccesses, promotionImportance: policy.promotionImportance }, { source: 'semantic-memory' });
+    await events?.publish('memory.policy.configured', { maxRecords: policy.maxRecords, longTermMaxRecords: policy.longTermMaxRecords, shortTermMaxRecords: policy.shortTermMaxRecords, shortTermTtlMs: policy.shortTermTtlMs, promotionAccesses: policy.promotionAccesses, promotionImportance: policy.promotionImportance }, { source: 'semantic-memory' });
     return status();
   });
-  const forget = id => mutate(async () => { const removed = await repository.delete(id); if (removed) cachePromise = Promise.resolve((await loadRecords()).filter(record => record.id !== id)); return removed; });
+  const forget = id => mutate(async () => { const removed = await repository.delete(id); if (removed) { cachePromise = Promise.resolve((await loadRecords()).filter(record => record.id !== id)); await governance?.record({ action: 'FORGOTTEN', memoryId: id, reason: 'explicit-delete' }); } return removed; });
   const rememberShortTerm = input => remember({ ...input, type: 'SHORT_TERM' });
   const rememberLongTerm = input => remember({ ...input, type: 'LONG_TERM', importance: Math.max(0.8, Number(input.importance ?? 0.8)) });
   return Object.freeze({ remember, rememberShortTerm, rememberLongTerm, search, recall, consolidate, forget, status, all, configure });
 }
 
-function normalizePolicy({ maxRecords, shortTermMaxRecords, shortTermTtlMs, promotionAccesses, promotionImportance }) {
-  const policy = { maxRecords, shortTermMaxRecords: shortTermMaxRecords ?? Math.min(1000, maxRecords), shortTermTtlMs: shortTermTtlMs ?? 86_400_000, promotionAccesses: promotionAccesses ?? 3, promotionImportance: promotionImportance ?? 0.8 };
+function normalizePolicy({ maxRecords, longTermMaxRecords, shortTermMaxRecords, shortTermTtlMs, promotionAccesses, promotionImportance }) {
+  const policy = { maxRecords, longTermMaxRecords: longTermMaxRecords ?? maxRecords, shortTermMaxRecords: shortTermMaxRecords ?? Math.min(1000, maxRecords), shortTermTtlMs: shortTermTtlMs ?? 86_400_000, promotionAccesses: promotionAccesses ?? 3, promotionImportance: promotionImportance ?? 0.8 };
   if (!Number.isInteger(policy.maxRecords) || policy.maxRecords < 100) throw new ValidationError('Semantic memory limit must be at least 100');
   if (!Number.isInteger(policy.shortTermMaxRecords) || policy.shortTermMaxRecords < 1 || policy.shortTermMaxRecords > maxRecords) throw new ValidationError('Short-term memory limit must be between 1 and maxRecords');
+  if (!Number.isInteger(policy.longTermMaxRecords) || policy.longTermMaxRecords < 1 || policy.longTermMaxRecords > maxRecords) throw new ValidationError('Long-term memory limit must be between 1 and maxRecords');
   if (!Number.isInteger(policy.shortTermTtlMs) || policy.shortTermTtlMs < 1000) throw new ValidationError('Short-term memory TTL must be at least 1000ms');
   if (!Number.isInteger(policy.promotionAccesses) || policy.promotionAccesses < 1) throw new ValidationError('Memory promotion accesses must be a positive integer');
   if (!Number.isFinite(policy.promotionImportance) || policy.promotionImportance < 0 || policy.promotionImportance > 1) throw new ValidationError('Memory promotion importance must be between 0 and 1');
@@ -80,7 +82,7 @@ function configuredPolicy(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ValidationError('Memory settings must be an object');
   const fields = ['maxRecords', 'shortTermMaxRecords', 'shortTermTtlMs', 'promotionAccesses', 'promotionImportance'];
   for (const field of fields) if (input[field] === undefined) throw new ValidationError(`Memory setting '${field}' is required`);
-  return normalizePolicy({ maxRecords: Number(input.maxRecords), shortTermMaxRecords: Number(input.shortTermMaxRecords), shortTermTtlMs: Number(input.shortTermTtlMs), promotionAccesses: Number(input.promotionAccesses), promotionImportance: Number(input.promotionImportance) });
+  return normalizePolicy({ maxRecords: Number(input.maxRecords), longTermMaxRecords: input.longTermMaxRecords === undefined ? Number(input.maxRecords) : Number(input.longTermMaxRecords), shortTermMaxRecords: Number(input.shortTermMaxRecords), shortTermTtlMs: Number(input.shortTermTtlMs), promotionAccesses: Number(input.promotionAccesses), promotionImportance: Number(input.promotionImportance) });
 }
 
 function normalizeMemory(input) {
@@ -101,7 +103,8 @@ function matchesScope(record, query) { return (!query.worldKey || record.worldKe
 function embeddingMetadata(provider, vector, generatedAt) { return { model: provider.model, version: provider.version, dimensions: provider.dimensions, generatedAt, vector }; }
 function publicMemory(record) { const { embedding, ...value } = record; return { ...value, embedding: { model: embedding.model, version: embedding.version, dimensions: embedding.dimensions, generatedAt: embedding.generatedAt } }; }
 function isExpired(record, now) { return record.type === 'SHORT_TERM' && record.expiresAt && Date.parse(record.expiresAt) <= now; }
-async function prune(repository, records, policy, now) { const expired = records.filter(record => isExpired(record, now) && record.importance < policy.promotionImportance); const expiredIds = new Set(expired.map(record => record.id)); const shortTerm = records.filter(record => record.type === 'SHORT_TERM' && !expiredIds.has(record.id)).sort((left, right) => left.importance - right.importance || Number(left.accessCount ?? 0) - Number(right.accessCount ?? 0) || left.updatedAt.localeCompare(right.updatedAt)); const excessShortTerm = shortTerm.slice(0, Math.max(0, shortTerm.length - policy.shortTermMaxRecords)); const initialRemoved = new Set([...expired, ...excessShortTerm].map(record => record.id)); const removable = records.filter(record => record.type !== 'LONG_TERM' && !initialRemoved.has(record.id)).sort((left, right) => left.importance - right.importance || left.updatedAt.localeCompare(right.updatedAt)).slice(0, Math.max(0, records.length - initialRemoved.size - policy.maxRecords)); const removed = new Set([...initialRemoved, ...removable.map(record => record.id)]); for (const record of records) if (removed.has(record.id)) await repository.delete(record.id); return records.filter(record => !removed.has(record.id)); }
+async function prune(repository, records, policy, now, governance) { const expired = records.filter(record => isExpired(record, now) && record.importance < policy.promotionImportance); const expiredIds = new Set(expired.map(record => record.id)); const shortTerm = records.filter(record => record.type === 'SHORT_TERM' && !expiredIds.has(record.id)).sort(retentionOrder); const excessShortTerm = shortTerm.slice(0, Math.max(0, shortTerm.length - policy.shortTermMaxRecords)); const longTerm = records.filter(record => record.type === 'LONG_TERM').sort(retentionOrder); const excessLongTerm = longTerm.slice(0, Math.max(0, longTerm.length - policy.longTermMaxRecords)); const initialRemoved = new Set([...expired, ...excessShortTerm, ...excessLongTerm].map(record => record.id)); const removable = records.filter(record => record.type !== 'LONG_TERM' && !initialRemoved.has(record.id)).sort(retentionOrder).slice(0, Math.max(0, records.length - initialRemoved.size - policy.maxRecords)); const removed = new Set([...initialRemoved, ...removable.map(record => record.id)]); for (const record of records) if (removed.has(record.id)) { const reason = excessLongTerm.some(item => item.id === record.id) ? 'long-term-limit' : expiredIds.has(record.id) ? 'short-term-expired' : 'retention-limit'; if (record.type === 'LONG_TERM') await governance?.archive(record, reason); else await governance?.record({ action: 'RETENTION_EVICTED', memoryId: record.id, reason }); await repository.delete(record.id); } return records.filter(record => !removed.has(record.id)); }
+function retentionOrder(left, right) { return left.importance - right.importance || Number(left.accessCount ?? 0) - Number(right.accessCount ?? 0) || left.updatedAt.localeCompare(right.updatedAt); }
 function boundedNumber(value, minimum, maximum, fallback) { const number = Number(value ?? fallback); if (!Number.isFinite(number)) throw new ValidationError('Memory numeric field must be finite'); return Math.max(minimum, Math.min(maximum, number)); }
 function boundedInteger(value, minimum, maximum, fallback) { const number = Number.parseInt(value ?? fallback, 10); if (!Number.isInteger(number)) throw new ValidationError('Memory limit must be an integer'); return Math.max(minimum, Math.min(maximum, number)); }
 function round(value) { return Math.round(value * 10000) / 10000; }

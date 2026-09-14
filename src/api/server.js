@@ -111,6 +111,11 @@ export class ApiServer {
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/long-term') return send(201, { data: await this.application.semanticMemory.rememberLongTerm(await body(req)) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/recall') return send(200, { data: await this.application.semanticMemory.recall(await body(req)) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/consolidate') return send(200, { data: await this.application.memoryLifecycle.tick() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/memory/governance/status') return send(200, { data: await this.application.memoryGovernance.status() });
+        if (req.method === 'POST' && url.pathname === '/api/v1/memory/governance/scan') return send(200, { data: await this.application.memoryGovernance.initialize() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/memory/audit') return send(200, { data: await this.application.memoryGovernance.audit(url.searchParams.get('limit')) });
+        if (req.method === 'GET' && url.pathname === '/api/v1/memory/quarantine') return send(200, { data: await this.application.memoryGovernance.quarantine(url.searchParams.get('limit')) });
+        if (req.method === 'GET' && url.pathname === '/api/v1/memory/archive') return send(200, { data: await this.application.memoryGovernance.archived(url.searchParams.get('limit')) });
         if (req.method === 'GET' && url.pathname === '/api/v1/ml/status') return send(200, { data: await this.application.ml.status() });
         if (req.method === 'GET' && url.pathname === '/api/v1/ml/models') return send(200, { data: await this.application.ml.models() });
         if (req.method === 'GET' && url.pathname === '/api/v1/hivemind/status') { this.application.hive.syncMembers(this.application.bots.list()); return send(200, { data: await this.application.hive.status() }); }

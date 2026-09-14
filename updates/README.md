@@ -29,6 +29,7 @@ Folder ini menyimpan histori lengkap setiap release, phase, dan update fitur Min
 - [`v0.8.0 Phase 3 — Exploration & Scout Assignment`](v0.8.0/phase-3-exploration-scout-assignment.md)
 - [`v0.8.0 Phase 4 — Expansion Proposal & Deterministic Validation`](v0.8.0/phase-4-expansion-proposal-validation.md)
 - [`v0.8.0 Phase 5 — Territory Logistics, Defense & Resilience`](v0.8.0/phase-5-territory-logistics-defense-resilience.md)
+- [`v0.9.0 Phase 1 — Short & Long-Term Memory Hardening`](v0.9.0/phase-1-short-long-memory-hardening.md)
 
 ## Daftar update fitur
 

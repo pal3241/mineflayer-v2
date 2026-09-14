@@ -825,6 +825,11 @@ Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/territory/regions" -Headers
 | `POST` | `/api/v1/memory/long-term` | Menambah long-term memory. |
 | `POST` | `/api/v1/memory/recall` | Recall memory yang relevan. |
 | `POST` | `/api/v1/memory/consolidate` | Menjalankan konsolidasi memory. |
+| `GET` | `/api/v1/memory/governance/status` | Status schema scan, audit, quarantine, dan archive memory. |
+| `POST` | `/api/v1/memory/governance/scan` | Menjalankan ulang validasi dan migrasi memory secara idempotent. |
+| `GET` | `/api/v1/memory/audit` | Membaca audit lifecycle memory; mendukung query `limit`. |
+| `GET` | `/api/v1/memory/quarantine` | Membaca record korup yang diamankan; mendukung query `limit`. |
+| `GET` | `/api/v1/memory/archive` | Membaca long-term memory yang keluar dari active retention; mendukung query `limit`. |
 | `GET` | `/api/v1/memory/dashboard` | Browser gabungan world dan semantic memory dengan filter serta pagination. |
 | `GET` | `/api/v1/ml/status` | Status model ML. |
 | `GET` | `/api/v1/ml/models` | Daftar model ML. |
