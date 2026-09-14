@@ -102,6 +102,14 @@ export class ApiServer {
         if (req.method === 'GET' && url.pathname === '/api/v1/ai/fleet') return send(200, { data: this.application.coordinator.fleetView() });
         if (req.method === 'POST' && url.pathname === '/api/v1/ai/command') { const input = await body(req); return send(200, { data: await this.application.coordinator.coordinate({ text: input.text, selector: input.selector, actor: 'api' }) }); }
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/dashboard') return send(200, { data: await memoryDashboard(this.application, url.searchParams) });
+        if (req.method === 'GET' && url.pathname === '/api/v1/memory/working') return send(200, { data: await this.application.workingMemory.list({ botId: url.searchParams.get('botId') ?? undefined, goalId: url.searchParams.get('goalId') ?? undefined, limit: url.searchParams.get('limit') ?? 100 }) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/memory/working') return send(201, { data: await this.application.workingMemory.activate(await body(req)) });
+        if (parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3] === 'working' && parts[4] && parts.length === 5) {
+          const taskId = decodeURIComponent(parts[4]);
+          if (req.method === 'GET') return send(200, { data: await this.application.workingMemory.find(taskId) });
+          if (req.method === 'PATCH') return send(200, { data: await this.application.workingMemory.update(taskId, await body(req)) });
+          if (req.method === 'DELETE') return send(200, { data: { removed: await this.application.workingMemory.release(taskId, 'api-delete') } });
+        }
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/semantic') return send(200, { data: await this.application.semanticMemory.search({ text: url.searchParams.get('q') ?? '', worldKey: url.searchParams.get('worldKey') ?? undefined, dimension: url.searchParams.get('dimension') ?? undefined, type: url.searchParams.get('type') ?? undefined, limit: url.searchParams.get('limit') ?? 10 }) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/semantic') return send(201, { data: await this.application.semanticMemory.remember(await body(req)) });
         if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3] === 'semantic' && parts[4] && parts.length === 5) return send(200, { data: await deleteMemory(this.application.semanticMemory, 'Semantic memory', decodeURIComponent(parts[4]), 'semantic') });

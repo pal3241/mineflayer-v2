@@ -817,6 +817,11 @@ Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/territory/regions" -Headers
 | `POST` | `/api/v1/memory` | Menambah world memory. |
 | `DELETE` | `/api/v1/memory/:id` | Menghapus world memory. |
 | `GET` | `/api/v1/memory/semantic` | Mencari semantic memory. |
+| `GET` | `/api/v1/memory/working` | Daftar working memory aktif; filter `botId`, `goalId`, dan `limit`. |
+| `POST` | `/api/v1/memory/working` | Membuka working memory untuk task aktif. |
+| `GET` | `/api/v1/memory/working/:taskId` | Membaca workspace sementara suatu task. |
+| `PATCH` | `/api/v1/memory/working/:taskId` | Memperbarui action, target, progress, inventory/cargo, route, lease, atau checkpoint. |
+| `DELETE` | `/api/v1/memory/working/:taskId` | Melepas working memory task secara eksplisit. |
 | `POST` | `/api/v1/memory/semantic` | Menambah semantic memory. |
 | `DELETE` | `/api/v1/memory/semantic/:id` | Menghapus satu semantic memory. |
 | `GET` | `/api/v1/memory/short-term` | Mencari short-term memory. |

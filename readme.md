@@ -34,7 +34,6 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 - v0.7.4 — Advanced Navigation & Movement
 - v0.8.0 — Autonomous Territory & Expansion
 - v0.9.0 — Unified Hive Shared Memory
-  - Phase 2 — Working Memory
   - Phase 3 — Episodic Memory
   - Phase 4 — Procedural & Strategic Knowledge
   - Phase 5 — Unified Memory Event Stream

@@ -22,6 +22,7 @@ export { SqliteDatabase, SqliteRepository } from './database/sqlite-database.js'
 export { createHashEmbeddingProvider, createSemanticMemory } from './memory/semantic-memory.js';
 export { createMemoryLifecycle } from './memory/memory-lifecycle.js';
 export { createMemoryGovernanceService } from './memory/memory-governance-service.js';
+export { createWorkingMemoryService } from './memory/working-memory-service.js';
 export { createAdaptiveModel } from './ml/adaptive-model.js';
 export { createHiveService } from './hivemind/hive-service.js';
 export { createAutonomyService } from './autonomy/autonomy-service.js';

@@ -65,3 +65,8 @@ test('configuration validates short and long memory lifecycle policy', () => {
   assert.equal(loadConfig({ MINEHIVE_MEMORY_MAX_RECORDS: '100' }).semanticMemory.shortTermMaxRecords, 100);
   assert.throws(() => loadConfig({ MINEHIVE_SHORT_MEMORY_TTL_MS: '100' }), /short-term memory lifecycle/);
 });
+
+test('configuration validates working memory bounds', () => {
+  const config = loadConfig({ MINEHIVE_WORKING_MEMORY_MAX_RECORDS: '25', MINEHIVE_WORKING_MEMORY_TTL_MS: '5000' }); assert.equal(config.semanticMemory.workingMemoryMaxRecords, 25); assert.equal(config.semanticMemory.workingMemoryTtlMs, 5000);
+  assert.throws(() => loadConfig({ MINEHIVE_WORKING_MEMORY_MAX_RECORDS: '0' }), /memory lifecycle/); assert.throws(() => loadConfig({ MINEHIVE_WORKING_MEMORY_TTL_MS: '999' }), /memory lifecycle/);
+});
