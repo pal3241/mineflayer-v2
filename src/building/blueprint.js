@@ -49,13 +49,15 @@ function decodedNbt(content) {
 }
 
 function decodeSpongeSchematic(content) {
-  const root = decodedNbt(content); const width = Number(root.Width); const height = Number(root.Height); const length = Number(root.Length);
+  const document = decodedNbt(content); const root = document.Schematic ?? document; const width = Number(root.Width); const height = Number(root.Height); const length = Number(root.Length);
   if (![width, height, length].every(value => Number.isInteger(value) && value > 0)) throw new ValidationError('Invalid .schem dimensions');
-  const palette = root.Palette; const data = root.BlockData;
-  if (!palette || !Buffer.isBuffer(data)) throw new ValidationError('Unsupported .schem: Palette and BlockData are required');
+  // Sponge Schematic v2 stored Palette/BlockData at the root. v3 wraps them in
+  // Blocks as Palette/Data (the format emitted by current WorldEdit/FAWE).
+  const palette = root.Palette ?? root.Blocks?.Palette; const data = root.BlockData ?? root.Blocks?.Data;
+  if (!palette || !Buffer.isBuffer(data)) throw new ValidationError('Unsupported .schem: Palette and block data are required');
   const names = []; for (const [name, index] of Object.entries(palette)) names[Number(index)] = name;
   const ids = readVarInts(data, width * height * length); const blocks = [];
-  for (let index = 0; index < ids.length; index++) { const name = names[ids[index]]; if (!name || AIR.has(String(name).replace(/^minecraft:/, ''))) continue; const x = index % width; const z = Math.floor(index / width) % length; const y = Math.floor(index / (width * length)); blocks.push({ x, y, z, name }); }
+  for (let index = 0; index < ids.length; index++) { const state = blockStateFromName(names[ids[index]]); if (!state || AIR.has(state.name)) continue; const x = index % width; const z = Math.floor(index / width) % length; const y = Math.floor(index / (width * length)); blocks.push({ x, y, z, ...state }); }
   return { name: root.Metadata?.Name ?? 'Imported schematic', format: 'schem', origin: { x: 0, y: 0, z: 0 }, blocks, metadata: { sourceFormat: 'sponge-schem', version: root.Version ?? null } };
 }
 
@@ -75,6 +77,7 @@ function decodeLitematic(content) {
 }
 
 function readVarInts(data, count) { const values = []; let index = 0; while (index < data.length && values.length < count) { let value = 0; let shift = 0; let current; do { if (index >= data.length || shift > 35) throw new ValidationError('Invalid .schem BlockData varint'); current = data[index++]; value |= (current & 127) << shift; shift += 7; } while (current & 128); values.push(value >>> 0); } if (values.length !== count) throw new ValidationError('Incomplete .schem BlockData'); return values; }
+function blockStateFromName(value) { const text = String(value ?? '').trim().replace(/^minecraft:/, ''); if (!text) return null; const match = /^([^\[]+)(?:\[([^\]]*)\])?$/.exec(text); if (!match) return { name: text, properties: {} }; const properties = Object.fromEntries((match[2] ?? '').split(',').filter(Boolean).map(item => { const [key, ...rest] = item.split('='); return [key, rest.join('=')]; })); return { name: match[1], properties }; }
 function packedIndex(values, index, bits) { const start = BigInt(index * bits); const word = Number(start >> 6n); const offset = Number(start & 63n); const first = BigInt.asUintN(64, BigInt(values[word] ?? 0)); const second = BigInt.asUintN(64, BigInt(values[word + 1] ?? 0)); return Number(((first >> BigInt(offset)) | (second << BigInt(64 - offset))) & ((1n << BigInt(bits)) - 1n)); }
 
 class NbtReader {
