@@ -49,3 +49,4 @@ function validDate(value) { return typeof value === 'string' && Number.isFinite(
 function boundedLimit(value) { const number = Number(value ?? 100); return Number.isInteger(number) ? Math.max(1, Math.min(500, number)) : 100; }
 function round(value) { return Math.round(value * 10_000) / 10_000; }
 function publicCandidate(value) { return structuredClone(value); }
+
