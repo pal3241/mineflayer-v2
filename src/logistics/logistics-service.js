@@ -16,7 +16,7 @@ export function createLogisticsService({ repositories, hive, events, resourceRes
       const storages = await repositories.storages.list(); const scoped = storages.filter(storage => matchesScope(storage, scope));
       const sameName = scoped.find(storage => storage.name.toLowerCase() === label.toLowerCase()); if (sameName) throw new ConflictError(`Storage name '${label}' is already used in this world`);
       const normalized = validateObservation(await input.runtime.adapter.findNearestStorage({ maxDistance: input.maxDistance, excludePositions: scoped.map(storage => storage.position) }), true);
-      const samePosition = scoped.find(storage => positionKey(storage.position) === positionKey(normalized.position)); if (samePosition) throw new ConflictError(`Storage at ${positionKey(normalized.position)} is already registered as '${samePosition.name}'`);
+      const samePosition = scoped.find(storage => positionKey(storage.position) === positionKey(normalized.position)); if (samePosition) throw new ConflictError(`Storage at ${positionKey(normalized.position)} is already registered as '${samePosition.name}'. Rename it from the dashboard instead`);
       const now = new Date().toISOString(); const storage = await repositories.storages.create({ ...scope, name: label, kind: normalized.kind, position: normalized.position, inventory: normalized.inventory, capacitySlots: normalized.capacitySlots, occupiedSlots: normalized.occupiedSlots, status: 'ACTIVE', sourceBotId: input.runtime.bot.id, observedAt: now, updatedAt: now, id: randomUUID(), createdAt: now, version: 1 }); await events?.publish('logistics.storage.registered', storage, eventOptions(storage.id)); return storage;
     });
   };

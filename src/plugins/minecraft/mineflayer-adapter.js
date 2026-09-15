@@ -190,8 +190,9 @@ export class MineflayerAdapter extends EventEmitter {
   }
   async findNearestStorage({ maxDistance, excludePositions = [] }) {
     const bot = this.#ready('storage-discovery'); const radius = Math.max(2, Math.min(64, Number(maxDistance))); if (!Number.isFinite(radius)) throw new ValidationError('Storage search distance must be numeric');
-    const excluded = excludePositions.map(position => ({ x: Number(position.x), y: Number(position.y), z: Number(position.z) })); const positions = bot.findBlocks?.({ matching: candidate => isStorageBlock(candidate?.name), maxDistance: radius, count: 256 }) ?? [];
-    const block = positions.map(position => bot.blockAt(position)).filter(candidate => candidate && isStorageBlock(candidate.name) && !isExcludedStorageHalf(candidate, excluded)).sort((left, right) => distance3(bot.entity.position, left.position) - distance3(bot.entity.position, right.position))[0];
+    const excluded = excludePositions.map(position => ({ x: Number(position.x), y: Number(position.y), z: Number(position.z) })); const positions = bot.findBlocks?.({ matching: candidate => isStorageBlock(candidate?.name), maxDistance: radius, count: 256 });
+    const candidates = Array.isArray(positions) ? positions.map(position => bot.blockAt(position)) : [bot.findBlock?.({ matching: candidate => isStorageBlock(candidate?.name) && !isExcludedStorageHalf(candidate, excluded), maxDistance: radius })];
+    const block = candidates.filter(candidate => candidate && isStorageBlock(candidate.name) && !isExcludedStorageHalf(candidate, excluded)).sort((left, right) => distance3(bot.entity.position, left.position) - distance3(bot.entity.position, right.position))[0];
     if (!block) throw new ValidationError(`No unregistered chest or barrel found within ${radius} blocks`);
     return this.inspectStorage({ position: block.position });
   }
