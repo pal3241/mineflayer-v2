@@ -188,8 +188,12 @@ export class MineflayerAdapter extends EventEmitter {
     });
     return { maxDistance: radius, scannedAt: new Date().toISOString(), discoveries: uniqueDiscoveries(discoveries).slice(0, 32) };
   }
-  async findNearestStorage({ maxDistance }) {
-    const bot = this.#ready('storage-discovery'); const radius = Math.max(2, Math.min(64, Number(maxDistance))); if (!Number.isFinite(radius)) throw new ValidationError('Storage search distance must be numeric'); const block = bot.findBlock({ matching: candidate => isStorageBlock(candidate?.name), maxDistance: radius }); if (!block) throw new ValidationError(`No chest or barrel found within ${radius} blocks`); return this.inspectStorage({ position: block.position });
+  async findNearestStorage({ maxDistance, excludePositions = [] }) {
+    const bot = this.#ready('storage-discovery'); const radius = Math.max(2, Math.min(64, Number(maxDistance))); if (!Number.isFinite(radius)) throw new ValidationError('Storage search distance must be numeric');
+    const excluded = new Set(excludePositions.map(positionKey)); const positions = bot.findBlocks?.({ matching: candidate => isStorageBlock(candidate?.name), maxDistance: radius, count: 256 }) ?? [];
+    const block = positions.map(position => bot.blockAt(position)).filter(candidate => candidate && isStorageBlock(candidate.name) && !excluded.has(positionKey(candidate.position))).sort((left, right) => distance3(bot.entity.position, left.position) - distance3(bot.entity.position, right.position))[0];
+    if (!block) throw new ValidationError(`No unregistered chest or barrel found within ${radius} blocks`);
+    return this.inspectStorage({ position: block.position });
   }
   async findWorkshops({ kinds = ['crafting_table', 'furnace'], maxDistance = 48 } = {}) {
     const bot = this.#ready('workshop-discovery'); const allowed = new Set(kinds.map(String)); const ids = [...allowed].map(name => bot.registry.blocksByName?.[name]?.id).filter(Number.isInteger);
