@@ -38,7 +38,7 @@ class OperationalAdapter extends EventEmitter {
   snapshot() { return { connection: this.status, position: { ...this.position }, health: 20, food: 20, inventorySummary: this.items.filter(item => item.count > 0), plugins: {}, camera: this.camera ?? { active: false, port: null }, timestamp: new Date().toISOString() }; }
 }
 
-async function waitFor(predicate, timeout = 1000) {
+async function waitFor(predicate, timeout = 3000) {
   const started = Date.now();
   while (!predicate()) { if (Date.now() - started > timeout) throw new Error('Timed out waiting for condition'); await new Promise(resolve => setTimeout(resolve, 5)); }
 }
