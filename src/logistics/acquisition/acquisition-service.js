@@ -91,6 +91,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
     if (request.attempts >= settings.maxAttempts) throw new ConflictError(`Acquisition request '${request.id}' exceeded maxAttempts (${settings.maxAttempts})`);
     const runtime = bots.get?.(target.id) ?? target;
     const requirement = request.requirement;
+    const sourceAllowed = source => !requirement.sources?.length || requirement.sources.includes(source);
     request.attempts += 1;
     request.status = 'RESOLVING';
     request.updatedAt = new Date().toISOString();
@@ -133,12 +134,12 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       }
       return null;
     };
-    if (settings.storageFirst) {
+    if (settings.storageFirst && sourceAllowed('STORAGE')) {
       const storageResult = await tryStorage();
       if (storageResult) return storageResult;
     }
 
-    if (settings.allowFleet) {
+    if (settings.allowFleet && sourceAllowed('FLEET')) {
       const donors = candidateBots.filter(bot => bot.id !== target.id && bot.status === 'READY' && sameScope(bot, target) && !(bot.runtime?.activeTasks?.length));
       const donor = donors.find(bot => {
         const snapshot = botInventory(bot);
@@ -157,12 +158,12 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       }
     }
 
-    if (!settings.storageFirst) {
+    if (!settings.storageFirst && sourceAllowed('STORAGE')) {
       const storageResult = await tryStorage();
       if (storageResult) return storageResult;
     }
 
-    if (requirement.type === 'ITEM') {
+    if (sourceAllowed('SPECIAL') && requirement.type === 'ITEM') {
       const special = [...specialSources.values()].find(source => source.matches(requirement.item));
       if (special) {
         const declaredDependencies = special.dependencies({ item: requirement.item, count: shortage });
@@ -176,7 +177,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       }
     }
 
-    if (settings.allowCraft && requirement.type === 'ITEM') {
+    if (settings.allowCraft && sourceAllowed('CRAFT') && requirement.type === 'ITEM') {
       const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item: requirement.item, count: shortage }) : null;
       if (recipe?.craftable === true) {
         if (recipe.missing?.length === 0) {
@@ -186,7 +187,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
           await events?.publish?.('acquisition.craft.ready', { requestId: request.id, requirement, recipe }, { source: 'acquisition' });
           return { requestId: request.id, status: 'CRAFT_READY', source: 'craft', item: requirement.item, count: shortage, requirement, recipe };
         }
-        const subrequests = recipe.missing.map(ingredient => ({ requesterBotId: target.id, type: 'ITEM', item: ingredient.name, count: ingredient.count, purpose: `craft ${requirement.item}`, priority: requirement.priority, consume: true }));
+        const subrequests = recipe.missing.map(ingredient => ({ requesterBotId: target.id, type: 'ITEM', item: ingredient.name, count: ingredient.count, purpose: `craft ${requirement.item}`, priority: requirement.priority, consume: true, sources: requirement.sources }));
         request.status = 'CRAFT_PLAN_CREATED';
         request.updatedAt = new Date().toISOString();
         request.trace.push({ at: request.updatedAt, step: 'craft-plan', detail: recipe.missing.map(item => `${item.name}:${item.count}`).join(', ') });
@@ -195,7 +196,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       }
     }
 
-    if (settings.allowCraft && requirement.type === 'TOOL') {
+    if (settings.allowCraft && sourceAllowed('CRAFT') && requirement.type === 'TOOL') {
       for (const item of requirement.acceptedItems) {
         const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item, count: 1 }) : null;
         if (recipe?.craftable === true && recipe.missing?.length === 0) {
@@ -204,7 +205,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
           return { requestId: request.id, status: 'CRAFT_READY', source: 'craft', item, count: 1, requirement, recipe };
         }
         if (recipe?.craftable === true) {
-          const subrequests = recipe.missing.map(ingredient => ({ requesterBotId: target.id, type: 'ITEM', item: ingredient.name, count: ingredient.count, purpose: `craft ${item}`, priority: requirement.priority, consume: true }));
+          const subrequests = recipe.missing.map(ingredient => ({ requesterBotId: target.id, type: 'ITEM', item: ingredient.name, count: ingredient.count, purpose: `craft ${item}`, priority: requirement.priority, consume: true, sources: requirement.sources }));
           request.status = 'CRAFT_PLAN_CREATED';
           request.updatedAt = new Date().toISOString();
           return { requestId: request.id, status: 'CRAFT_PLAN_CREATED', source: 'craft', item, count: 1, requirement, recipe, subrequests };
@@ -212,7 +213,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       }
     }
 
-    if (settings.allowSmelt && requirement.type === 'ITEM') {
+    if (settings.allowSmelt && sourceAllowed('SMELT') && requirement.type === 'ITEM') {
       const formula = runtime.adapter?.smeltRequirements ? await runtime.adapter.smeltRequirements({ item: requirement.item, count: shortage }) : null;
       if (formula && (!formula.item || formula.item === requirement.item) && formula.input?.name !== requirement.item) {
         request.status = 'SMELT_PLAN_CREATED';
@@ -223,7 +224,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       }
     }
 
-    if (settings.allowCollect && requirement.type === 'ITEM') {
+    if (settings.allowCollect && sourceAllowed('COLLECT') && requirement.type === 'ITEM') {
       const blocks = runtime.adapter?.findSourceBlocks ? await runtime.adapter.findSourceBlocks({ item: requirement.item }) : [];
       if (blocks.length) {
         request.status = 'COLLECTION_PLANNED';
@@ -369,7 +370,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
 }
 
 function acquisitionKey(input = {}) {
-  return [input.requesterBotId, input.type, input.item ?? input.category, input.count ?? 1, input.minimumTier ?? ''].join(':').toLowerCase();
+  return [input.requesterBotId, input.type, input.item ?? input.category, input.count ?? 1, input.minimumTier ?? '', Array.isArray(input.sources) ? input.sources.join(',') : 'ANY'].join(':').toLowerCase();
 }
 
 async function runAdapter(taskRunner, runtime, capability, input, resources, fallback) {
@@ -480,6 +481,7 @@ function normalizeRequirement(requirement) {
     normalized.count = Number(requirement.count ?? 1);
     if (!Number.isInteger(normalized.count) || normalized.count < 1) throw new ValidationError('Acquisition tool count must be a positive integer');
   }
+  normalized.sources = Array.isArray(requirement.sources) ? [...new Set(requirement.sources.map(value => String(value).toUpperCase()))].filter(value => ['STORAGE','FLEET','CRAFT','SMELT','COLLECT','SPECIAL'].includes(value)) : null;
   normalized.priority = Number(requirement.priority ?? 50);
   normalized.consume = Boolean(requirement.consume ?? true);
   normalized.purpose = String(requirement.purpose ?? 'general acquisition');

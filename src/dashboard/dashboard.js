@@ -318,5 +318,6 @@ $('#buildingImportForm').onsubmit = async event => { event.preventDefault(); con
 function bytesToBase64(bytes) { let text = ''; const chunk = 0x8000; for (let index = 0; index < bytes.length; index += chunk) text += String.fromCharCode(...bytes.subarray(index, index + chunk)); return btoa(text); }
 $('#buildingLayer').onchange = () => void loadBuildingPreview();
 $('#buildingPreviewReset').onclick=()=>{buildingView.yaw=-.65;buildingView.pitch=.55;fitBuildingView();renderBuilding3d();};
+$('#buildingMakeAll').onclick=async()=>{if(!selectedBlueprintId)return toast('Select a blueprint first',true);const button=$('#buildingMakeAll');button.disabled=true;try{const result=await api(`/api/v1/building/blueprints/${encodeURIComponent(selectedBlueprintId)}/materials/make-all`,{method:'POST',body:'{}',signal:AbortSignal.timeout(300000)});if(result.status==='FAILED')toast(result.failed.reason,true);else toast(`All Make completed: ${result.results.length} material(s)`);await loadBuildingPreview();await loadBuilding();}catch(error){toast(error.message,true);}finally{button.disabled=false;}};
 $('#buildingRefreshMaterials').onclick=()=>void loadBuildingPreview();
 setupBuildingCanvas();

@@ -45,6 +45,24 @@ class BuildingService {
     }
     return { blueprintId: id, botId: null, storages: [], warnings: [{ error: 'No READY bot can inspect logistics storage' }], materials: project.materials.map(material => ({ ...material, available: 0, missing: material.count, ready: false, decision: project.materialDecisions?.[material.name] ?? null })) };
   }
+  async makeAll(id, input = {}) {
+    const project = await this.get(id); if (ACTIVE.has(project.status)) throw new ConflictError(`Cannot make materials while blueprint is ${project.status}`);
+    if (!this.acquisition) throw new ValidationError('Acquisition service is unavailable');
+    const worker = this.workers(input.botId ? [String(input.botId)] : null)[0]; if (!worker) throw new ValidationError('No READY builder bot is available to craft materials');
+    const check = await this.materialStatus(id, worker); const missing = check.materials.filter(item => item.missing > 0); const results = [];
+    for (const material of missing) {
+      try {
+        const result = await this.acquisition.acquire({ requesterBotId: worker, type: 'ITEM', item: material.name, count: material.count, purpose: `make all materials for blueprint ${id}`, priority: 90, consume: true, sources: ['STORAGE', 'CRAFT'] });
+        results.push({ material: material.name, count: material.count, status: 'READY', source: result.source, requestId: result.requestId });
+      } catch (error) {
+        const failure = { material: material.name, required: material.count, available: material.available, missing: material.missing, status: 'FAILED', reason: `Cannot make '${material.name}' using inventory or registered chest materials: ${error.message}` };
+        results.push(failure); await this.repository.update(id, { materialBatch: { status: 'FAILED', botId: worker, results, failed: failure, updatedAt: iso() }, updatedAt: iso() }); await this.record(id, 'MATERIAL_MAKE_ALL_FAILED', failure);
+        return { blueprintId: id, status: 'FAILED', botId: worker, results, failed: failure };
+      }
+    }
+    const materialBatch = { status: 'COMPLETED', botId: worker, results, completedAt: iso() }; await this.repository.update(id, { materialBatch, updatedAt: iso() }); await this.record(id, 'MATERIAL_MAKE_ALL_COMPLETED', { botId: worker, count: results.length });
+    return { blueprintId: id, ...materialBatch };
+  }
   async resolveMaterial(id, input = {}) {
     const project = await this.get(id); const material = String(input.material ?? '').toLowerCase(); const action = String(input.action ?? '').toUpperCase();
     if (!project.materials.some(item => item.name === material)) throw new ValidationError(`Material '${material}' is not required by this blueprint`);
