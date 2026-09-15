@@ -9,6 +9,8 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
   const armorRunning = new Set();
   const sleepRunning = new Set();
   const sleepLastAttempt = new Map();
+  const assignedBeds = new Map();
+  const bedOwners = new Map();
   const publish = async (type, payload, runtime) => events?.publish(type, { botId: runtime.bot.id, ...payload }, { source: 'survival' });
   const call = async (runtime, method, input, context, event) => {
     if (!policy.enabled) throw new ValidationError(`Survival capability '${method}' is disabled by policy`);
@@ -33,6 +35,19 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
     execute: async ({ runtime, count, context }) => call(runtime, 'acquireMilk', { count, maxDistance: policy.entitySearchDistance, minimumCowReserve: policy.minimumCowReserve }, context, 'milk.acquired')
   });
 
+  const releaseBed = botId => { const position = assignedBeds.get(botId); if (position) bedOwners.delete(bedKey(position)); assignedBeds.delete(botId); };
+  const sleepForBot = async (runtime, input = {}, context = {}) => {
+    let position = assignedBeds.get(runtime.bot.id);
+    if (!position) {
+      const bed = await call(runtime, 'findBed', { maxDistance: input.maxDistance ?? 32, excludePositions: [...bedOwners.keys()].map(parseBedKey) }, context, 'sleep.searching');
+      position = bed.position; const key = bedKey(position); const owner = bedOwners.get(key);
+      if (owner && owner !== runtime.bot.id) throw new ValidationError(`Bed at ${key} is reserved by bot '${owner}'`);
+      assignedBeds.set(runtime.bot.id, position); bedOwners.set(key, runtime.bot.id);
+    }
+    try { return await call(runtime, 'sleep', { ...input, position }, context, 'sleep.started'); }
+    catch (error) { if (/occupied|disappeared|not found/i.test(error.message)) releaseBed(runtime.bot.id); throw error; }
+  };
+
   const attach = runtime => {
     if (attached.has(runtime.bot.id)) return attached.get(runtime.bot.id);
     const evaluateArmor = () => { if (!policy.enabled || !policy.autoEquipArmor || armorRunning.has(runtime.bot.id)) return; armorRunning.add(runtime.bot.id); void call(runtime, 'autoEquipArmor', armorPolicy(policy), {}, 'armor.equipped').catch(error => { logger?.error?.('armor.auto-equip.failed', { botId: runtime.bot.id, error: error.message, code: error.code }); void publish('armor.auto-equip.failed', { error: error.message, code: error.code ?? 'CAPABILITY_UNAVAILABLE' }, runtime); }).finally(() => armorRunning.delete(runtime.bot.id)); };
@@ -42,13 +57,13 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
       let status; try { status = await runtime.adapter.sleepStatus(); } catch { return; }
       if (status.sleeping || !status.isNight) return;
       sleepLastAttempt.set(runtime.bot.id, Date.now()); sleepRunning.add(runtime.bot.id);
-      try { await call(runtime, 'sleep', { maxDistance: 32 }, {}, 'sleep.auto-started'); logger?.info?.('sleep.auto.started', { botId: runtime.bot.id, timeOfDay: status.timeOfDay }); }
+      try { await sleepForBot(runtime, { maxDistance: 32 }, {}); logger?.info?.('sleep.auto.started', { botId: runtime.bot.id, timeOfDay: status.timeOfDay }); }
       catch (error) { logger?.warn?.('sleep.auto.failed', { botId: runtime.bot.id, error: error.message, code: error.code }); }
       finally { sleepRunning.delete(runtime.bot.id); }
     };
     const onSpawn = () => { evaluateArmor(); void evaluateSleep(); }; const onInventoryUpdate = () => evaluateArmor(); runtime.adapter.on('spawn', onSpawn); runtime.adapter.on('inventoryUpdate', onInventoryUpdate);
     const sleepTimer = setInterval(() => void evaluateSleep(), 5_000); sleepTimer.unref?.();
-    const detach = () => { clearInterval(sleepTimer); runtime.adapter.removeListener('spawn', onSpawn); runtime.adapter.removeListener('inventoryUpdate', onInventoryUpdate); armorRunning.delete(runtime.bot.id); sleepRunning.delete(runtime.bot.id); sleepLastAttempt.delete(runtime.bot.id); attached.delete(runtime.bot.id); };
+    const detach = () => { clearInterval(sleepTimer); runtime.adapter.removeListener('spawn', onSpawn); runtime.adapter.removeListener('inventoryUpdate', onInventoryUpdate); armorRunning.delete(runtime.bot.id); sleepRunning.delete(runtime.bot.id); sleepLastAttempt.delete(runtime.bot.id); releaseBed(runtime.bot.id); attached.delete(runtime.bot.id); };
     attached.set(runtime.bot.id, detach);
     return detach;
   };
@@ -75,7 +90,7 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
     milkNearest: async (runtime, input, context) => { const cow = await invoke(runtime, 'findCow', { maxDistance: policy.entitySearchDistance, ...input }, context, 'cow.found'); return invoke(runtime, 'milkCow', { entityId: cow.entityId }, context, 'cow.milked'); },
     acquireMilk: (runtime, input, context) => invoke(runtime, 'acquireMilk', { maxDistance: policy.entitySearchDistance, minimumCowReserve: policy.minimumCowReserve, ...input }, context, 'milk.acquired'),
     findBed: (runtime, input, context) => invoke(runtime, 'findBed', input, context, 'sleep.searching'),
-    sleep: (runtime, input, context) => invoke(runtime, 'sleep', input, context, 'sleep.started'),
+    sleep: (runtime, input, context) => sleepForBot(runtime, input, context),
     wake: (runtime, input, context) => invoke(runtime, 'wake', input, context, 'sleep.completed'),
     sleepStatus: (runtime, input, context) => invoke(runtime, 'sleepStatus', input, context, 'sleep.status'),
     openDoor: (runtime, input, context) => invoke(runtime, 'openDoor', { ...input, cooldownMs: policy.interactionCooldownMs }, context, 'door.opened'),
@@ -94,5 +109,7 @@ export function normalizeSurvivalPolicy(input) {
   return policy;
 }
 
+function bedKey(position) { return `${Number(position.x)},${Number(position.y)},${Number(position.z)}`; }
+function parseBedKey(key) { const [x, y, z] = key.split(',').map(Number); return { x, y, z }; }
 function armorPolicy(policy) { return { preserveDurability: true, minimumDurability: policy.minimumDurabilityPercent, preferProtection: policy.preferProtection, preferDurability: policy.preferDurability, allowBindingCurse: policy.allowBindingCurse }; }
 function survivalFailureEvent(event) { if (event.startsWith('sleep.')) return 'sleep.failed'; if (event.startsWith('door.')) return 'door.interaction.failed'; if (event.startsWith('trapdoor.')) return 'trapdoor.interaction.failed'; return `${event}.failed`; }
