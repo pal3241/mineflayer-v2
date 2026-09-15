@@ -14,3 +14,8 @@
 .guess-message { min-height: 24px; margin: 18px 0 6px; color: var(--accent); font-weight: 600; }
 .guess-attempts { margin: 0 0 18px; color: var(--muted); font-size: .9rem; }
 .guess-game-card .ghost { width: 100%; }
+
+.selectable-row { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 10px; }
+.select-record { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.select-record input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+.memory-record-head .select-record { margin-right: 8px; }
