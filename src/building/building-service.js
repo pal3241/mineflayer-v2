@@ -39,20 +39,20 @@ class BuildingService {
     if (!project.materials.some(item => item.name === material)) throw new ValidationError(`Material '${material}' is not required by this blueprint`);
     if (action === 'CANCEL') return this.cancel(id);
     if (ACTIVE.has(project.status)) throw new ConflictError(`Material decisions cannot change while blueprint is ${project.status}`);
-    if (action === 'ACQUIRE') {
+    if (['ACQUIRE', 'SEARCH_MAKE'].includes(action)) {
       const worker = this.workers(input.botId ? [String(input.botId)] : null)[0];
       if (!worker) throw new ValidationError('No READY builder bot is available to search this material');
       const requirement = project.materials.find(item => item.name === material);
       const supply = await this.prepareMaterials({ ...project, materials: [requirement] }, worker);
       if (!supply.ready) {
-        const materialDecisions = { ...(project.materialDecisions ?? {}), [material]: { action, status: 'FAILED', reason: supply.reason, requestedAt: iso() } };
+        const materialDecisions = { ...(project.materialDecisions ?? {}), [material]: { action: 'SEARCH_MAKE', status: 'FAILED', reason: supply.reason, requestedAt: iso() } };
         await this.repository.update(id, { materialDecisions, updatedAt: iso() }); await this.record(id, 'MATERIAL_ACQUIRE_FAILED', { material, reason: supply.reason });
         throw new ConflictError(`Could not acquire '${material}': ${supply.reason}`);
       }
-      const materialDecisions = { ...(project.materialDecisions ?? {}), [material]: { action, status: 'READY', botId: worker, supply, completedAt: iso() } };
+      const materialDecisions = { ...(project.materialDecisions ?? {}), [material]: { action: 'SEARCH_MAKE', status: 'READY', botId: worker, supply, completedAt: iso() } };
       await this.repository.update(id, { materialDecisions, updatedAt: iso() }); await this.record(id, 'MATERIAL_ACQUIRED', { material, botId: worker, supply }); return this.get(id);
     }
-    if (!['REPLACE', 'SKIP'].includes(action)) throw new ValidationError('Material action must be REPLACE, SKIP, ACQUIRE, or CANCEL');
+    if (!['REPLACE', 'SKIP'].includes(action)) throw new ValidationError('Material action must be REPLACE, SKIP, SEARCH_MAKE, or CANCEL');
     const replacement = action === 'REPLACE' ? String(input.replacement ?? '').toLowerCase() : null;
     if (action === 'REPLACE' && !/^[a-z0-9_]{1,80}$/.test(replacement)) throw new ValidationError('Replacement must be a Minecraft block registry name');
     const blocks = action === 'SKIP' ? project.blocks.filter(block => block.name !== material) : project.blocks.map(block => block.name === material ? { ...block, name: replacement } : block);
