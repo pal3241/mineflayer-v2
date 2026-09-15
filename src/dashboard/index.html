@@ -68,6 +68,7 @@
             <label>Authentication<select name="auth"><option value="offline">Offline</option><option value="microsoft">Microsoft</option></select></label>
             <label>Protocol version<input name="version" placeholder="Auto detect"></label>
             <label class="check"><input name="autoConnect" type="checkbox" checked><span>Connect automatically after restart</span></label>
+            <label class="check"><input name="autoSleep" type="checkbox"><span>Sleep automatically at night</span></label>
             <button class="button primary full" type="submit">Add bot to fleet</button>
           </form>
           <p class="hint">Alias creates !botname commands. Class creates grouped commands such as !miner. Microsoft auth may require device login in the terminal.</p>
@@ -319,6 +320,7 @@
       <label>Command alias<input id="editBotAlias" required></label>
       <label>Bot class / kelompok<input id="editBotClass" required></label>
       <label class="check"><input id="editBotAutoConnect" type="checkbox"><span>Connect automatically</span></label>
+      <label class="check"><input id="editBotAutoSleep" type="checkbox"><span>Sleep automatically at night</span></label>
       <section class="full inventory-detail"><div class="inventory-live-title"><h3>Inventory saat ini</h3><span id="editBotInventoryUpdated" class="badge">Live</span></div><div id="editBotInventory" class="inventory-grid"></div></section>
       <p id="editBotHint" class="hint full"></p>
       <button class="button primary full" type="submit">Save bot configuration</button>
