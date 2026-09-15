@@ -223,13 +223,15 @@ export class MineflayerAdapter extends EventEmitter {
       await furnace.takeOutput(); const outputAfter = inventoryCount(bot, item); if (outputAfter - outputBefore !== amount) throw new ValidationError(`Smelting verification failed for '${item}': inventory delta ${outputAfter - outputBefore}, expected ${amount}`); return { item, input: inputName, count: amount, fuel: selectedFuel, inventory: this.snapshot().inventorySummary };
     } finally { furnace.close(); }
   }
-  async collect({ block, count = 1, maxDistance = 64, movement }, { signal } = {}) {
+  async collect({ block, count = 1, maxDistance = 64, movement, minY = -64, maxY = 320, maxDescend = 12 }, { signal } = {}) {
     const bot = this.#ready('collection'); if (!bot.collectBlock) throw new ValidationError('CollectBlock plugin is unavailable');
     const definition = bot.registry?.blocksByName?.[block]; if (!definition) throw new ValidationError(`Unknown block '${block}'`);
     const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1));
     const radius = boundedDistance(maxDistance, 1, 128, 'Collection distance');
-    const positions = bot.findBlocks({ matching: candidate => candidate && candidate.name === block, maxDistance: radius, count: Math.min(256, amount * 8) });
-    const blocks = positions.map(position => bot.blockAt(position)).filter(Boolean); if (!blocks.length) throw new ValidationError(`No '${block}' found within ${maxDistance} blocks`);
+    const floor = Number(minY); const ceiling = Number(maxY); const descent = Number(maxDescend); if (![floor, ceiling, descent].every(Number.isFinite) || floor > ceiling || descent < 0) throw new ValidationError('Collection height policy is invalid');
+    const currentY = bot.entity.position.y; const positions = bot.findBlocks({ matching: candidate => candidate && candidate.name === block, maxDistance: radius, count: Math.min(256, amount * 8) });
+    const blocks = positions.map(position => bot.blockAt(position)).filter(Boolean).filter(target => target.position.y >= floor && target.position.y <= ceiling && target.position.y >= currentY - descent);
+    if (!blocks.length) throw new ValidationError(`No safe '${block}' found within ${maxDistance} blocks; search cannot descend below Y=${Math.max(floor, Math.ceil(currentY - descent))}`);
     this.#applyMovementPolicy(movement ?? this.commandMovementPolicy ?? safeMovementPolicy()); const cleanup = this.#abort(signal, () => { void bot.collectBlock.cancelTask(); }); let collectedTargets = 0; let lastError = null;
     try { for (const target of blocks) { if (collectedTargets >= amount || signal?.aborted) break; try { await bot.collectBlock.collect(target); collectedTargets++; } catch (error) { lastError = error; } } if (!collectedTargets) throw new ValidationError(`No reachable '${block}' found within ${maxDistance} blocks${lastError ? `: ${lastError.message}` : ''}`); return { block, requested: amount, collectedTargets, inventory: this.snapshot().inventorySummary }; } finally { cleanup(); this.#applyMovementPolicy(safeMovementPolicy()); }
   }
