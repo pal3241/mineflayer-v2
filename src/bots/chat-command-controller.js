@@ -1,8 +1,8 @@
-const HELP = 'commands: help <owner>, add helper <bot...>, stop help, helpers, help status, status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, shear, milk, sleep, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
+const HELP = 'commands: help <owner>, add helper <bot...>, stop help, helpers, help status, status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, shear, milk, sleep, sleep toggle on/off, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
 
 export class ChatCommandController {
-  constructor({ goalService, executor, capabilities, coordinator, helpCommands, navigation, config, logger }) {
-    this.goals = goalService; this.executor = executor; this.capabilities = capabilities; this.coordinator = coordinator; this.helpCommands = helpCommands; this.navigation = navigation; this.config = config; this.logger = logger;
+  constructor({ goalService, executor, capabilities, coordinator, helpCommands, navigation, botProfiles, config, logger }) {
+    this.goals = goalService; this.executor = executor; this.capabilities = capabilities; this.coordinator = coordinator; this.helpCommands = helpCommands; this.navigation = navigation; this.botProfiles = botProfiles; this.config = config; this.logger = logger;
   }
   attach(runtime) {
     if (!this.config.enabled) return () => {};
@@ -32,6 +32,15 @@ export class ChatCommandController {
       if (command === 'helpers') return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: runtime.bot.id }));
       if (command === 'goto') { const result = await this.navigation.moveTo({ botId: runtime.bot.id, target: { type: 'POSITION', x: Number(args[0]), y: Number(args[1]), z: Number(args[2]) }, mode: 'SAFE', tolerance: 2, timeout: 120_000, source: 'CHAT_COMMAND' }); return this.#reply(runtime, `arrived in ${result.durationMs}ms`); }
       if (command === 'come') { await runtime.adapter.comeToPlayer({ username, range: 2 }); return this.#reply(runtime, `arrived near ${username}`); }
+      if (command === 'sleep' && args[0] === 'toggle') {
+        const mode = String(args[1] ?? '').toLowerCase(); if (!['on', 'off'].includes(mode)) return this.#reply(runtime, `use !${alias} sleep toggle on/off`);
+        const enabled = mode === 'on'; await this.botProfiles.update(runtime.bot.id, { metadata: { autoSleep: enabled } });
+        return this.#reply(runtime, `automatic night sleep ${enabled ? 'enabled' : 'disabled'}`);
+      }
+      if (command === 'sleep') {
+        const result = await runtime.adapter.sleep({ maxDistance: 32 });
+        return this.#reply(runtime, `sleeping at ${result.bed.x},${result.bed.y},${result.bed.z}`);
+      }
       if (['ai', 'collect', 'craft', 'smelt', 'cook', 'masak', 'lebur', 'survey', 'scan', 'jelajah', 'register_chest', 'daftar_chest', 'store', 'simpan', 'retrieve', 'withdraw', 'ambil_chest', 'stock', 'stok', 'farm', 'farming', 'deforest', 'reforest', 'guard', 'combat', 'meat', 'remember', 'place'].includes(command)) {
         const targetSelector = selector === 'global' ? 'global' : selector === className ? `class:${className}` : `bot:${alias}`; const request = command === 'ai' ? args.join(' ') : [command, ...args].join(' ');
         if (!this.coordinator.shouldHandle(runtime.bot.id, targetSelector)) return;
