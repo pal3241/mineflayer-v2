@@ -82,7 +82,7 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
     closeDoor: (runtime, input, context) => invoke(runtime, 'closeDoor', { ...input, cooldownMs: policy.interactionCooldownMs }, context, 'door.closed'),
     openTrapdoor: (runtime, input, context) => invoke(runtime, 'openTrapdoor', { ...input, cooldownMs: policy.interactionCooldownMs }, context, 'trapdoor.opened'),
     closeTrapdoor: (runtime, input, context) => invoke(runtime, 'closeTrapdoor', { ...input, cooldownMs: policy.interactionCooldownMs }, context, 'trapdoor.closed'),
-    status: () => ({ status: policy.enabled ? 'HEALTHY' : 'DISABLED', attachedBots: attached.size, autoSleepBots: [...attached.keys()].filter(id => false), settings: structuredClone(policy) })
+    status: () => ({ status: policy.enabled ? 'HEALTHY' : 'DISABLED', attachedBots: attached.size, settings: structuredClone(policy) })
   });
 }
 
