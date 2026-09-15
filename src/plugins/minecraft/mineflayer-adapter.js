@@ -29,7 +29,7 @@ const SURVEY_MARKERS = Object.freeze([
 ]);
 
 export class MineflayerAdapter extends EventEmitter {
-  constructor({ factory, plugins = true, autoEat = {} } = {}) { super(); this.factory = factory; this.plugins = plugins; this.autoEatConfig = { enabled: true, minHunger: 15, ...autoEat }; this.client = null; this.status = 'DISCONNECTED'; this.pluginStatus = {}; this.homes = new Map(); this.combatState = { mode: 'OFF', status: 'IDLE' }; this.lastAliveState = null; this.alive = false; this.interactionCooldowns = new Map(); this.currentSleepState = { state: 'IDLE', bed: null, error: null }; this.commandMovementPolicy = null; }
+  constructor({ factory, plugins = true, autoEat = {} } = {}) { super(); this.factory = factory; this.plugins = plugins; this.autoEatConfig = { enabled: true, minHunger: 15, ...autoEat }; this.client = null; this.status = 'DISCONNECTED'; this.pluginStatus = {}; this.homes = new Map(); this.combatState = { mode: 'OFF', status: 'IDLE' }; this.lastAliveState = null; this.alive = false; this.interactionCooldowns = new Map(); this.currentSleepState = { state: 'IDLE', bed: null, error: null }; this.commandMovementPolicy = null; this.protectedZones = []; }
 
   async connect(options) {
     if (this.client) return;
@@ -223,14 +223,15 @@ export class MineflayerAdapter extends EventEmitter {
       await furnace.takeOutput(); const outputAfter = inventoryCount(bot, item); if (outputAfter - outputBefore !== amount) throw new ValidationError(`Smelting verification failed for '${item}': inventory delta ${outputAfter - outputBefore}, expected ${amount}`); return { item, input: inputName, count: amount, fuel: selectedFuel, inventory: this.snapshot().inventorySummary };
     } finally { furnace.close(); }
   }
-  async collect({ block, count = 1, maxDistance = 64, movement, minY = -64, maxY = 320, maxDescend = 12 }, { signal } = {}) {
+  setProtectedZones(zones = []) { this.protectedZones = zones.filter(zone => zone?.bounds?.min && zone?.bounds?.max).map(zone => structuredClone(zone)); return { zones: this.protectedZones.length }; }
+  async collect({ block, count = 1, maxDistance = 64, movement, minY = -64, maxY = 320, maxDescend = 12, allowProtected = false }, { signal } = {}) {
     const bot = this.#ready('collection'); if (!bot.collectBlock) throw new ValidationError('CollectBlock plugin is unavailable');
     const definition = bot.registry?.blocksByName?.[block]; if (!definition) throw new ValidationError(`Unknown block '${block}'`);
     const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1));
     const radius = boundedDistance(maxDistance, 1, 128, 'Collection distance');
     const floor = Number(minY); const ceiling = Number(maxY); const descent = Number(maxDescend); if (![floor, ceiling, descent].every(Number.isFinite) || floor > ceiling || descent < 0) throw new ValidationError('Collection height policy is invalid');
     const currentY = bot.entity.position.y; const positions = bot.findBlocks({ matching: candidate => candidate && candidate.name === block, maxDistance: radius, count: Math.min(256, amount * 8) });
-    const blocks = positions.map(position => bot.blockAt(position)).filter(Boolean).filter(target => target.position.y >= floor && target.position.y <= ceiling && target.position.y >= currentY - descent);
+    const blocks = positions.map(position => bot.blockAt(position)).filter(Boolean).filter(target => target.position.y >= floor && target.position.y <= ceiling && target.position.y >= currentY - descent).filter(target => allowProtected || !this.protectedZones.some(zone => inBounds(target.position, zone.bounds)));
     if (!blocks.length) throw new ValidationError(`No safe '${block}' found within ${maxDistance} blocks; search cannot descend below Y=${Math.max(floor, Math.ceil(currentY - descent))}`);
     this.#applyMovementPolicy(movement ?? this.commandMovementPolicy ?? safeMovementPolicy()); const cleanup = this.#abort(signal, () => { void bot.collectBlock.cancelTask(); }); let collectedTargets = 0; let lastError = null;
     try { for (const target of blocks) { if (collectedTargets >= amount || signal?.aborted) break; try { await bot.collectBlock.collect(target); collectedTargets++; } catch (error) { lastError = error; } } if (!collectedTargets) throw new ValidationError(`No reachable '${block}' found within ${maxDistance} blocks${lastError ? `: ${lastError.message}` : ''}`); return { block, requested: amount, collectedTargets, inventory: this.snapshot().inventorySummary }; } finally { cleanup(); this.#applyMovementPolicy(safeMovementPolicy()); }
@@ -571,6 +572,7 @@ function windowInventoryCount(container, bot, item) { const start = Number(conta
 async function waitForStorageState(bot, container, item, expected, timeoutMs, operation) { const started = Date.now(); let observed = { bot: windowInventoryCount(container, bot, item), storage: containerCount(container, item) }; while (Date.now() - started <= timeoutMs) { observed = { bot: windowInventoryCount(container, bot, item), storage: containerCount(container, item) }; if (observed.bot === expected.bot && observed.storage === expected.storage) return observed; await delay(50); } throw new ValidationError(`Storage ${operation} verification timed out for '${item}': expected bot=${expected.bot}, storage=${expected.storage}; observed bot=${observed.bot}, storage=${observed.storage}`); }
 function itemCount(inventory, name) { return inventory.filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0); }
 function summarizeItems(items) { const totals = new Map(); for (const item of items) totals.set(item.name, (totals.get(item.name) ?? 0) + item.count); return [...totals].map(([name, count]) => ({ name, count })).sort((left, right) => left.name.localeCompare(right.name)); }
+function inBounds(position, bounds) { return position.x >= bounds.min.x && position.x <= bounds.max.x && position.y >= bounds.min.y && position.y <= bounds.max.y && position.z >= bounds.min.z && position.z <= bounds.max.z; }
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 async function waitForViewer(port, timeoutMs = 5000) {
