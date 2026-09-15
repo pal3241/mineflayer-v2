@@ -16,6 +16,44 @@ class BuildingService {
   async get(id) { return this.repository.find(id); }
   async preview(id, layer) { return blueprintPreview(await this.get(id), layer); }
   async preview3d(id) { const project = await this.get(id); return { blueprintId: project.id, revision: project.revision, bounds: project.bounds, target: project.target, protection: project.protection ?? { enabled: false, bounds: null }, blocks: project.blocks.map(block => ({ x: block.x, y: block.y, z: block.z, name: block.name, properties: block.properties, status: project.placements[block.key]?.status ?? 'PENDING' })) }; }
+  async materialStatus(id, botId = null) {
+    const project = await this.get(id); const botSummary = this.bots.list().find(bot => bot.id === botId) ?? this.bots.list().find(bot => bot.status === 'READY');
+    const inventory = new Map(); const storages = [];
+    if (botSummary) {
+      try {
+        const runtime = this.bots.get(botSummary.id); const snapshot = runtime.adapter.snapshot();
+        for (const entry of snapshot.inventorySummary ?? []) inventory.set(entry.name, (inventory.get(entry.name) ?? 0) + Number(entry.count ?? 0));
+        if (this.logistics) for (const storage of await this.logistics.stock(this.scope(botSummary.id))) {
+          storages.push({ id: storage.id, name: storage.name, position: storage.position });
+          for (const entry of storage.availableInventory ?? []) inventory.set(entry.name, (inventory.get(entry.name) ?? 0) + Number(entry.available ?? 0));
+        }
+      } catch {}
+    }
+    return { blueprintId: id, botId: botSummary?.id ?? null, storages, materials: project.materials.map(material => {
+      const available = inventory.get(material.name) ?? 0; const decision = project.materialDecisions?.[material.name] ?? null;
+      return { ...material, available, missing: Math.max(0, material.count - available), ready: available >= material.count, decision };
+    }) };
+  }
+  async resolveMaterial(id, input = {}) {
+    const project = await this.get(id); const material = String(input.material ?? '').toLowerCase(); const action = String(input.action ?? '').toUpperCase();
+    if (!project.materials.some(item => item.name === material)) throw new ValidationError(`Material '${material}' is not required by this blueprint`);
+    if (action === 'CANCEL') return this.cancel(id);
+    if (ACTIVE.has(project.status)) throw new ConflictError(`Material decisions cannot change while blueprint is ${project.status}`);
+    if (action === 'ACQUIRE') {
+      const materialDecisions = { ...(project.materialDecisions ?? {}), [material]: { action, requestedAt: iso() } };
+      await this.repository.update(id, { materialDecisions, updatedAt: iso() }); await this.record(id, 'MATERIAL_ACQUIRE_SELECTED', { material }); return this.get(id);
+    }
+    if (!['REPLACE', 'SKIP'].includes(action)) throw new ValidationError('Material action must be REPLACE, SKIP, ACQUIRE, or CANCEL');
+    const replacement = action === 'REPLACE' ? String(input.replacement ?? '').toLowerCase() : null;
+    if (action === 'REPLACE' && !/^[a-z0-9_]{1,80}$/.test(replacement)) throw new ValidationError('Replacement must be a Minecraft block registry name');
+    const blocks = action === 'SKIP' ? project.blocks.filter(block => block.name !== material) : project.blocks.map(block => block.name === material ? { ...block, name: replacement } : block);
+    if (!blocks.length) throw new ValidationError('Skipping this material would leave an empty blueprint; cancel the project instead');
+    const rebuilt = importBlueprint({ name: project.name, format: project.format, origin: project.origin, blocks, metadata: { ...project.metadata, materialDecision: { material, action, replacement } } }, this.config);
+    const placements = Object.fromEntries(rebuilt.blocks.map(block => [block.key, { status: 'PENDING', attempts: 0, ownerBotId: null, verifiedAt: null, error: null }]));
+    const materialDecisions = { ...(project.materialDecisions ?? {}), [material]: { action, replacement, decidedAt: iso() } };
+    await this.repository.update(id, { blocks: rebuilt.blocks, bounds: rebuilt.bounds, materials: rebuilt.materials, checksum: rebuilt.checksum, placements, materialDecisions, progress: { total: rebuilt.blocks.length, completed: 0, failed: 0, pending: rebuilt.blocks.length }, updatedAt: iso() });
+    await this.record(id, action === 'REPLACE' ? 'MATERIAL_REPLACED' : 'MATERIAL_SKIPPED', { material, replacement }); return this.get(id);
+  }
   async transform(id, input = {}) { const project = await this.get(id); if (!['PENDING_APPROVAL', 'READY'].includes(project.status)) throw new ConflictError(`Blueprint transform requires PENDING_APPROVAL or READY, current ${project.status}`); const rotation = Number(input.rotation ?? 0); if (![0, 90, 180, 270].includes(rotation)) throw new ValidationError('rotation must be 0, 90, 180, or 270'); const mirrorX = Boolean(input.mirrorX); const mirrorZ = Boolean(input.mirrorZ); const blocks = project.blocks.map(block => transformBlock(block, project.origin, rotation, mirrorX, mirrorZ)); const transformed = importBlueprint({ name: project.name, format: project.format, origin: project.origin, blocks, metadata: { ...project.metadata, transform: { rotation, mirrorX, mirrorZ } } }, this.config); const placements = Object.fromEntries(transformed.blocks.map(block => [block.key, { status: 'PENDING', attempts: 0, ownerBotId: null, verifiedAt: null, error: null }])); await this.repository.update(id, { blocks: transformed.blocks, bounds: transformed.bounds, materials: transformed.materials, checksum: transformed.checksum, placements, progress: { total: transformed.blocks.length, completed: 0, failed: 0, pending: transformed.blocks.length }, transform: { rotation, mirrorX, mirrorZ }, updatedAt: iso() }); await this.record(id, 'TRANSFORMED', { rotation, mirrorX, mirrorZ }); return this.get(id); }
   async protection(id) { const project = await this.get(id); return project.protection ?? { enabled: false, bounds: null }; }
   async snapshot(id) { return { protocol: this.protocol().protocol, protocolVersion: this.protocol().version, project: await this.get(id) }; }
