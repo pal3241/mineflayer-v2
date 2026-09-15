@@ -37,6 +37,7 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
 
   const releaseBed = botId => { const position = assignedBeds.get(botId); if (position) bedOwners.delete(bedKey(position)); assignedBeds.delete(botId); };
   const sleepForBot = async (runtime, input = {}, context = {}) => {
+    if (typeof runtime.adapter?.findBed !== 'function') return call(runtime, 'sleep', input, context, 'sleep.started');
     let position = assignedBeds.get(runtime.bot.id);
     if (!position) {
       const bed = await call(runtime, 'findBed', { maxDistance: input.maxDistance ?? 32, excludePositions: [...bedOwners.keys()].map(parseBedKey) }, context, 'sleep.searching');
