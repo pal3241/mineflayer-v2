@@ -43,7 +43,7 @@ test('self-hosted NVIDIA NIM returns a validated coordinator intent', async () =
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     const gateway = new LlmGateway({ provider: 'nvidia', nvidiaEndpoint: `http://127.0.0.1:${server.address().port}`, nvidiaModel: 'test', nvidiaApiKeys: [], timeoutMs: 1000 }, { warn() {} });
-    const fleet = [{ id: 'bot1', position: { x: 1, y: 64, z: 1 }, inventory: [{ name: 'stone_pickaxe', count: 1 }], nearby: [] }]; const result = await gateway.interpret('get stone', { fleet }); assert.equal(result.intent, 'collect'); assert.equal(result.block, 'stone'); assert.equal(result.count, 8); assert.equal(requestBody.max_tokens, 5); assert.deepEqual(JSON.parse(requestBody.messages[1].content).fleet, fleet);
+    const fleet = [{ id: 'bot1', position: { x: 1, y: 64, z: 1 }, inventory: [{ name: 'stone_pickaxe', count: 1 }], nearby: [] }]; const result = await gateway.interpret('get stone', { fleet }); assert.equal(result.intent, 'collect'); assert.equal(result.block, 'stone'); assert.equal(result.count, 8); assert.equal(requestBody.max_tokens, 256); assert.deepEqual(JSON.parse(requestBody.messages[1].content).fleet, fleet);
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
