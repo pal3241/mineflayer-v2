@@ -8,6 +8,9 @@ const DEFAULT_CONFIG = Object.freeze({
   maxSubtasks: 32,
   maxAttempts: 3,
   maxDistance: 2000,
+  minSearchY: -64,
+  maxSearchY: 320,
+  maxSearchDescend: 12,
   storageFirst: true,
   allowFleet: true,
   allowCraft: true,
@@ -287,7 +290,8 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
         if (collected >= plan.requirement.count) break;
         const before = itemTotal(runtime, plan.requirement.item);
         try {
-          await runBatches(taskRunner, runtime, 'minecraft.collection', { block, maxDistance: settings.maxDistance }, (plan.count ?? plan.requirement.count) - collected, batch => acquisitionResources([], [{ item: plan.requirement.item, count: batch }]), (count) => runtime.adapter.collect({ block, count, maxDistance: settings.maxDistance }));
+          const heightPolicy = { minY: settings.minSearchY, maxY: settings.maxSearchY, maxDescend: settings.maxSearchDescend };
+          await runBatches(taskRunner, runtime, 'minecraft.collection', { block, maxDistance: settings.maxDistance, ...heightPolicy }, (plan.count ?? plan.requirement.count) - collected, batch => acquisitionResources([], [{ item: plan.requirement.item, count: batch }]), (count) => runtime.adapter.collect({ block, count, maxDistance: settings.maxDistance, ...heightPolicy }));
         } catch (error) {
           request?.trace.push({ at: new Date().toISOString(), step: 'collect-source-failed', detail: `${block}: ${error.message}` });
           continue;
@@ -334,6 +338,9 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
     maxSubtasks: settings.maxSubtasks,
     maxAttempts: settings.maxAttempts,
     maxDistance: settings.maxDistance,
+    minSearchY: settings.minSearchY,
+    maxSearchY: settings.maxSearchY,
+    maxSearchDescend: settings.maxSearchDescend,
     storageFirst: settings.storageFirst,
     allowFleet: settings.allowFleet,
     allowCraft: settings.allowCraft,
@@ -427,6 +434,8 @@ function normalizeConfig(input = {}) {
   if (!Number.isInteger(config.maxSubtasks) || config.maxSubtasks < 1 || config.maxSubtasks > 256) throw new ValidationError('Acquisition maxSubtasks must be an integer between 1 and 256');
   if (!Number.isInteger(config.maxAttempts) || config.maxAttempts < 1 || config.maxAttempts > 10) throw new ValidationError('Acquisition maxAttempts must be an integer between 1 and 10');
   if (!Number.isInteger(config.maxDistance) || config.maxDistance < 16 || config.maxDistance > 100_000) throw new ValidationError('Acquisition maxDistance must be between 16 and 100000');
+  for (const field of ['minSearchY', 'maxSearchY', 'maxSearchDescend']) if (!Number.isInteger(config[field])) throw new ValidationError(`Acquisition ${field} must be an integer`);
+  if (config.minSearchY < -64 || config.maxSearchY > 320 || config.minSearchY > config.maxSearchY || config.maxSearchDescend < 0 || config.maxSearchDescend > 64) throw new ValidationError('Acquisition search height policy is invalid');
   if (typeof config.storageFirst !== 'boolean') throw new ValidationError('Acquisition storageFirst must be a boolean');
   if (typeof config.allowFleet !== 'boolean') throw new ValidationError('Acquisition allowFleet must be a boolean');
   if (typeof config.allowCraft !== 'boolean') throw new ValidationError('Acquisition allowCraft must be a boolean');
