@@ -89,8 +89,8 @@ function bindDynamic() {
   $$('[data-bot-action]').forEach(button => button.onclick = () => performBot(button.dataset.bot, button.dataset.botAction));
   $$('[data-camera]').forEach(button => button.onclick = () => camera(button.dataset.bot, button.dataset.camera, button.dataset.cameraMode));
   $$('[data-delete-bot]').forEach(button => button.onclick = () => deleteBot(button.dataset.deleteBot));
-  $('[data-edit-bot]').forEach(button => button.onclick = () => editBot(button.dataset.editBot));
-  $('[data-auto-sleep]').forEach(button => button.onclick = () => setAutoSleep(button.dataset.autoSleep, button.dataset.autoSleepEnabled !== 'true'));
+  document.querySelectorAll('[data-edit-bot]').forEach(button => button.onclick = () => editBot(button.dataset.editBot));
+  document.querySelectorAll('[data-auto-sleep]').forEach(button => button.onclick = () => setAutoSleep(button.dataset.autoSleep, button.dataset.autoSleepEnabled !== 'true'));
   $$('[data-remove-admin]').forEach(button => button.onclick = () => removeAdmin(button.dataset.removeAdmin));
   $$('[data-remove-objective]').forEach(button => button.onclick = () => removeObjective(button.dataset.removeObjective));
 }
