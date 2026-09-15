@@ -321,3 +321,50 @@ $('#buildingPreviewReset').onclick=()=>{buildingView.yaw=-.65;buildingView.pitch
 $('#buildingMakeAll').onclick=async()=>{if(!selectedBlueprintId)return toast('Select a blueprint first',true);const button=$('#buildingMakeAll');button.disabled=true;try{const result=await api(`/api/v1/building/blueprints/${encodeURIComponent(selectedBlueprintId)}/materials/make-all`,{method:'POST',body:'{}',signal:AbortSignal.timeout(300000)});if(result.status==='FAILED')toast(result.failed.reason,true);else toast(`All Make completed: ${result.results.length} material(s)`);await loadBuildingPreview();await loadBuilding();}catch(error){toast(error.message,true);}finally{button.disabled=false;}};
 $('#buildingRefreshMaterials').onclick=()=>void loadBuildingPreview();
 setupBuildingCanvas();
+
+const guessGame = $('#guessGame');
+const guessForm = $('#guessGameForm');
+const guessInput = $('#guessInput');
+const guessMessage = $('#guessMessage');
+const guessAttempts = $('#guessAttempts');
+let secretNumber = 0;
+let guessCount = 0;
+function newGuessGame() {
+  secretNumber = Math.floor(Math.random() * 100) + 1;
+  guessCount = 0;
+  guessMessage.textContent = 'Masukkan angka untuk mulai.';
+  guessMessage.style.color = '';
+  guessAttempts.textContent = 'Percobaan: 0';
+  guessInput.value = '';
+  guessInput.disabled = false;
+  $('#guessSubmit').disabled = false;
+}
+function openGuessGame(event) {
+  event.preventDefault();
+  newGuessGame();
+  guessGame.showModal();
+  requestAnimationFrame(() => guessInput.focus());
+}
+$('.brand-mark')?.addEventListener('click', openGuessGame);
+guessForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  const guess = Number(guessInput.value);
+  if (!Number.isInteger(guess) || guess < 1 || guess > 100) {
+    guessMessage.textContent = 'Masukkan angka bulat antara 1 dan 100.';
+    return;
+  }
+  guessCount++;
+  guessAttempts.textContent = `Percobaan: ${guessCount}`;
+  if (guess === secretNumber) {
+    guessMessage.textContent = `Benar! Angkanya ${secretNumber}. Kamu menang dalam ${guessCount} percobaan.`;
+    guessMessage.style.color = '#77e39e';
+    guessInput.disabled = true;
+    $('#guessSubmit').disabled = true;
+  } else {
+    guessMessage.textContent = guess < secretNumber ? 'Terlalu kecil. Coba lagi.' : 'Terlalu besar. Coba lagi.';
+    guessMessage.style.color = '';
+    guessInput.select();
+  }
+});
+$('#guessReset')?.addEventListener('click', newGuessGame);
+setupBuildingCanvas();
