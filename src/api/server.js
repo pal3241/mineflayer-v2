@@ -236,6 +236,7 @@ export class ApiServer {
         }
         if (parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'bots' && parts[3]) {
           if (req.method === 'GET' && parts.length === 4) return send(200, { data: this.application.bots.get(parts[3]).snapshot() });
+          if (req.method === 'GET' && parts[4] === 'inventory' && parts.length === 5) { const runtime = this.application.bots.get(parts[3]); const snapshot = runtime.adapter.snapshot(); return send(200, { data: { botId: parts[3], status: runtime.status, inventorySummary: snapshot.inventorySummary ?? [], timestamp: snapshot.timestamp ?? new Date().toISOString() } }); }
           if (req.method === 'PATCH' && parts.length === 4) return send(200, { data: await this.application.botProfiles.update(parts[3], await body(req)) });
           if (req.method === 'POST' && parts[4] === 'start') { await this.application.bots.start(parts[3]); return send(202, { data: this.application.bots.get(parts[3]).snapshot() }); }
           if (req.method === 'POST' && parts[4] === 'stop') { await this.application.bots.stop(parts[3]); return send(200, { data: this.application.bots.get(parts[3]).snapshot() }); }
