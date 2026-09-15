@@ -328,8 +328,8 @@ export class MineflayerAdapter extends EventEmitter {
     const existing = bot.blockAt(await blockVector(position));
     if (existing && !isAir(existing)) {
       if (existing.name === itemName) return { position, item: itemName, verified: true, alreadyPresent: true };
-      if (!input?.settings?.replaceExisting) throw new ValidationError(`Blueprint target ${formatPosition(position)} is occupied by '${existing.name}'`);
-      await bot.dig(existing);
+      // Construction work is additive by default. Never dig an occupied target here: replacing blocks must go through a separately authorized, audited project-mutation flow.
+      throw new ValidationError(`Blueprint target ${formatPosition(position)} is occupied by '${existing.name}'; protected construction does not replace existing blocks`);
     }
     const references = [[0, -1, 0], [0, 1, 0], [-1, 0, 0], [1, 0, 0], [0, 0, -1], [0, 0, 1]];
     let chosen = null;
