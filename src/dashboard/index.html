@@ -324,6 +324,22 @@
       <button class="button primary full" type="submit">Save bot configuration</button>
     </form>
   </dialog>
+  <dialog id="guessGame" class="guess-game">
+    <form method="dialog" class="guess-game-card" id="guessGameForm">
+      <button class="guess-close" value="cancel" aria-label="Tutup">×</button>
+      <p class="eyebrow">FK EASTER EGG</p>
+      <h2>Tebak angka</h2>
+      <p class="hint">Saya memikirkan angka dari 1 sampai 100. Bisa menebaknya?</p>
+      <label for="guessInput">Tebakan kamu</label>
+      <div class="guess-row">
+        <input id="guessInput" type="number" min="1" max="100" inputmode="numeric" autocomplete="off" required>
+        <button id="guessSubmit" class="button primary" type="submit">Tebak</button>
+      </div>
+      <p id="guessMessage" class="guess-message" role="status">Masukkan angka untuk mulai.</p>
+      <p id="guessAttempts" class="guess-attempts">Percobaan: 0</p>
+      <button id="guessReset" class="button ghost" type="button">Angka baru</button>
+    </form>
+  </dialog>
   <script type="module" src="/dashboard.js"></script>
 </body>
 </html>
