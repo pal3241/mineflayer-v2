@@ -7,6 +7,8 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
   const policy = normalizeSurvivalPolicy({ ...DEFAULT_POLICY, ...(config ?? {}) });
   const attached = new Map();
   const armorRunning = new Set();
+  const sleepRunning = new Set();
+  const sleepLastAttempt = new Map();
   const publish = async (type, payload, runtime) => events?.publish(type, { botId: runtime.bot.id, ...payload }, { source: 'survival' });
   const call = async (runtime, method, input, context, event) => {
     if (!policy.enabled) throw new ValidationError(`Survival capability '${method}' is disabled by policy`);
@@ -34,8 +36,19 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
   const attach = runtime => {
     if (attached.has(runtime.bot.id)) return attached.get(runtime.bot.id);
     const evaluateArmor = () => { if (!policy.enabled || !policy.autoEquipArmor || armorRunning.has(runtime.bot.id)) return; armorRunning.add(runtime.bot.id); void call(runtime, 'autoEquipArmor', armorPolicy(policy), {}, 'armor.equipped').catch(error => { logger?.error?.('armor.auto-equip.failed', { botId: runtime.bot.id, error: error.message, code: error.code }); void publish('armor.auto-equip.failed', { error: error.message, code: error.code ?? 'CAPABILITY_UNAVAILABLE' }, runtime); }).finally(() => armorRunning.delete(runtime.bot.id)); };
-    const onSpawn = () => evaluateArmor(); const onInventoryUpdate = () => evaluateArmor(); runtime.adapter.on('spawn', onSpawn); runtime.adapter.on('inventoryUpdate', onInventoryUpdate);
-    const detach = () => { runtime.adapter.removeListener('spawn', onSpawn); runtime.adapter.removeListener('inventoryUpdate', onInventoryUpdate); armorRunning.delete(runtime.bot.id); attached.delete(runtime.bot.id); };
+    const evaluateSleep = async () => {
+      if (!policy.enabled || runtime.bot.metadata?.autoSleep !== true || sleepRunning.has(runtime.bot.id) || runtime.snapshot().status !== 'READY') return;
+      const lastAttempt = sleepLastAttempt.get(runtime.bot.id) ?? 0; if (Date.now() - lastAttempt < 30_000) return;
+      let status; try { status = await runtime.adapter.sleepStatus(); } catch { return; }
+      if (status.sleeping || !status.isNight) return;
+      sleepLastAttempt.set(runtime.bot.id, Date.now()); sleepRunning.add(runtime.bot.id);
+      try { await call(runtime, 'sleep', { maxDistance: 32 }, {}, 'sleep.auto-started'); logger?.info?.('sleep.auto.started', { botId: runtime.bot.id, timeOfDay: status.timeOfDay }); }
+      catch (error) { logger?.warn?.('sleep.auto.failed', { botId: runtime.bot.id, error: error.message, code: error.code }); }
+      finally { sleepRunning.delete(runtime.bot.id); }
+    };
+    const onSpawn = () => { evaluateArmor(); void evaluateSleep(); }; const onInventoryUpdate = () => evaluateArmor(); runtime.adapter.on('spawn', onSpawn); runtime.adapter.on('inventoryUpdate', onInventoryUpdate);
+    const sleepTimer = setInterval(() => void evaluateSleep(), 5_000); sleepTimer.unref?.();
+    const detach = () => { clearInterval(sleepTimer); runtime.adapter.removeListener('spawn', onSpawn); runtime.adapter.removeListener('inventoryUpdate', onInventoryUpdate); armorRunning.delete(runtime.bot.id); sleepRunning.delete(runtime.bot.id); sleepLastAttempt.delete(runtime.bot.id); attached.delete(runtime.bot.id); };
     attached.set(runtime.bot.id, detach);
     return detach;
   };
@@ -69,7 +82,7 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
     closeDoor: (runtime, input, context) => invoke(runtime, 'closeDoor', { ...input, cooldownMs: policy.interactionCooldownMs }, context, 'door.closed'),
     openTrapdoor: (runtime, input, context) => invoke(runtime, 'openTrapdoor', { ...input, cooldownMs: policy.interactionCooldownMs }, context, 'trapdoor.opened'),
     closeTrapdoor: (runtime, input, context) => invoke(runtime, 'closeTrapdoor', { ...input, cooldownMs: policy.interactionCooldownMs }, context, 'trapdoor.closed'),
-    status: () => ({ status: policy.enabled ? 'HEALTHY' : 'DISABLED', attachedBots: attached.size, settings: structuredClone(policy) })
+    status: () => ({ status: policy.enabled ? 'HEALTHY' : 'DISABLED', attachedBots: attached.size, autoSleepBots: [...attached.keys()].filter(id => false), settings: structuredClone(policy) })
   });
 }
 
