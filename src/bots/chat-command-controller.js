@@ -39,7 +39,7 @@ export class ChatCommandController {
       }
       if (command === 'sleep') {
         const result = await runtime.adapter.sleep({ maxDistance: 32 });
-        return this.#reply(runtime, `sleeping at ${result.bed.x},${result.bed.y},${result.bed.z}`);
+        const location = result?.bed ? ` at ${result.bed.x},${result.bed.y},${result.bed.z}` : ''; return this.#reply(runtime, `sleeping${location}`);
       }
       if (['ai', 'collect', 'craft', 'smelt', 'cook', 'masak', 'lebur', 'survey', 'scan', 'jelajah', 'register_chest', 'daftar_chest', 'store', 'simpan', 'retrieve', 'withdraw', 'ambil_chest', 'stock', 'stok', 'farm', 'farming', 'deforest', 'reforest', 'guard', 'combat', 'meat', 'remember', 'place'].includes(command)) {
         const targetSelector = selector === 'global' ? 'global' : selector === className ? `class:${className}` : `bot:${alias}`; const request = command === 'ai' ? args.join(' ') : [command, ...args].join(' ');
