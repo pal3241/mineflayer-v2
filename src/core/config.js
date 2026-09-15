@@ -31,7 +31,7 @@ export function loadConfig(env = process.env) {
     },
     commands: { enabled: bool(env.MINEHIVE_CHAT_COMMANDS ?? true), admins: (env.MINEHIVE_ADMINS ?? '').split(',').map(value => value.trim()).filter(Boolean) },
     viewer: { basePort: integer(env.MINEHIVE_VIEWER_BASE_PORT, 3100), viewDistance: integer(env.MINEHIVE_VIEWER_DISTANCE, 4) },
-    llm: { provider: resolveLlmProvider(env.MINEHIVE_LLM_PROVIDER, openRouterKeys.length > 0, nvidiaConfigured), openRouterEndpoint: env.MINEHIVE_OPENROUTER_ENDPOINT ?? env.MINEHIVE_LLM_ENDPOINT ?? 'https://openrouter.ai/api/v1', openRouterModel: env.MINEHIVE_OPENROUTER_MODEL ?? env.MINEHIVE_LLM_MODEL ?? 'openrouter/auto', openRouterApiKeys: openRouterKeys, nvidiaEndpoint, nvidiaModel, nvidiaApiKeys: nvidiaKeys, siteUrl: env.MINEHIVE_SITE_URL, timeoutMs: integer(env.MINEHIVE_LLM_TIMEOUT_MS, 30_000) }
+    llm: { provider: resolveLlmProvider(env.MINEHIVE_LLM_PROVIDER, openRouterKeys.length > 0, nvidiaConfigured), openRouterEndpoint: env.MINEHIVE_OPENROUTER_ENDPOINT ?? env.MINEHIVE_LLM_ENDPOINT ?? 'https://openrouter.ai/api/v1', openRouterModel: env.MINEHIVE_OPENROUTER_MODEL ?? env.MINEHIVE_LLM_MODEL ?? 'openrouter/auto', openRouterApiKeys: openRouterKeys, nvidiaEndpoint, nvidiaModel, nvidiaApiKeys: nvidiaKeys, siteUrl: env.MINEHIVE_SITE_URL, timeoutMs: integer(env.MINEHIVE_LLM_TIMEOUT_MS, 90_000) }
   };
   if (!Number.isInteger(config.api.port) || config.api.port < 1 || config.api.port > 65535) throw new ValidationError('Invalid API port');
   if (!Number.isInteger(config.api.rateLimitPerMinute) || config.api.rateLimitPerMinute < 10) throw new ValidationError('API rate limit must be at least 10 requests per minute');
