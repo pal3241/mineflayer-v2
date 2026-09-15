@@ -166,6 +166,19 @@ export class ApiServer {
         if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3] === 'integrity' && parts[4] === 'recovery' && parts[5] && parts[6] === 'retry' && parts.length === 7) return send(200, { data: await this.application.memoryIntegrity.retry(decodeURIComponent(parts[5]), await body(req)) });
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/semantic') return send(200, { data: await this.application.semanticMemory.search({ text: url.searchParams.get('q') ?? '', worldKey: url.searchParams.get('worldKey') ?? undefined, dimension: url.searchParams.get('dimension') ?? undefined, type: url.searchParams.get('type') ?? undefined, limit: url.searchParams.get('limit') ?? 10 }) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/semantic') return send(201, { data: await this.application.semanticMemory.remember(await body(req)) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/memory/bulk-delete') {
+          const input = await body(req); const records = Array.isArray(input.records) ? input.records : [];
+          if (!records.length || records.length > 200) throw new ValidationError('Bulk memory deletion requires 1-200 records');
+          const removed = [];
+          for (const record of records) {
+            const category = record?.category === 'semantic' ? 'semantic' : record?.category === 'world' ? 'world' : null;
+            const id = String(record?.id ?? '');
+            if (!category || !/^[A-Za-z0-9_.:-]{1,128}$/.test(id)) throw new ValidationError('Each memory record requires a safe id and category');
+            const service = category === 'semantic' ? this.application.semanticMemory : this.application.worldMemory;
+            if (await service.forget(id)) removed.push({ id, category });
+          }
+          return send(200, { data: { removed, count: removed.length } });
+        }
         if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'memory' && parts[3] === 'semantic' && parts[4] && parts.length === 5) return send(200, { data: await deleteMemory(this.application.semanticMemory, 'Semantic memory', decodeURIComponent(parts[4]), 'semantic') });
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/short-term') return send(200, { data: await this.application.semanticMemory.search({ text: url.searchParams.get('q') ?? '', worldKey: url.searchParams.get('worldKey') ?? undefined, dimension: url.searchParams.get('dimension') ?? undefined, type: 'SHORT_TERM', limit: url.searchParams.get('limit') ?? 10 }) });
         if (req.method === 'POST' && url.pathname === '/api/v1/memory/short-term') return send(201, { data: await this.application.semanticMemory.rememberShortTerm(await body(req)) });
