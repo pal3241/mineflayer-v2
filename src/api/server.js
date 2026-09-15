@@ -49,6 +49,9 @@ export class ApiServer {
           const blueprintId = decodeURIComponent(parts[4]);
           if (req.method === 'GET' && parts.length === 5) return send(200, { data: await this.application.building.get(blueprintId) });
           if (req.method === 'GET' && parts[5] === 'preview') return send(200, { data: await this.application.building.preview(blueprintId, url.searchParams.get('layer') ?? undefined) });
+          if (req.method === 'GET' && parts[5] === 'preview3d') return send(200, { data: await this.application.building.preview3d(blueprintId) });
+          if (req.method === 'GET' && parts[5] === 'protection') return send(200, { data: await this.application.building.protection(blueprintId) });
+          if (req.method === 'POST' && parts[5] === 'transform') return send(200, { data: await this.application.building.transform(blueprintId, await body(req)) });
           if (req.method === 'GET' && parts[5] === 'snapshot') return send(200, { data: await this.application.building.snapshot(blueprintId) });
           if (req.method === 'GET' && parts[5] === 'deltas') return send(200, { data: await this.application.building.deltas(blueprintId, url.searchParams.get('afterRevision') ?? 0) });
           if (req.method === 'POST' && parts[5] === 'approve') return send(200, { data: await this.application.building.approve(blueprintId, await body(req)) });
