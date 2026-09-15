@@ -28,5 +28,5 @@ function normalize(input) {
   const derivedAlias = String(input.name ?? username).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 32); const commandAlias = String(input.commandAlias ?? input.metadata?.commandAlias ?? derivedAlias).trim(); const className = String(input.className ?? input.metadata?.className ?? 'worker').trim();
   if (!/^[A-Za-z0-9_-]{2,32}$/.test(commandAlias) || !/^[A-Za-z0-9_-]{2,32}$/.test(className)) throw new ValidationError('Command alias and class must be 2-32 letters, numbers, hyphens, or underscores');
   return { id: input.id ?? randomUUID(), name: input.name ?? username, username, host: input.host ?? 'localhost', port, auth: input.auth ?? 'offline', version: input.version || undefined,
-    autoConnect: Boolean(input.autoConnect), capabilities: input.capabilities, metadata: { ...(input.metadata ?? {}), commandAlias, className } };
+    autoConnect: Boolean(input.autoConnect), capabilities: input.capabilities, metadata: { ...(input.metadata ?? {}), commandAlias, className, autoSleep: Boolean(input.autoSleep ?? input.metadata?.autoSleep) } };
 }
