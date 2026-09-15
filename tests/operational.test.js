@@ -26,7 +26,7 @@ class OperationalAdapter extends EventEmitter {
   async stopNavigation() { this.navigationStopped = true; return { stopped: true }; }
   async resolveNavigationTarget({ type, username }) { if (type !== 'PLAYER' || username !== 'Alice') throw new Error('player is not visible'); return { x: 4, y: 64, z: 2 }; }
   async followPlayer(input) { this.following = input.username; return { player: input.username }; }
-  async comeToPlayer(input) { this.cameTo = input.username; return { player: input.username }; }
+  async comeToPlayer(input) { this.cameTo = input.username; const position = await this.resolveNavigationTarget({ type: 'PLAYER', username: input.username }); await this.navigateTo({ position }); return { player: input.username, position }; }
   async findSheep() { return { entityId: 'sheep-1' }; }
   async shearSheep(input) { this.sheared = input.entityId; return { entityId: input.entityId, verified: true }; }
   async findCow() { return { entityId: 'cow-1' }; }
