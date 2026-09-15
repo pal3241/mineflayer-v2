@@ -36,7 +36,15 @@ export class ChatCommandController {
         const targetSelector = selector === 'global' ? 'global' : selector === className ? `class:${className}` : `bot:${alias}`; const request = command === 'ai' ? args.join(' ') : [command, ...args].join(' ');
         if (!this.coordinator.shouldHandle(runtime.bot.id, targetSelector)) return;
         const result = await this.coordinator.coordinateOnce(`${username}:${message}`, { text: request, selector: targetSelector, actor: username });
-        const reply = result.results.find(item => item.status === 'COMPLETED')?.result?.reply; if (reply) return this.#reply(runtime, reply);
+        const completed = result.results.find(item => item.status === 'COMPLETED')?.result; const reply = completed?.reply; if (reply) return this.#reply(runtime, reply);
+        if (result.intent.intent === 'stock' && completed?.storages) {
+          const lines = completed.storages.map(storage => {
+            const items = (storage.availableInventory ?? storage.inventory ?? []).filter(item => Number(item.available ?? item.count) > 0).map(item => `${item.name}:${item.available ?? item.count}`).join(', ');
+            return `${storage.name} [${storage.position.x},${storage.position.y},${storage.position.z}]: ${items || 'empty'}`;
+          });
+          const warning = completed.warnings?.length ? ` | warning: ${completed.warnings.join('; ')}` : '';
+          return this.#reply(runtime, `${lines.join(' | ') || 'no registered chest in this world'}${warning}`.slice(0, 240));
+        }
         return this.#reply(runtime, `coordinator completed ${result.results.filter(item => item.status === 'COMPLETED').length}/${result.results.length}`);
       }
       if (command === 'status') { const state = runtime.snapshot(); return this.#reply(runtime, `${state.status}, hp=${state.runtime.health}, food=${state.runtime.food}, pos=${formatPosition(state.runtime.position)}`); }

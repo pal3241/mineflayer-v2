@@ -61,7 +61,11 @@ export class FleetCoordinator {
     if (intent.intent === 'register_storage') return this.logistics.registerNearest({ runtime, name: intent.name, maxDistance: intent.radius });
     if (intent.intent === 'store') return this.logistics.store({ runtime, storageName: intent.name, item: intent.item, count: intent.count });
     if (intent.intent === 'retrieve') return this.logistics.retrieve({ runtime, storageName: intent.name, item: intent.item, count: intent.count });
-    if (intent.intent === 'stock') { const server = serverIdentity(runtime.options); return { storages: await this.logistics.stock({ worldKey: `${server.host}:${server.port}`, dimension: adapter.snapshot().dimension }) }; }
+    if (intent.intent === 'stock') {
+      const server = serverIdentity(runtime.options); const scope = { worldKey: `${server.host}:${server.port}`, dimension: adapter.snapshot().dimension }; const warnings = [];
+      for (const storage of await this.logistics.storages(scope)) { try { await this.logistics.sync({ runtime, storageId: storage.id }); } catch (error) { warnings.push(`${storage.name}: ${error.message}`); } }
+      return { storages: await this.logistics.stock(scope), warnings };
+    }
     if (intent.intent === 'remember') { const snapshot = adapter.snapshot(); return this.memory.remember({ ...runtime.options, dimension: snapshot.dimension, position: snapshot.position, name: intent.name, type: intent.type, sourceBotId: botId }); }
     if (intent.intent === 'place') { const places = await this.memory.forBot(runtime, { name: intent.name, limit: 1 }); if (!places.length) throw new ConflictError(`Shared memory '${intent.name}' was not found in this world`); return { memory: places[0], movement: await adapter.smartMove({ ...places[0].position, range: 2 }) }; }
     if (intent.intent === 'farm') { applyCommandMovementPolicy(adapter, movement); const requirements = typeof adapter.farmRequirements === 'function' ? await adapter.farmRequirements({ crop: intent.crop, count: intent.count }) : { needsHoe: true, needsSeed: false }; const equipment = requirements.needsHoe ? await this.#ensureEquipment(botId, HOES) : null; const seed = requirements.needsSeed ? await this.#acquireItem(botId, requirements.seed, 1, new Set()) : null; return { requirements, equipment, seed, farming: await adapter.farm({ crop: intent.crop, count: intent.count }) }; }

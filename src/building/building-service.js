@@ -23,16 +23,27 @@ class BuildingService {
       try {
         const runtime = this.bots.get(botSummary.id); const snapshot = runtime.adapter.snapshot();
         for (const entry of snapshot.inventorySummary ?? []) inventory.set(entry.name, (inventory.get(entry.name) ?? 0) + Number(entry.count ?? 0));
-        if (this.logistics) for (const storage of await this.logistics.stock(this.scope(botSummary.id))) {
-          storages.push({ id: storage.id, name: storage.name, position: storage.position });
-          for (const entry of storage.availableInventory ?? []) inventory.set(entry.name, (inventory.get(entry.name) ?? 0) + Number(entry.available ?? 0));
+        const warnings = [];
+        if (this.logistics) {
+          const scope = this.scope(botSummary.id);
+          for (const registered of await this.logistics.storages(scope)) {
+            try { await this.logistics.sync({ runtime, storageId: registered.id }); }
+            catch (error) { warnings.push({ storageId: registered.id, name: registered.name, error: error.message }); }
+          }
+          for (const storage of await this.logistics.stock(scope)) {
+            storages.push({ id: storage.id, name: storage.name, position: storage.position });
+            for (const entry of storage.availableInventory ?? []) inventory.set(entry.name, (inventory.get(entry.name) ?? 0) + Number(entry.available ?? 0));
+          }
         }
-      } catch {}
+        return { blueprintId: id, botId: botSummary.id, storages, warnings, materials: project.materials.map(material => {
+          const available = inventory.get(material.name) ?? 0; const decision = project.materialDecisions?.[material.name] ?? null;
+          return { ...material, available, missing: Math.max(0, material.count - available), ready: available >= material.count, decision };
+        }) };
+      } catch (error) {
+        return { blueprintId: id, botId: botSummary.id, storages, warnings: [{ error: error.message }], materials: project.materials.map(material => ({ ...material, available: 0, missing: material.count, ready: false, decision: project.materialDecisions?.[material.name] ?? null })) };
+      }
     }
-    return { blueprintId: id, botId: botSummary?.id ?? null, storages, materials: project.materials.map(material => {
-      const available = inventory.get(material.name) ?? 0; const decision = project.materialDecisions?.[material.name] ?? null;
-      return { ...material, available, missing: Math.max(0, material.count - available), ready: available >= material.count, decision };
-    }) };
+    return { blueprintId: id, botId: null, storages: [], warnings: [{ error: 'No READY bot can inspect logistics storage' }], materials: project.materials.map(material => ({ ...material, available: 0, missing: material.count, ready: false, decision: project.materialDecisions?.[material.name] ?? null })) };
   }
   async resolveMaterial(id, input = {}) {
     const project = await this.get(id); const material = String(input.material ?? '').toLowerCase(); const action = String(input.action ?? '').toUpperCase();
