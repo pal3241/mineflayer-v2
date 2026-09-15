@@ -434,7 +434,7 @@ export class MineflayerAdapter extends EventEmitter {
     } finally { signal?.removeEventListener('abort', wakeOnAbort); }
   }
   async wake() { const bot = this.#ready('wake'); if (bot.isSleeping) await bot.wake(); if (bot.isSleeping) throw survivalError('SLEEP_UNAVAILABLE', 'Bot remained asleep after wake request', 'minecraft.wake', { bed: this.currentSleepState.bed }); this.currentSleepState = { state: 'AWAKE', bed: this.currentSleepState.bed, error: null }; return { ...this.currentSleepState, verified: true }; }
-  sleepStatus() { const bot = this.#ready('sleep-status'); return { ...this.currentSleepState, sleeping: Boolean(bot.isSleeping) }; }
+  sleepStatus() { const bot = this.#ready('sleep-status'); return { ...this.currentSleepState, sleeping: Boolean(bot.isSleeping), isNight: sleepTime(bot), timeOfDay: Number(bot.time?.timeOfDay ?? 0), dimension: bot.game?.dimension ?? null }; }
   async openDoor(input) { return setOpenableState(this, input, true, 'door'); }
   async closeDoor(input) { return setOpenableState(this, input, false, 'door'); }
   async openTrapdoor(input) { return setOpenableState(this, input, true, 'trapdoor'); }
