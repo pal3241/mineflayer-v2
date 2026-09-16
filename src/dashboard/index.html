@@ -20,6 +20,7 @@
       <button class="nav" data-view="recovery">✚ <span>Recovery</span></button>
       <button class="nav" data-view="memory">◫ <span>Memory</span></button>
       <button class="nav" data-view="movement">➤ <span>Movement</span></button>
+      <button class="nav" data-view="combat">⚔ <span>Combat RTS</span></button>
       <button class="nav" data-view="building">▧ <span>Building</span></button>
       <button class="nav" data-view="admins">♙ <span>Admins</span></button>
       <button class="nav" data-view="settings">⚙ <span>Settings</span></button>
@@ -224,6 +225,12 @@
         <div class="full"><p id="movementEffectiveStatus" class="hint">Loading effective policy…</p><div id="movementDifferences" class="hint"></div></div>
         <div class="actions full"><button id="movementApplyPreset" class="button secondary" type="button">Apply preset</button><button id="movementReset" class="button secondary" type="button">Reset draft</button><button id="movementRemoveOverride" class="button danger" type="button">Reset bot override</button><button class="button primary" type="submit">Save changes</button></div>
       </form></section>
+    </section>
+
+    <section id="combat" class="view">
+      <div class="panel-title"><div><p class="eyebrow">v1.1.0 COMBAT SUPERIOR</p><h2>Squad, guarding & adaptive combat</h2></div><button id="refreshCombat" class="button secondary" type="button">Refresh combat</button></div>
+      <div class="stats compact-stats"><article><span>COMBAT BOTS</span><strong id="combatBotCount">0</strong><small>profiles loaded</small></article><article><span>EXPERIENCE</span><strong id="combatEventCount">0</strong><small>training events</small></article><article><span>POLICY</span><strong id="combatPolicy">—</strong><small>safe local execution</small></article></div>
+      <div class="settings-grid"><section class="panel"><div class="panel-title"><div><p class="eyebrow">BOT ROLES</p><h2>Combat points & state</h2></div></div><div id="combatProfiles" class="timeline"></div></section><section class="panel"><div class="panel-title"><div><p class="eyebrow">SQUAD COMMAND</p><h2>Focus target</h2></div></div><form id="combatFocusForm" class="form-grid"><label>Squad ID<input id="combatSquadId" value="default"></label><label>Target entity ID<input id="combatTargetId" required></label><label>Target name<input id="combatTargetName" placeholder="zombie"></label><label>Bot IDs (comma-separated)<input id="combatBotIds" placeholder="bot-a, bot-b"></label><button class="button primary full">Assign focus</button></form><div id="combatSquads" class="timeline"></div></section><section class="panel full"><div class="panel-title"><div><p class="eyebrow">EXPERIENCE BUFFER</p><h2>Python RL training feed</h2></div></div><pre id="combatEvents" class="runtime-logs">Open Combat RTS to load event data.</pre></section></div>
     </section>
 
     <section id="building" class="view">
