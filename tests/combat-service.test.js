@@ -41,3 +41,22 @@ test('combat doctrine extracts PvP techniques from owner text without overriding
   const decision = await combat.decide({ botId: 'archer', self: { health: 20 }, target: { name: 'skeleton', distance: 6 }, inventory: ['bow', 'arrow'] });
   assert.ok(decision.doctrine.some(item => item.title === 'PvP notes'));
 });
+
+
+test('damage to a bound bot starts automatic guard combat once', async () => {
+  const handlers = new Map(); const calls = [];
+  const adapter = {
+    combatState: { status: 'IDLE' },
+    snapshot: () => ({ entityId: 42, position: { x: 3, y: 64, z: 5 }, health: 18 }),
+    on: (name, callback) => handlers.set(name, callback),
+    off: () => {},
+    startCombat: async input => { calls.push(input); adapter.combatState.status = 'ACTIVE'; }
+  };
+  const combat = createCombatService({ repositories: { profiles: new MemoryRepository(), events: new MemoryRepository(), policies: new MemoryRepository() }, events: new EventBus(), bots: bots([{ id: 'guard', status: 'READY', runtime: { position: { x: 3, y: 64, z: 5 } } }]) });
+  await combat.setRole('guard', 'TANK');
+  await combat.bind({ bot: { id: 'guard' }, adapter });
+  handlers.get('entityHurt')({ id: 42 });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], { mode: 'guard', position: { x: 3, y: 64, z: 5 }, radius: 16, role: 'TANK' });
+});
