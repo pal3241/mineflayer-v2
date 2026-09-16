@@ -1,4 +1,4 @@
-name: Release MineHive 1.0.0
+name: Release MineHive 1.0.1
 
 on:
   push:
@@ -28,13 +28,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          asset="client-mod/build/libs/minehive-client-1.0.0.jar"
-          if gh release view v1.0.0 >/dev/null 2>&1; then
-            gh release upload v1.0.0 "$asset#MineHive Fabric Client 1.0.0" --clobber
+          asset="client-mod/build/libs/minehive-client-1.0.1.jar"
+          if gh release view v1.0.1 >/dev/null 2>&1; then
+            gh release upload v1.0.1 "$asset#MineHive Fabric Client 1.0.1" --clobber
           else
-            gh release create v1.0.0 "$asset#MineHive Fabric Client 1.0.0" \
+            gh release create v1.0.1 "$asset#MineHive Fabric Client 1.0.1" \
               --target "$GITHUB_SHA" \
-              --title "MineHive 1.0.0 — Hivemind Client" \
-              --notes-file updates/v1.0.0/client-mod-and-control-bridge.md \
+              --title "MineHive 1.0.1 — LAN Client Fix" \
+              --notes "Memperbaiki penyimpanan endpoint LAN dan pesan galat koneksi client." \
               --latest
           fi
