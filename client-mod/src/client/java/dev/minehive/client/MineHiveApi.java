@@ -26,7 +26,7 @@ public final class MineHiveApi {
     public JsonObject preview() { return preview.deepCopy(); }
 
     public CompletableFuture<JsonObject> connect(String playerName) {
-        JsonObject body = new JsonObject(); body.addProperty("clientName", "MineHive Fabric 1.0.0"); body.addProperty("playerName", playerName); status = "Connecting";
+        JsonObject body = new JsonObject(); body.addProperty("clientName", "MineHive Fabric 1.0.1"); body.addProperty("playerName", playerName); status = "Connecting";
         return request("POST", "/api/v1/client/sessions", body).thenApply(data -> { sessionId = data.get("id").getAsString(); status = "Connected"; return data; })
                 .exceptionally(error -> { failed(error); return new JsonObject(); });
     }
@@ -58,15 +58,28 @@ public final class MineHiveApi {
     }
     private JsonObject sessionBody() { if (sessionId == null) throw new IllegalStateException("MineHive client has no session"); JsonObject body = new JsonObject(); body.addProperty("sessionId", sessionId); return body; }
     private CompletableFuture<JsonObject> request(String method, String path, JsonObject body) {
-        MineHiveConfig current = config; HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(current.baseUrl + path)).timeout(Duration.ofSeconds(5)).header("Accept", "application/json");
+        MineHiveConfig current = config;
+        final URI uri;
+        try { uri = URI.create(current.baseUrl + path); }
+        catch (Exception error) { return CompletableFuture.failedFuture(new IllegalArgumentException("Alamat MineHive tidak valid: " + current.baseUrl)); }
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(5)).header("Accept", "application/json");
         if (!current.apiToken.isBlank()) builder.header("Authorization", "Bearer " + current.apiToken);
         if (body == null) builder.GET(); else builder.header("Content-Type", "application/json").method(method, HttpRequest.BodyPublishers.ofString(GSON.toJson(body), StandardCharsets.UTF_8));
         return http.sendAsync(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)).thenApply(response -> {
-            JsonElement parsed; try { parsed = JsonParser.parseString(response.body()); } catch (Exception error) { throw new CompletionException(new IllegalStateException("MineHive returned invalid JSON (HTTP " + response.statusCode() + ")")); }
+            JsonElement parsed; try { parsed = JsonParser.parseString(response.body()); } catch (Exception error) { throw new CompletionException(new IllegalStateException("MineHive memberi respons bukan JSON (HTTP " + response.statusCode() + ")")); }
             if (response.statusCode() < 200 || response.statusCode() >= 300) throw new CompletionException(new IllegalStateException("HTTP " + response.statusCode() + ": " + response.body()));
             JsonObject root = parsed.getAsJsonObject(); return root.has("data") && root.get("data").isJsonObject() ? root.getAsJsonObject("data") : root;
         });
     }
-    private void failed(Throwable error) { Throwable cause = error; while (cause.getCause() != null) cause = cause.getCause(); status = "Error: " + cause.getMessage(); }
+    private void failed(Throwable error) {
+        Throwable cause = error; while (cause.getCause() != null) cause = cause.getCause();
+        String message = cause.getMessage();
+        if (message == null || message.isBlank()) {
+            String type = cause.getClass().getSimpleName();
+            message = type.isBlank() ? "koneksi ke MineHive gagal" : type + ": koneksi ke MineHive gagal";
+        }
+        if (message.contains("ConnectException")) message = "Tidak bisa terhubung. Isi alamat LAN HP, misalnya http://192.168.1.6:3000";
+        status = "Error: " + message;
+    }
     private static String encode(String value) { return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8); }
 }
