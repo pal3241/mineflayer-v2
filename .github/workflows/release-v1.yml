@@ -1,0 +1,40 @@
+name: Release MineHive 1.0.0
+
+on:
+  push:
+    paths:
+      - '.github/workflows/release-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Build release JAR
+        working-directory: client-mod
+        run: gradle clean build --stacktrace
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset="client-mod/build/libs/minehive-client-1.0.0.jar"
+          if gh release view v1.0.0 >/dev/null 2>&1; then
+            gh release upload v1.0.0 "$asset#MineHive Fabric Client 1.0.0" --clobber
+          else
+            gh release create v1.0.0 "$asset#MineHive Fabric Client 1.0.0" \
+              --target "$GITHUB_SHA" \
+              --title "MineHive 1.0.0 — Hivemind Client" \
+              --notes-file updates/v1.0.0/client-mod-and-control-bridge.md \
+              --latest
+          fi
