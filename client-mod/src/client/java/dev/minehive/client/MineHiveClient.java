@@ -17,7 +17,7 @@ public final class MineHiveClient implements ClientModInitializer {
     public static MineHiveClient INSTANCE;
     private MineHiveConfig config; private MineHiveApi api;
     private KeyBinding controlKey, switchKey, releaseKey, rtsKey, blueprintKey;
-    private int ticks; private String controlledBotId, controlledUsername; private boolean previousAttack, previousUse;
+    private int ticks; private String controlledBotId, controlledUsername; private boolean previousAttack, previousUse; private long lastControlAt; private String lastControlSignature = "";
 
     @Override public void onInitializeClient() {
         INSTANCE = this; config = MineHiveConfig.load(); api = new MineHiveApi(config);
@@ -34,7 +34,7 @@ public final class MineHiveClient implements ClientModInitializer {
         while (rtsKey.wasPressed()) client.setScreen(new RtsScreen(client.currentScreen));
         while (blueprintKey.wasPressed()) client.setScreen(new BlueprintScreen(client.currentScreen));
         while (switchKey.wasPressed()) switchByLook(client); while (releaseKey.wasPressed()) release(client);
-        keepCamera(client); if (controlledBotId != null && ticks % config.controlIntervalTicks == 0) sendControl(client);
+        keepCamera(client); if (controlledBotId != null) sendControl(client);
     }
     private void switchByLook(MinecraftClient client) {
         if (!(client.crosshairTarget instanceof EntityHitResult hit)) { toast(client, "Look directly at a MineHive bot first"); return; }
@@ -47,16 +47,31 @@ public final class MineHiveClient implements ClientModInitializer {
     public void release(MinecraftClient client) {
         api.release().whenComplete((result, error) -> client.execute(() -> { controlledBotId = null; controlledUsername = null; if (client.player != null) client.setCameraEntity(client.player); toast(client, error == null ? "Bot control released" : rootMessage(error)); }));
     }
-    private void keepCamera(MinecraftClient client) { if (controlledUsername == null) return; Entity target = findEntity(client, controlledUsername); if (target != null && client.getCameraEntity() != target) client.setCameraEntity(target); }
+    private void keepCamera(MinecraftClient client) {
+        if (controlledUsername == null || client.player == null) return;
+        Entity target = findEntity(client, controlledUsername);
+        if (target != null) {
+            if (client.getCameraEntity() != target) client.setCameraEntity(target);
+            // Keep the locally rendered remote camera aligned with the player's mouse input.
+            target.setYaw(client.player.getYaw()); target.setPitch(client.player.getPitch()); target.setHeadYaw(client.player.getYaw());
+        }
+    }
     private void sendControl(MinecraftClient client) {
+        boolean forward = client.options.forwardKey.isPressed(), back = client.options.backKey.isPressed(), left = client.options.leftKey.isPressed(), right = client.options.rightKey.isPressed();
+        boolean jump = client.options.jumpKey.isPressed(), sprint = client.options.sprintKey.isPressed(), sneak = client.options.sneakKey.isPressed();
         boolean attack = client.options.attackKey.isPressed(), use = client.options.useKey.isPressed();
-        api.control(client.options.forwardKey.isPressed(), client.options.backKey.isPressed(), client.options.leftKey.isPressed(), client.options.rightKey.isPressed(), client.options.jumpKey.isPressed(), client.options.sprintKey.isPressed(), client.options.sneakKey.isPressed(), client.player.getYaw(), client.player.getPitch(), attack && !previousAttack, use && !previousUse);
-        previousAttack = attack; previousUse = use;
+        float yaw = client.player.getYaw(), pitch = client.player.getPitch();
+        String signature = forward + ":" + back + ":" + left + ":" + right + ":" + jump + ":" + sprint + ":" + sneak + ":" + attack + ":" + use + ":" + Math.round(yaw) + ":" + Math.round(pitch);
+        long now = System.currentTimeMillis();
+        // Four packets per second at most; idle state is not resent. This keeps the mobile host responsive.
+        if (signature.equals(lastControlSignature) || now - lastControlAt < 250) { previousAttack = attack; previousUse = use; return; }
+        api.control(forward, back, left, right, jump, sprint, sneak, yaw, pitch, attack && !previousAttack, use && !previousUse);
+        lastControlAt = now; lastControlSignature = signature; previousAttack = attack; previousUse = use;
     }
     private void renderHud(net.minecraft.client.gui.DrawContext draw) {
         MinecraftClient client = MinecraftClient.getInstance(); if (!config.showHud || client.player == null) return;
         int color = api.status().startsWith("Error") ? 0xFFFF6666 : api.connected() ? 0xFF75E6A4 : 0xFFFFC857;
-        draw.fill(6, 6, 520, controlledBotId == null ? 31 : 43, 0xB0101815); draw.drawTextWithShadow(client.textRenderer, Text.literal("MineHive 1.0.1 · " + api.status()), 12, 11, color);
+        draw.fill(6, 6, 520, controlledBotId == null ? 31 : 43, 0xB0101815); draw.drawTextWithShadow(client.textRenderer, Text.literal("MineHive 1.0.2 · " + api.status()), 12, 11, color);
         if (controlledBotId != null) draw.drawTextWithShadow(client.textRenderer, Text.literal("BODY: " + controlledUsername + "  [V switch · X release]"), 12, 25, 0xFFFFFFFF);
     }
     private JsonObject botByUsername(String username) { JsonObject state = api.state(); if (!state.has("bots")) return null; for (JsonElement element : state.getAsJsonArray("bots")) { JsonObject bot = element.getAsJsonObject(); if (bot.has("username") && username.equalsIgnoreCase(bot.get("username").getAsString())) return bot; } return null; }
