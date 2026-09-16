@@ -1,4 +1,4 @@
-name: Release MineHive 1.0.3
+name: Release MineHive 1.0.4
 
 on:
   push:
@@ -28,13 +28,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          asset="client-mod/build/libs/minehive-client-1.0.3.jar"
-          if gh release view v1.0.3 >/dev/null 2>&1; then
-            gh release upload v1.0.3 "$asset#MineHive Fabric Client 1.0.3" --clobber
+          asset="client-mod/build/libs/minehive-client-1.0.4.jar"
+          if gh release view v1.0.4 >/dev/null 2>&1; then
+            gh release upload v1.0.4 "$asset#MineHive Fabric Client 1.0.4" --clobber
           else
-            gh release create v1.0.3 "$asset#MineHive Fabric Client 1.0.3" \
+            gh release create v1.0.4 "$asset#MineHive Fabric Client 1.0.4" \
               --target "$GITHUB_SHA" \
-              --title "MineHive 1.0.3 — LAN Client Fix" \
+              --title "MineHive 1.0.4 — LAN Client Fix" \
               --notes "Memperbaiki kontrol realtime, kamera bot, dan arah pandangan." \
               --latest
           fi
