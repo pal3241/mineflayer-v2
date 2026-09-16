@@ -109,7 +109,7 @@ export class MineflayerAdapter extends EventEmitter {
   async applyClientControl(input = {}) {
     const bot = this.#ready('client-control'); const sessionId = String(input.sessionId ?? '').trim(); if (!this.clientControlSession || this.clientControlSession !== sessionId) throw new ValidationError('Client control lease is not active for this bot');
     const states = { forward: input.forward, back: input.back, left: input.left, right: input.right, jump: input.jump, sprint: input.sprint, sneak: input.sneak }; for (const [name, value] of Object.entries(states)) if (value !== undefined) bot.setControlState(name, Boolean(value));
-    if (Number.isFinite(Number(input.yaw)) && Number.isFinite(Number(input.pitch))) await bot.look(degreesToRadians(input.yaw), degreesToRadians(input.pitch), true);
+    if (Number.isFinite(Number(input.yaw)) && Number.isFinite(Number(input.pitch))) await bot.look(minecraftYawToMineflayerRadians(input.yaw), degreesToRadians(input.pitch), true);
     if (input.attack) { const target = bot.entityAtCursor?.(5); if (target) await bot.attack(target); else bot.swingArm?.('right'); } if (input.use) { const block = bot.blockAtCursor?.(5); if (block && bot.activateBlock) await bot.activateBlock(block); else bot.activateItem?.(); }
     return { position: this.snapshot().position, health: bot.health ?? null, food: bot.food ?? null };
   }
@@ -614,3 +614,4 @@ async function validateCanvas() {
 }
 
 function degreesToRadians(value) { return Number(value) * Math.PI / 180; }
+function minecraftYawToMineflayerRadians(value) { const yaw = Math.PI - degreesToRadians(value); return Math.atan2(Math.sin(yaw), Math.cos(yaw)); }
