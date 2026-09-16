@@ -35,6 +35,18 @@ test('acquisition marks craft-ready requirements when the recipe has no missing 
   assert.deepEqual(result.recipe.steps, ['craft']);
 });
 
+test('acquisition reuses a remembered crafting table instead of crafting another one', async () => {
+  let tableReady = false; let preparations = 0;
+  const bot = { id: 'bot-a', status: 'READY', options: { host: 'localhost', port: 25565 }, adapter: {
+    snapshot: () => ({ inventorySummary: [{ name: 'oak_planks', count: 8 }], dimension: 'overworld', position: { x: 0, y: 64, z: 0 } }),
+    craftRequirements: async () => ({ craftable: true, missing: tableReady ? [] : [{ name: 'crafting_table', count: 1 }], steps: [{ item: 'chest', crafts: 1 }] })
+  } };
+  const workshops = { prepare: async ({ kind }) => { preparations++; assert.equal(kind, 'crafting_table'); tableReady = true; return { kind, position: { x: 2, y: 64, z: 0 } }; } };
+  const service = createAcquisitionService({ bots: { list: () => [bot], get: () => bot }, logistics: { stock: async () => [] }, workshops, events: { publish: async () => {} } });
+  const plan = await service.request({ requesterBotId: 'bot-a', type: 'ITEM', item: 'chest', count: 1 });
+  assert.equal(plan.status, 'CRAFT_READY'); assert.equal(preparations, 1); assert.deepEqual(plan.recipe.missing, []); assert.equal(plan.recipe.workshop.kind, 'crafting_table');
+});
+
 test('acquisition bypasses craft when an item is not craftable', async () => {
   const bot = {
     id: 'bot-a',

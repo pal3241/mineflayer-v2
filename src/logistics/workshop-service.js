@@ -1,7 +1,7 @@
 import { ValidationError } from '../core/errors.js';
 
 const KINDS = new Set(['crafting_table', 'furnace', 'blast_furnace', 'smoker', 'stonecutter', 'smithing_table', 'loom', 'cartography_table', 'brewing_stand']);
-export function createWorkshopService({ events, memory }) { return Object.freeze({ scan: input => scan({ events, memory }, input), known: input => known(memory, input) }); }
+export function createWorkshopService({ events, memory }) { return Object.freeze({ scan: input => scan({ events, memory }, input), known: input => known(memory, input), prepare: input => prepare({ events, memory }, input) }); }
 
 async function scan({ events, memory }, { runtime, radius = 48, kinds = [...KINDS] }) {
   if (!runtime?.adapter?.findWorkshops) throw new ValidationError('Workshop scan requires a Minecraft runtime that supports workshop discovery');
@@ -13,5 +13,26 @@ async function scan({ events, memory }, { runtime, radius = 48, kinds = [...KIND
   return workshops;
 }
 async function known(memory, { worldKey, dimension, kind, position = null }) { if (!memory) return []; const context = await memory.context({ worldKey, dimension, position, limit: 100 }); return context.records.filter(record => record.kind === 'WORKSHOP' && (!kind || record.metadata?.kind === kind)); }
+async function prepare({ events, memory }, { runtime, kind, radius = 48, signal } = {}) {
+  if (!runtime?.adapter?.findWorkshops) return null;
+  const requested = String(kind ?? ''); if (!KINDS.has(requested)) throw new ValidationError(`Unsupported workshop kind '${requested}'`);
+  const snapshot = runtime.adapter.snapshot(); const position = snapshot.position ?? runtime.adapter.client?.entity?.position ?? null; const scope = runtimeScope(runtime);
+  const visible = await scan({ events, memory }, { runtime, radius, kinds: [requested] });
+  let candidate = nearest(visible, position);
+  if (!candidate) candidate = nearest(await known(memory, { ...scope, kind: requested, position }), position);
+  if (!candidate?.position) return null;
+  if (signal?.aborted) throw signal.reason ?? new ValidationError('Workshop preparation cancelled');
+  if (runtime.adapter.navigate && (!position || distance(position, candidate.position) > 5)) await runtime.adapter.navigate({ ...candidate.position, range: 3 }, { signal });
+  const verified = nearest(await runtime.adapter.findWorkshops({ kinds: [requested], maxDistance: 6 }), candidate.position);
+  if (!verified || distance(verified.position, candidate.position) > 2) {
+    if (candidate.key) await memory?.invalidateWorkshop?.(candidate.key, 'BLOCK_MISSING_AFTER_NAVIGATION');
+    return null;
+  }
+  const observed = { ...scope, ...verified, botId: runtime.bot?.id ?? runtime.id, observedAt: new Date().toISOString() };
+  await events?.publish('logistics.workshop.observed', observed, { source: 'workshops', correlationId: `${observed.kind}:${observed.position.x},${observed.position.y},${observed.position.z}` });
+  return observed;
+}
 function bounded(value) { const number = Number(value); if (!Number.isInteger(number) || number < 1 || number > 256) throw new ValidationError('Workshop scan radius must be an integer from 1 to 256'); return number; }
 function runtimeScope(runtime) { const snapshot = runtime.adapter.snapshot(); return { worldKey: `${String(runtime.options?.host ?? 'localhost').toLowerCase()}:${Number(runtime.options?.port ?? 25565)}`, dimension: String(snapshot.dimension ?? 'overworld') }; }
+function nearest(items, position) { return [...(items ?? [])].sort((left, right) => distance(position, left.position) - distance(position, right.position))[0] ?? null; }
+function distance(left, right) { if (!left || !right) return 0; return Math.hypot(Number(left.x) - Number(right.x), Number(left.y) - Number(right.y), Number(left.z) - Number(right.z)); }

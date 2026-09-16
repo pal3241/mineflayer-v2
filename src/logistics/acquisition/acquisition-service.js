@@ -20,7 +20,7 @@ const DEFAULT_CONFIG = Object.freeze({
   toolPreservation: true
 });
 
-export function createAcquisitionService({ bots, logistics, events, logger, repository = null, config = {}, fleetTransfer = null } = {}) {
+export function createAcquisitionService({ bots, logistics, workshops = null, events, logger, repository = null, config = {}, fleetTransfer = null } = {}) {
   const settings = normalizeConfig({ ...DEFAULT_CONFIG, ...config });
   const records = new Map();
   const flights = new Map();
@@ -29,6 +29,19 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
   let taskRunner = null;
   let initialized = false;
   let persistenceTail = Promise.resolve();
+  const craftPlan = async (runtime, item, count, request) => {
+    let recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item, count }) : null;
+    const needsTable = recipe?.missing?.some(entry => entry.name === 'crafting_table') === true;
+    if (needsTable && workshops?.prepare) {
+      const workshop = await workshops.prepare({ runtime, kind: 'crafting_table', radius: Math.min(settings.maxDistance, 64) });
+      if (workshop) {
+        request?.trace?.push({ at: new Date().toISOString(), step: 'workshop-memory-hit', detail: `crafting_table@${workshop.position.x},${workshop.position.y},${workshop.position.z}` });
+        recipe = await runtime.adapter.craftRequirements({ item, count });
+        recipe.workshop = workshop;
+      }
+    }
+    return recipe;
+  };
   const save = request => {
     if (!request || !repository) return Promise.resolve();
     persistenceTail = persistenceTail.then(async () => {
@@ -178,7 +191,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
     }
 
     if (settings.allowCraft && sourceAllowed('CRAFT') && requirement.type === 'ITEM') {
-      const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item: requirement.item, count: shortage }) : null;
+      const recipe = await craftPlan(runtime, requirement.item, shortage, request);
       if (recipe?.craftable === true) {
         if (recipe.missing?.length === 0) {
           request.status = 'CRAFT_READY';
@@ -198,7 +211,7 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
 
     if (settings.allowCraft && sourceAllowed('CRAFT') && requirement.type === 'TOOL') {
       for (const item of requirement.acceptedItems) {
-        const recipe = runtime.adapter?.craftRequirements ? await runtime.adapter.craftRequirements({ item, count: 1 }) : null;
+        const recipe = await craftPlan(runtime, item, 1, request);
         if (recipe?.craftable === true && recipe.missing?.length === 0) {
           request.status = 'CRAFT_READY';
           request.updatedAt = new Date().toISOString();
@@ -214,7 +227,8 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
     }
 
     if (settings.allowSmelt && sourceAllowed('SMELT') && requirement.type === 'ITEM') {
-      const formula = runtime.adapter?.smeltRequirements ? await runtime.adapter.smeltRequirements({ item: requirement.item, count: shortage }) : null;
+      let formula = runtime.adapter?.smeltRequirements ? await runtime.adapter.smeltRequirements({ item: requirement.item, count: shortage }) : null;
+      if (formula && formula.furnace === false && workshops?.prepare) { const workshop = await workshops.prepare({ runtime, kind: 'furnace', radius: Math.min(settings.maxDistance, 64) }); if (workshop) { request.trace.push({ at: new Date().toISOString(), step: 'workshop-memory-hit', detail: `furnace@${workshop.position.x},${workshop.position.y},${workshop.position.z}` }); formula = { ...await runtime.adapter.smeltRequirements({ item: requirement.item, count: shortage }), workshop }; } }
       if (formula && (!formula.item || formula.item === requirement.item) && formula.input?.name !== requirement.item) {
         request.status = 'SMELT_PLAN_CREATED';
         request.updatedAt = new Date().toISOString();
@@ -273,7 +287,8 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
     }
     if (plan.status === 'CRAFT_READY') {
       const item = plan.item ?? plan.requirement.item;
-      const count = plan.count ?? plan.requirement.count; const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item, count }, acquisitionResources(craftInputs(plan), [{ item, count }]), () => runtime.adapter.craftItem({ item, count }));
+      if (plan.recipe?.workshop && workshops?.prepare) await workshops.prepare({ runtime, kind: 'crafting_table', radius: Math.min(settings.maxDistance, 64) });
+      const count = plan.count ?? plan.requirement.count; const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item, count }, acquisitionResources(craftInputs(plan), [{ item, count }]), () => runtime.adapter.craftItem({ item, count })); if (workshops?.scan) await workshops.scan({ runtime, radius: 8 }).catch(() => {});
       verifyAcquired(runtime, item, plan.requirement.count);
       return await complete(plan, request, { execution: result }, events, save);
     }
@@ -281,7 +296,8 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       const executions = [];
       for (const subrequest of plan.subrequests) executions.push(await acquire(subrequest, depth + 1, budget));
       const item = plan.item ?? plan.requirement.item;
-      const count = plan.count ?? plan.requirement.count; const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item, count }, acquisitionResources(craftInputs(plan), [{ item, count }]), () => runtime.adapter.craftItem({ item, count }));
+      if (plan.recipe?.workshop && workshops?.prepare) await workshops.prepare({ runtime, kind: 'crafting_table', radius: Math.min(settings.maxDistance, 64) });
+      const count = plan.count ?? plan.requirement.count; const result = await runAdapter(taskRunner, runtime, 'minecraft.crafting', { item, count }, acquisitionResources(craftInputs(plan), [{ item, count }]), () => runtime.adapter.craftItem({ item, count })); if (workshops?.scan) await workshops.scan({ runtime, radius: 8 }).catch(() => {});
       verifyAcquired(runtime, item, plan.requirement.count);
       return await complete(plan, request, { execution: { dependencies: executions, craft: result } }, events, save);
     }
@@ -311,7 +327,8 @@ export function createAcquisitionService({ bots, logistics, events, logger, repo
       const count = plan.count ?? plan.requirement.count;
       const input = await acquire({ requesterBotId: runtime.id, type: 'ITEM', item: plan.formula.input.name, count: plan.formula.input.count }, depth + 1, budget);
       const fuel = await acquire({ requesterBotId: runtime.id, type: 'ITEM', item: plan.formula.fuel.name, count: plan.formula.fuel.count }, depth + 1, budget);
-      const result = await runBatches(taskRunner, runtime, 'minecraft.smelting', { item: plan.requirement.item, fuel: plan.formula.fuel.name }, count, batch => acquisitionResources([{ item: plan.formula.input.name, count: batch }, { item: plan.formula.fuel.name, count: Math.ceil(batch / 8) }], [{ item: plan.requirement.item, count: batch }]), (batch) => runtime.adapter.smeltItem({ item: plan.requirement.item, count: batch, fuel: plan.formula.fuel.name }));
+      if (workshops?.prepare) await workshops.prepare({ runtime, kind: 'furnace', radius: Math.min(settings.maxDistance, 64) });
+      const result = await runBatches(taskRunner, runtime, 'minecraft.smelting', { item: plan.requirement.item, fuel: plan.formula.fuel.name }, count, batch => acquisitionResources([{ item: plan.formula.input.name, count: batch }, { item: plan.formula.fuel.name, count: Math.ceil(batch / 8) }], [{ item: plan.requirement.item, count: batch }]), (batch) => runtime.adapter.smeltItem({ item: plan.requirement.item, count: batch, fuel: plan.formula.fuel.name })); if (workshops?.scan) await workshops.scan({ runtime, radius: 8 }).catch(() => {});
       verifyAcquired(runtime, plan.requirement.item, plan.requirement.count);
       return await complete(plan, request, { execution: { input, fuel, smelt: result } }, events, save);
     }

@@ -11,7 +11,7 @@ export class FleetCoordinator {
   #busy = new Map();
   #operationTails = new Map();
   #operationWaiting = new Map();
-  constructor({ gateway, bots, goals, memory, semanticMemory, workingMemory = null, episodicMemory = null, knowledge = null, memoryIntegrity = null, discovery, logistics, acquisition, ml, hive, events, logger, maxQueuePerBot, navigationSettings }) { if (!Number.isInteger(maxQueuePerBot) || maxQueuePerBot < 1) throw new ValidationError('Coordinator queue limit must be a positive integer'); this.gateway = gateway; this.bots = bots; this.goals = goals; this.memory = memory; this.semanticMemory = semanticMemory; this.workingMemory = workingMemory; this.episodicMemory = episodicMemory; this.knowledge = knowledge; this.memoryIntegrity = memoryIntegrity; this.discovery = discovery; this.logistics = logistics; this.acquisition = acquisition ?? null; this.ml = ml; this.hive = hive; this.events = events; this.logger = logger; this.maxQueuePerBot = maxQueuePerBot; this.navigationSettings = navigationSettings; }
+  constructor({ gateway, bots, goals, memory, semanticMemory, workingMemory = null, episodicMemory = null, knowledge = null, memoryIntegrity = null, discovery, logistics, workshops = null, acquisition, ml, hive, events, logger, maxQueuePerBot, navigationSettings }) { if (!Number.isInteger(maxQueuePerBot) || maxQueuePerBot < 1) throw new ValidationError('Coordinator queue limit must be a positive integer'); this.gateway = gateway; this.bots = bots; this.goals = goals; this.memory = memory; this.semanticMemory = semanticMemory; this.workingMemory = workingMemory; this.episodicMemory = episodicMemory; this.knowledge = knowledge; this.memoryIntegrity = memoryIntegrity; this.discovery = discovery; this.logistics = logistics; this.workshops = workshops; this.acquisition = acquisition ?? null; this.ml = ml; this.hive = hive; this.events = events; this.logger = logger; this.maxQueuePerBot = maxQueuePerBot; this.navigationSettings = navigationSettings; }
   status() { const depths = [...this.#operationWaiting.values()]; const maximumDepth = Math.max(0, ...depths); return { llm: this.gateway.status(), bots: this.bots.list().length, coordination: 'semantic-ml-hivemind-resource-planning', queuedOperations: depths.reduce((sum, count) => sum + count, 0), queues: Object.fromEntries(this.#operationWaiting), maxQueuePerBot: this.maxQueuePerBot, maximumDepth, saturation: maximumDepth / this.maxQueuePerBot }; }
   fleetView() {
     const bots = this.bots.list();
@@ -110,8 +110,8 @@ export class FleetCoordinator {
   }
   async #prepareCraft(botId, item, count, visiting) {
     const target = this.bots.get(botId); const available = itemCount(target.adapter.snapshot(), item); if (available >= count) return { item, count, source: 'inventory' };
-    try { await target.adapter.craftItem({ item, count }); return { item, count, source: 'existing-materials' }; } catch {}
-    const plan = await target.adapter.craftRequirements({ item, count });
+    let plan = await target.adapter.craftRequirements({ item, count });
+    if (plan?.missing?.some(missing => missing.name === 'crafting_table') && this.workshops?.prepare) { const workshop = await this.workshops.prepare({ runtime: target, kind: 'crafting_table', radius: 64 }); if (workshop) plan = { ...await target.adapter.craftRequirements({ item, count }), workshop }; }
     if (plan && Array.isArray(plan.missing) && plan.missing.length === 0) {
       return { item, count, source: 'craft-ready', steps: plan.steps ?? [], recipe: plan };
     }
@@ -131,7 +131,8 @@ export class FleetCoordinator {
     return { item, count, source: 'prepared-materials', missing: plan.missing, acquisitions, steps: plan.steps };
   }
   async #prepareSmelt(botId, item, count, visiting) {
-    const target = this.bots.get(botId); const requirements = await target.adapter.smeltRequirements({ item, count }); if (!requirements) throw new ValidationError(`No supported smelting recipe for '${item}'`);
+    const target = this.bots.get(botId); let requirements = await target.adapter.smeltRequirements({ item, count }); if (!requirements) throw new ValidationError(`No supported smelting recipe for '${item}'`);
+    if (!requirements.furnace && this.workshops?.prepare) { const workshop = await this.workshops.prepare({ runtime: target, kind: 'furnace', radius: 64 }); if (workshop) requirements = { ...await target.adapter.smeltRequirements({ item, count }), workshop }; }
     let furnacePreparation = null;
     if (!requirements.furnace) { furnacePreparation = await this.#prepareCraft(botId, 'furnace', 1, visiting); if (itemCount(target.adapter.snapshot(), 'furnace') < 1) await target.adapter.craftItem({ item: 'furnace', count: 1 }); }
     const input = await this.#acquireItem(botId, requirements.input.name, requirements.input.count, visiting); const fuel = await this.#acquireItem(botId, requirements.fuel.name, requirements.fuel.count, visiting); const smelted = await target.adapter.smeltItem({ item, count, fuel: requirements.fuel.name }); return { requirements, furnacePreparation, input, fuel, smelted };
@@ -151,7 +152,8 @@ export class FleetCoordinator {
     const smelting = typeof target.adapter.smeltRequirements === 'function' ? await target.adapter.smeltRequirements({ item, count: shortage }) : null;
     if (smelting) {
       try {
-        const furnacePreparation = smelting.furnace ? null : await this.#prepareCraft(botId, 'furnace', 1, visiting); if (!smelting.furnace) await target.adapter.craftItem({ item: 'furnace', count: 1 });
+        let furnaceAvailable = smelting.furnace; let rememberedWorkshop = null; if (!furnaceAvailable && this.workshops?.prepare) { rememberedWorkshop = await this.workshops.prepare({ runtime: target, kind: 'furnace', radius: 64 }); furnaceAvailable = Boolean(rememberedWorkshop); }
+        const furnacePreparation = furnaceAvailable ? rememberedWorkshop : await this.#prepareCraft(botId, 'furnace', 1, visiting); if (!furnaceAvailable) await target.adapter.craftItem({ item: 'furnace', count: 1 });
         const input = await this.#acquireItem(botId, smelting.input.name, smelting.input.count, visiting); const fuel = await this.#acquireItem(botId, smelting.fuel.name, smelting.fuel.count, visiting);
         const result = await target.adapter.smeltItem({ item, count: shortage }); if (itemCount(target.adapter.snapshot(), item) >= count) return { item, count, source: 'smelted', furnacePreparation, input, fuel, result, transfers };
       } catch (error) { lastError = error; }
