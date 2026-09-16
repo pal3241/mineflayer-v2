@@ -110,7 +110,7 @@ export class Application {
     registerMinecraftCapabilities(this.capabilities, this.bots, this.survival);
     this.resourceReservationCoordinator = createResourceReservationCoordinator({ events: this.events, bots: this.bots, reservations: this.resourceReservations }); this.navigation = createNavigationService({ bots: this.bots, capabilities: this.capabilities, events: this.events, metrics: this.metrics, reservations: this.resourceReservations, settings: this.navigationSettings });
     this.clientBridge = createClientBridgeService({ bots: this.bots, navigation: this.navigation, building: this.building, events: this.events, logger: this.logger });
-    this.combat = createCombatService({ repositories: { profiles: repository('combat-profiles'), events: repository('combat-events'), policies: repository('combat-policies') }, events: this.events, bots: this.bots, ml: this.ml, logger: this.logger });
+    this.combat = createCombatService({ repositories: { profiles: repository('combat-profiles'), events: repository('combat-events'), policies: repository('combat-policies'), doctrines: repository('combat-doctrines') }, events: this.events, bots: this.bots, ml: this.ml, logger: this.logger });
     this.exploration = createExplorationService({ repository: repository('exploration-missions'), territory: this.territory, bots: this.bots, navigation: this.navigation, discovery: this.discovery, events: this.events });
     this.expansion = createExpansionService({ repository: repository('territory-expansions'), territory: this.territory, events: this.events });
     this.admins = new AdminManager({ repository: repository('admins'), bootstrap: [...(config.commands?.admins ?? [])], target: config.commands?.admins ?? [] });
