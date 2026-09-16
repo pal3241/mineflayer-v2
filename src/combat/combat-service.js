@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ValidationError, NotFoundError } from '../core/errors.js';
+import { createCombatNeuralPolicy } from './combat-neural-policy.js';
 
 export const COMBAT_ROLES = Object.freeze(['UNASSIGNED', 'TANK', 'FLANKER', 'RANGED', 'SUPPORT', 'SCOUT']);
 export const COMBAT_RANKS = Object.freeze([
@@ -26,7 +27,7 @@ const MOB_PROFILES = Object.freeze({
 export function createCombatService({ repositories, events, bots, ml, logger } = {}) {
   if (!repositories?.profiles || !repositories?.events || !repositories?.policies) throw new ValidationError('Combat repositories are required');
   const doctrineRepository = repositories.doctrines ?? repositories.policies;
-  const profileCache = new Map(); const squadTargets = new Map(); const bindings = new Map(); let queue = Promise.resolve();
+  const profileCache = new Map(); const squadTargets = new Map(); const bindings = new Map(); const runtimes = new Map(); const neural = createCombatNeuralPolicy(); let queue = Promise.resolve();
   const mutate = operation => { const result = queue.then(operation); queue = result.then(() => undefined, () => undefined); return result; };
   const emit = (type, payload) => events?.publish(type, payload, { source: 'combat-superior', correlationId: payload.botId ?? payload.squadId ?? randomUUID() });
 
@@ -58,6 +59,7 @@ export function createCombatService({ repositories, events, bots, ml, logger } =
       const current = await profile(botId); const points = Math.max(0, Number(current.combatPoints ?? 0) + delta);
       const saved = await repositories.profiles.update(current.id, normalizeProfile({ ...current, combatPoints: points, combatRank: rankFor(points), updatedAt: new Date().toISOString() }));
       profileCache.set(botId, saved);
+      neural.observe({ state: event.state, action: event.action, reward: event.reward });
       await ml?.recordOutcome?.({ botId, intent: 'combat', success: delta >= 0, durationMs: Number(input.durationMs ?? 0), features: mlFeatures(event), source: 'combat-superior' }).catch(error => logger?.warn?.('combat.ml.record.failed', { botId, error: error.message }));
       await emit('combat.event.recorded', { event, profile: saved }); return { event, profile: structuredClone(saved) };
     });
@@ -73,7 +75,33 @@ export function createCombatService({ repositories, events, bots, ml, logger } =
     else if (distance > 16 && inventory.has('ender_pearl') && input.world?.pearlSafe === true) action = 'PEARL_CHASE';
     else if (!ROLE_ACTIONS[role].includes(action)) action = ROLE_ACTIONS[role][0];
     const doctrines = await doctrineRepository.list(); const guidance = doctrines.filter(item => item.status === 'APPROVED' && doctrineMatches(item, { mob, role, action })).sort((a, b) => Number(b.confidence) - Number(a.confidence)).slice(0, 3);
-    return { action, role, mobProfile: mob, desiredDistance: p.desiredDistance, sideState: action === 'SURVIVE_HEAL' || action === 'EXTINGUISH' ? 'SURVIVAL' : 'COMBAT', combatSubstate: action, deterministic: ['EXTINGUISH', 'SURVIVE_HEAL', 'SHIELD_BREAK_WITH_AXE'].includes(action), safety: { avoidFriendlyFire: true, avoidProtectedBuild: true, pearlSafeRequired: true }, doctrine: guidance.map(item => ({ id: item.id, title: item.title, techniques: item.techniques, confidence: item.confidence })) };
+    const neuralAdvice = neural.recommend({ health, distance, mob, role, onFire: Boolean(input.self?.onFire), inventory: [...inventory] }, action);
+    return { action, neuralAdvice, role, mobProfile: mob, desiredDistance: p.desiredDistance, sideState: action === 'SURVIVE_HEAL' || action === 'EXTINGUISH' ? 'SURVIVAL' : 'COMBAT', combatSubstate: action, deterministic: ['EXTINGUISH', 'SURVIVE_HEAL', 'SHIELD_BREAK_WITH_AXE'].includes(action), safety: { avoidFriendlyFire: true, avoidProtectedBuild: true, pearlSafeRequired: true }, doctrine: guidance.map(item => ({ id: item.id, title: item.title, techniques: item.techniques, confidence: item.confidence })) };
+  }
+  async function engage({ botId, mode = 'full_combat', position, radius = 16 } = {}) {
+    const runtime = runtimes.get(String(botId)); if (!runtime?.adapter) throw new NotFoundError(`Combat runtime '${botId}' is not connected`);
+    const snapshot = runtime.adapter.snapshot?.() ?? {}; const profileValue = await profile(botId);
+    const anchor = position ?? snapshot.position; if (!anchor) throw new ValidationError('Combat engagement needs a known bot position');
+    const started = await runtime.adapter.startCombat({ mode, position: anchor, radius, role: profileValue.combatRole });
+    await transition(botId, profileValue.mainState, 'COMBAT', 'ENGAGED', { mode, anchor, radius });
+    await record({ botId, type: 'ENGAGEMENT_STARTED', action: 'ENGAGE', outcome: 'ACTIVE', state: { health: snapshot.health ?? 20 } });
+    return { ...started, botId: String(botId), mode: String(mode).toUpperCase(), anchor };
+  }
+  async function stopEngagement(botId) {
+    const runtime = runtimes.get(String(botId)); if (!runtime?.adapter) throw new NotFoundError(`Combat runtime '${botId}' is not connected`);
+    const result = await runtime.adapter.stopCombat(); const current = await profile(botId);
+    await transition(botId, current.mainState, null, null, { reason: 'owner-stop' });
+    return { ...result, botId: String(botId) };
+  }
+  async function protect({ protectorId, wardId, radius = 16 } = {}) {
+    const wardRuntime = runtimes.get(String(wardId)); if (!wardRuntime?.adapter) throw new NotFoundError(`Protected bot '${wardId}' is not connected`);
+    const wardSnapshot = wardRuntime.adapter.snapshot?.() ?? {}; if (!wardSnapshot.position) throw new ValidationError('Protected bot has no known position');
+    const result = await engage({ botId: protectorId, mode: 'guard', position: wardSnapshot.position, radius });
+    const protector = await profile(protectorId); const ward = await profile(wardId);
+    await transition(protectorId, protector.mainState, 'COMBAT_GUARD', 'PROTECTING_ALLY', { wardId: String(wardId), radius });
+    await transition(wardId, ward.mainState, 'PROTECTED', 'ESCORTED', { protectorId: String(protectorId) });
+    await record({ botId: protectorId, type: 'ALLY_SAVED', action: 'PROTECT', outcome: 'ACTIVE', state: { wardId: String(wardId) } });
+    return { protectorId: String(protectorId), wardId: String(wardId), radius: Number(radius), engagement: result };
   }
   async function assignFocus({ squadId = 'default', target, botIds = [] }) {
     if (!target?.id) throw new ValidationError('Focus target requires target.id');
@@ -83,12 +111,17 @@ export function createCombatService({ repositories, events, bots, ml, logger } =
   async function requestDefense({ botId, attacker, position, radius = 24, maxDefenders = 3 }) {
     const requester = String(botId); const candidates = bots.list().filter(item => item.id !== requester && ['READY', 'ACTIVE'].includes(item.status)).map(item => ({ item, score: defenderScore(profileCache.get(item.id), item, position) })).sort((a,b) => b.score - a.score).slice(0, Math.max(1, Math.min(5, maxDefenders)));
     const defenders = [];
-    for (const candidate of candidates) { const p = await profile(candidate.item.id); await transition(candidate.item.id, p.mainState, 'COMBAT_GUARD', 'INTERCEPT', { protect: requester, attacker }); defenders.push({ botId: candidate.item.id, role: p.combatRole }); }
+    for (const candidate of candidates) {
+      const p = await profile(candidate.item.id);
+      await transition(candidate.item.id, p.mainState, 'COMBAT_GUARD', 'INTERCEPT', { protect: requester, attacker });
+      try { await engage({ botId: candidate.item.id, mode: 'guard', position, radius }); defenders.push({ botId: candidate.item.id, role: p.combatRole, engaged: true }); }
+      catch (error) { logger?.warn?.('combat.defender.engage.failed', { botId: candidate.item.id, error: error.message }); defenders.push({ botId: candidate.item.id, role: p.combatRole, engaged: false }); }
+    }
     await emit('combat.defense.requested', { botId: requester, attacker: compact(attacker), position: compact(position), radius, defenders }); return { defenders };
   }
   async function bind(runtime) {
     const botId = runtime.bot.id; if (bindings.has(botId)) return;
-    await profile(botId); let lastAutoDefenseAt = 0;
+    await profile(botId); runtimes.set(botId, runtime); let lastAutoDefenseAt = 0;
     const onHurt = entity => {
       const snapshot = runtime.adapter.snapshot(); if (String(entity?.id) !== String(snapshot.entityId)) return;
       const now = Date.now(); const combatAlreadyActive = runtime.adapter.combatState?.status === 'ACTIVE';
@@ -107,7 +140,7 @@ export function createCombatService({ repositories, events, bots, ml, logger } =
     };
     const onDeath = () => void record({ botId, type: 'DEATH', action: 'DEATH', outcome: 'FAILED' });
     runtime.adapter.on('entityHurt', onHurt); runtime.adapter.on('death', onDeath);
-    bindings.set(botId, () => { runtime.adapter.off('entityHurt', onHurt); runtime.adapter.off('death', onDeath); });
+    bindings.set(botId, () => { runtimes.delete(botId); runtime.adapter.off('entityHurt', onHurt); runtime.adapter.off('death', onDeath); });
   }
   async function ingestDoctrine(input = {}) {
     const text = String(input.text ?? '').trim(); if (text.length < 12 || text.length > 20_000) throw new ValidationError('Combat doctrine text must be 12 to 20000 characters');
@@ -119,11 +152,11 @@ export function createCombatService({ repositories, events, bots, ml, logger } =
   async function doctrines() { return (await doctrineRepository.list()).filter(item => String(item.id).startsWith('doctrine:')).sort((a,b) => String(b.learnedAt).localeCompare(String(a.learnedAt))); }
   async function status() {
     const profiles = await Promise.all(bots.list().map(item => profile(item.id))); const eventsLog = await repositories.events.list(); const policies = await repositories.policies.list(); const doctrineList = await doctrines();
-    return { version: '1.1.0', profiles, squadTargets: [...squadTargets.values()], events: eventsLog.slice(-100), policy: policies.find(p => p.status === 'PRODUCTION') ?? { version: 'combat-rules-v1', status: 'SAFE_FALLBACK' }, rl: { mode: 'offline-experience', pythonBridge: 'ml/combat_trainer.py', records: eventsLog.length, doctrines: doctrineList.length }, doctrines: doctrineList };
+    return { version: '1.1.1', profiles, squadTargets: [...squadTargets.values()], events: eventsLog.slice(-100), policy: policies.find(p => p.status === 'PRODUCTION') ?? { version: 'combat-rules-v1', status: 'SAFE_FALLBACK' }, rl: { mode: 'online-neural-policy', pythonBridge: 'ml/combat_trainer.py', records: eventsLog.length, doctrines: doctrineList.length, neural: neural.status() }, doctrines: doctrineList };
   }
   async function trainingBatch(limit = 2048) { const records = await repositories.events.list(); return records.slice(-Math.max(1, Math.min(4096, Number(limit) || 2048))).map(item => ({ state: item.state, action: item.action, reward: item.reward, outcome: item.outcome, botId: item.botId, timestamp: item.createdAt })); }
   async function promotePolicy(policy) { if (!policy?.version) throw new ValidationError('Policy version is required'); const row = { id: String(policy.version), version: String(policy.version), status: 'PRODUCTION', metrics: compact(policy.metrics ?? {}), promotedAt: new Date().toISOString(), source: String(policy.source ?? 'python') }; const existing = (await repositories.policies.list()).find(x => x.id === row.id); const saved = existing ? await repositories.policies.update(existing.id, row) : await repositories.policies.create(row); await emit('combat.policy.promoted', saved); return saved; }
-  return Object.freeze({ profile, setRole, transition, record, decide, assignFocus, requestDefense, bind, status, trainingBatch, promotePolicy, ingestDoctrine, doctrines });
+  return Object.freeze({ profile, setRole, transition, record, decide, engage, stopEngagement, protect, assignFocus, requestDefense, bind, status, trainingBatch, promotePolicy, ingestDoctrine, doctrines });
 }
 function defaultProfile(botId) { return normalizeProfile({ id: 'combat:' + botId, botId, combatRole: 'UNASSIGNED', assignedRole: 'UNASSIGNED', combatPoints: 0, combatRank: 'Recruit', mainState: 'IDLE', sideState: null, combatSubstate: null, stateHistory: [], allowedActions: ROLE_ACTIONS.UNASSIGNED, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }); }
 function normalizeProfile(value) { const points = Math.max(0, Number(value.combatPoints ?? 0)); const role = normalizeRole(value.combatRole ?? 'UNASSIGNED'); return { ...value, combatRole: role, assignedRole: normalizeRole(value.assignedRole ?? role), combatPoints: points, combatRank: rankFor(points), mainState: validState(value.mainState ?? 'IDLE'), sideState: value.sideState ? validState(value.sideState) : null, combatSubstate: value.combatSubstate ? validState(value.combatSubstate) : null, allowedActions: ROLE_ACTIONS[role] }; }
