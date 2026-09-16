@@ -42,6 +42,14 @@ export class ApiServer {
         if (req.method === 'POST' && url.pathname === '/api/v1/client/release') return send(200, { data: await this.application.clientBridge.release(await body(req)) });
         if (req.method === 'POST' && url.pathname === '/api/v1/client/rts/move') return send(200, { data: await this.application.clientBridge.rtsMove(await body(req)) });
         if (req.method === 'GET' && url.pathname === '/api/v1/system/status') return send(200, this.application.status());
+        if (req.method === 'GET' && url.pathname === '/api/v1/combat/status') return send(200, { data: await this.application.combat.status() });
+        if (req.method === 'GET' && url.pathname === '/api/v1/combat/training-batch') return send(200, { data: await this.application.combat.trainingBatch(url.searchParams.get('limit')) });
+        if (req.method === 'POST' && /^\/api\/v1\/combat\/bots\/[^/]+\/role$/.test(url.pathname)) { const input = await body(req); return send(200, { data: await this.application.combat.setRole(decodeURIComponent(parts.at(-2)), input.role) }); }
+        if (req.method === 'POST' && /^\/api\/v1\/combat\/bots\/[^/]+\/state$/.test(url.pathname)) { const input = await body(req); return send(200, { data: await this.application.combat.transition(decodeURIComponent(parts.at(-2)), input.mainState, input.sideState, input.combatSubstate, input.context) }); }
+        if (req.method === 'POST' && url.pathname === '/api/v1/combat/decide') return send(200, { data: await this.application.combat.decide(await body(req)) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/combat/focus') return send(200, { data: await this.application.combat.assignFocus(await body(req)) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/combat/defend') return send(200, { data: await this.application.combat.requestDefense(await body(req)) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/combat/policy/promote') return send(200, { data: await this.application.combat.promotePolicy(await body(req)) });
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/universal/status') return send(200, { data: await this.application.universalMemory.status() });
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/universal/context') return send(200, { data: await this.application.universalMemory.context({ worldKey: url.searchParams.get('worldKey'), dimension: url.searchParams.get('dimension'), position: url.searchParams.has('x') ? { x: Number(url.searchParams.get('x')), y: Number(url.searchParams.get('y')), z: Number(url.searchParams.get('z')) } : null, limit: url.searchParams.get('limit') ?? 30 }) });
         if (req.method === 'POST' && url.pathname === '/api/v1/logistics/workshops/scan') { const input = await body(req); return send(200, { data: await this.application.workshops.scan({ ...input, runtime: this.application.bots.get(input.botId) }) }); }
