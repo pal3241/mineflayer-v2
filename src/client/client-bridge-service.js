@@ -22,7 +22,7 @@ export class ClientBridgeService {
   }
   async switchBody(input = {}) {
     const session = await this.touch(input.sessionId); const botId = shortText(input.botId, 'botId', 128); const runtime = this.readyRuntime(botId); const owner = this.botLeases.get(botId);
-    if (owner && owner !== session.id) throw new ConflictError(\`Bot '\${botId}' is controlled by another client session\`);
+    if (owner && owner !== session.id) throw new ConflictError(`Bot '${botId}' is controlled by another client session`);
     if (session.controlledBotId && session.controlledBotId !== botId) await this.release({ sessionId: session.id, reason: 'SWITCH_BODY' });
     await runtime.adapter.beginClientControl({ sessionId: session.id, playerName: session.playerName }); session.controlledBotId = botId; session.lastSequence = -1; this.botLeases.set(botId, session.id); this.refresh(session);
     await this.publish('client.body.switched', { sessionId: session.id, botId, playerName: session.playerName }); return { session: this.sessionView(session), bot: this.botView(runtime.snapshot()) };
@@ -61,13 +61,13 @@ export class ClientBridgeService {
   status() { return { sessions: this.sessions.size, controlledBots: this.botLeases.size, leaseTtlMs: this.leaseTtlMs }; }
   async touch(id, refresh = true) { await this.cleanup(); const session = this.sessions.get(String(id ?? '')); if (!session) throw new NotFoundError('Client session', id); if (refresh) this.refresh(session); return session; }
   refresh(session) { session.lastSeenAt = Date.now(); session.expiresAt = session.lastSeenAt + this.leaseTtlMs; }
-  readyRuntime(botId) { const runtime = this.bots.get(botId); if (!READY.has(runtime.machine?.state ?? runtime.snapshot().status)) throw new ConflictError(\`Bot '\${botId}' is not ready for client control\`); return runtime; }
+  readyRuntime(botId) { const runtime = this.bots.get(botId); if (!READY.has(runtime.machine?.state ?? runtime.snapshot().status)) throw new ConflictError(`Bot '${botId}' is not ready for client control`); return runtime; }
   sessionView(session) { return { id: session.id, clientName: session.clientName, playerName: session.playerName, controlledBotId: session.controlledBotId, createdAt: session.createdAt, lastSeenAt: new Date(session.lastSeenAt).toISOString(), expiresAt: new Date(session.expiresAt).toISOString() }; }
   botView(bot) { const runtime = this.bots.get(bot.id); const snapshot = bot.runtime ?? runtime.adapter.snapshot(); return { id: bot.id, name: bot.name, username: runtime.options?.username ?? bot.name, status: bot.status, position: snapshot.position, dimension: snapshot.dimension, health: snapshot.health, food: snapshot.food, inventorySummary: snapshot.inventorySummary ?? [], controlledBy: this.botLeases.get(bot.id) ?? null }; }
   publish(type, payload) { return this.events?.publish?.(type, payload, { source: 'client-bridge', correlationId: payload.sessionId }) ?? Promise.resolve(); }
 }
-function shortText(value, label, max) { const text = String(value ?? '').trim(); if (!text || text.length > max) throw new ValidationError(\`\${label} is required and must be at most \${max} characters\`); return text; }
+function shortText(value, label, max) { const text = String(value ?? '').trim(); if (!text || text.length > max) throw new ValidationError(`${label} is required and must be at most ${max} characters`); return text; }
 function optionalText(value, label, max) { if (value === undefined || value === null || value === '') return null; return shortText(value, label, max); }
-function integer(value, label, min, max) { const number = Number(value); if (!Number.isInteger(number) || number < min || number > max) throw new ValidationError(\`\${label} must be an integer from \${min} to \${max}\`); return number; }
+function integer(value, label, min, max) { const number = Number(value); if (!Number.isInteger(number) || number < min || number > max) throw new ValidationError(`${label} must be an integer from ${min} to ${max}`); return number; }
 function point(value) { const result = { x: Number(value?.x), y: Number(value?.y), z: Number(value?.z) }; if (!Object.values(result).every(Number.isFinite)) throw new ValidationError('RTS target requires finite x, y, z'); return result; }
 function formationOffset(index, count, formation) { if (formation === 'LINE') return { x: index - (count - 1) / 2, z: 0 }; const width = Math.ceil(Math.sqrt(count)); return { x: index % width - (width - 1) / 2, z: Math.floor(index / width) - (Math.ceil(count / width) - 1) / 2 }; }
