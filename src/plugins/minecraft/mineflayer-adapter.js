@@ -105,6 +105,15 @@ export class MineflayerAdapter extends EventEmitter {
     catch (error) { bot.pathfinder.setGoal(null); throw error; } finally { guard.stop(); cleanupAbort(); this.#applyMovementPolicy(safeMovementPolicy()); }
   }
   async stopNavigation() { const bot = this.#ready('navigation-stop'); bot.pathfinder?.setGoal(null); return { stopped: true }; }
+  async beginClientControl(input = {}) { const bot = this.#ready('client-control'); const sessionId = String(input.sessionId ?? '').trim(); if (!sessionId) throw new ValidationError('Client control sessionId is required'); bot.pathfinder?.setGoal(null); await this.stopActions(); this.clientControlSession = sessionId; return { sessionId, position: this.snapshot().position }; }
+  async applyClientControl(input = {}) {
+    const bot = this.#ready('client-control'); const sessionId = String(input.sessionId ?? '').trim(); if (!this.clientControlSession || this.clientControlSession !== sessionId) throw new ValidationError('Client control lease is not active for this bot');
+    const states = { forward: input.forward, back: input.back, left: input.left, right: input.right, jump: input.jump, sprint: input.sprint, sneak: input.sneak }; for (const [name, value] of Object.entries(states)) if (value !== undefined) bot.setControlState(name, Boolean(value));
+    if (Number.isFinite(Number(input.yaw)) && Number.isFinite(Number(input.pitch))) await bot.look(degreesToRadians(input.yaw), degreesToRadians(input.pitch), true);
+    if (input.attack) { const target = bot.entityAtCursor?.(5); if (target) await bot.attack(target); else bot.swingArm?.('right'); } if (input.use) { const block = bot.blockAtCursor?.(5); if (block && bot.activateBlock) await bot.activateBlock(block); else bot.activateItem?.(); }
+    return { position: this.snapshot().position, health: bot.health ?? null, food: bot.food ?? null };
+  }
+  async releaseClientControl(input = {}) { const sessionId = String(input.sessionId ?? '').trim(); if (!input.force && this.clientControlSession && sessionId !== this.clientControlSession) throw new ValidationError('Cannot release another client control lease'); const bot = this.client; if (bot) { for (const state of ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak']) bot.setControlState?.(state, false); bot.clearControlStates?.(); } this.clientControlSession = null; return { released: true }; }
   async precisionNavigate({ target, precision, movement }, { signal } = {}) {
     const bot = this.#ready('navigation-precision'); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; const tolerance = Number(precision.exactTolerance); let attempts = 0; let lastPosition;
     this.#applyMovementPolicy({ ...(movement ?? safeMovementPolicy()), allowSprinting: false, allowParkour: false });
@@ -471,7 +480,7 @@ export class MineflayerAdapter extends EventEmitter {
       camera: { active: Boolean(bot?.viewer), port: this.viewerPort ?? null, mode: this.viewerMode ?? null, version: bot?.version ?? null, renderVersion: this.viewerRenderVersion ?? null, versionSupported: this.viewerVersionSupported ?? null }, combat: { ...this.combatState }, timestamp: new Date().toISOString() };
   }
 
-  async disconnect(reason = 'MineHive shutdown') { if (!this.client) return; this.alive = false; await this.stopViewer(); await this.stopActions(); this.client.quit?.(reason); }
+  async disconnect(reason = 'MineHive shutdown') { if (!this.client) return; await this.releaseClientControl({ force: true }); this.alive = false; await this.stopViewer(); await this.stopActions(); this.client.quit?.(reason); }
   raw() { throw new ValidationError('Raw Mineflayer client access is forbidden outside adapter capabilities'); }
 }
 
@@ -603,3 +612,5 @@ async function validateCanvas() {
   try { const module = await import('canvas'); const canvas = module.createCanvas(1, 1); canvas.getContext('2d').fillRect(0, 0, 1, 1); }
   catch (error) { throw new ValidationError(`Canvas renderer is unavailable: ${error.message}`); }
 }
+
+function degreesToRadians(value) { return Number(value) * Math.PI / 180; }

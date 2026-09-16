@@ -43,3 +43,5 @@ export { DEFAULT_EXPANSION_POLICY, EXPANSION_DIRECTIONS, TERRITORY_TYPES, contai
 export { DEFAULT_TERRITORY_LOGISTICS_WEIGHTS, THREAT_LEVELS, createTerritoryLogisticsService, createThreatService, scoreThreat } from './territory/index.js';
 export { EMERGENCY_TYPES, SYSTEM_MODES, createResilienceService } from './resilience/index.js';
 export { createMemoryIntegrityService } from './memory/memory-integrity-service.js';
+
+export { ClientBridgeService, createClientBridgeService } from './client/client-bridge-service.js';

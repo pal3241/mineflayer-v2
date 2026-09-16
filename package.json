@@ -1,6 +1,6 @@
 {
   "name": "minehive",
-  "version": "0.9.3",
+  "version": "1.0.0",
   "description": "Modular, event-driven Mineflayer bot framework",
   "type": "module",
   "private": true,
