@@ -26,7 +26,7 @@ public final class MineHiveApi {
     public JsonObject preview() { return preview.deepCopy(); }
 
     public CompletableFuture<JsonObject> connect(String playerName) {
-        JsonObject body = new JsonObject(); body.addProperty("clientName", "MineHive Fabric 1.0.1"); body.addProperty("playerName", playerName); status = "Connecting";
+        JsonObject body = new JsonObject(); body.addProperty("clientName", "MineHive Fabric 1.0.3"); body.addProperty("playerName", playerName); status = "Connecting";
         return request("POST", "/api/v1/client/sessions", body).thenApply(data -> { sessionId = data.get("id").getAsString(); status = "Connected"; return data; })
                 .exceptionally(error -> { failed(error); return new JsonObject(); });
     }
@@ -77,6 +77,10 @@ public final class MineHiveApi {
         if (message == null || message.isBlank()) {
             String type = cause.getClass().getSimpleName();
             message = type.isBlank() ? "koneksi ke MineHive gagal" : type + ": koneksi ke MineHive gagal";
+        }
+        if (message.contains("Client session") && message.toLowerCase().contains("not found")) {
+            // The MineHive process restarted; its in-memory client sessions were cleared.
+            sessionId = null; sequence = 0; status = "Server restarted · reconnecting"; return;
         }
         if (message.contains("ConnectException")) message = "Tidak bisa terhubung. Isi alamat LAN HP, misalnya http://192.168.1.6:3000";
         status = "Error: " + message;
