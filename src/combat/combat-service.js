@@ -88,12 +88,22 @@ export function createCombatService({ repositories, events, bots, ml, logger } =
   }
   async function bind(runtime) {
     const botId = runtime.bot.id; if (bindings.has(botId)) return;
-    await profile(botId);
+    await profile(botId); let lastAutoDefenseAt = 0;
     const onHurt = entity => {
       const snapshot = runtime.adapter.snapshot(); if (String(entity?.id) !== String(snapshot.entityId)) return;
+      const now = Date.now(); const combatAlreadyActive = runtime.adapter.combatState?.status === 'ACTIVE';
       void transition(botId, (profileCache.get(botId)?.mainState ?? 'IDLE'), 'COMBAT', 'UNDER_ATTACK', { entityId: entity.id });
       void requestDefense({ botId, position: snapshot.position, attacker: null }).catch(error => logger?.warn?.('combat.defense.failed', { botId, error: error.message }));
       void record({ botId, type: 'DAMAGE_TAKEN', state: { health: snapshot.health }, action: 'UNDER_ATTACK' });
+      // A Mineflayer entityHurt event has no attacker reference. Guarding the bot's
+      // current position makes it acquire the nearest hostile that can hit it.
+      if (!combatAlreadyActive && now - lastAutoDefenseAt >= 2_000 && typeof runtime.adapter.startCombat === 'function') {
+        lastAutoDefenseAt = now;
+        const role = profileCache.get(botId)?.combatRole ?? 'UNASSIGNED';
+        void runtime.adapter.startCombat({ mode: 'guard', position: snapshot.position, radius: 16, role })
+          .then(() => transition(botId, (profileCache.get(botId)?.mainState ?? 'IDLE'), 'COMBAT', 'AUTO_GUARD', { trigger: 'damage-taken', radius: 16 }))
+          .catch(error => logger?.warn?.('combat.auto-defense.failed', { botId, error: error.message }));
+      }
     };
     const onDeath = () => void record({ botId, type: 'DEATH', action: 'DEATH', outcome: 'FAILED' });
     runtime.adapter.on('entityHurt', onHurt); runtime.adapter.on('death', onDeath);
