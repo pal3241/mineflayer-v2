@@ -13,6 +13,14 @@ test('building imports a validated blueprint with material manifest and dependen
   const preview = await building.preview(project.id, 1); assert.equal(preview.blocks[0].name, 'torch'); assert.equal((await building.deltas(project.id, 0)).deltas[0].type, 'IMPORTED');
 });
 
+test('building moves a preview placement and recalculates world protection bounds', async () => {
+  const building = service(); await building.initialize(); const project = await building.import({ blueprint });
+  const moved = await building.place(project.id, { target: { x: 25, y: 70, z: -12 }, source: 'test-client' });
+  assert.deepEqual(moved.target, { x: 25, y: 70, z: -12 });
+  assert.deepEqual(moved.protection.bounds, { min: { x: 25, y: 70, z: -12 }, max: { x: 25, y: 71, z: -12 } });
+  assert.equal(moved.deltas.at(-1).type, 'PLACEMENT_MOVED');
+});
+
 test('building requires approval then completes verified cooperative placement', async () => {
   const building = service(); await building.initialize(); const project = await building.import({ blueprint, target: { x: 10, y: 64, z: 10 } }); await building.approve(project.id, { actor: 'owner' }); await building.build(project.id);
   await new Promise(resolve => setTimeout(resolve, 80)); const result = await building.get(project.id); assert.equal(result.status, 'COMPLETED'); assert.equal(result.progress.completed, 2); assert.equal(result.placements['0,1,0'].ownerBotId, 'builder');

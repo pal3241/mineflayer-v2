@@ -74,6 +74,7 @@ export class ApiServer {
           if (req.method === 'POST' && parts[5] === 'materials' && parts[6] === 'resolve') return send(200, { data: await this.application.building.resolveMaterial(blueprintId, await body(req)) });
           if (req.method === 'POST' && parts[5] === 'materials' && parts[6] === 'make-all') return send(200, { data: await this.application.building.makeAll(blueprintId, await body(req)) });
           if (req.method === 'GET' && parts[5] === 'protection') return send(200, { data: await this.application.building.protection(blueprintId) });
+          if (req.method === 'POST' && parts[5] === 'placement') return send(200, { data: await this.application.building.place(blueprintId, await body(req)) });
           if (req.method === 'POST' && parts[5] === 'transform') return send(200, { data: await this.application.building.transform(blueprintId, await body(req)) });
           if (req.method === 'GET' && parts[5] === 'snapshot') return send(200, { data: await this.application.building.snapshot(blueprintId) });
           if (req.method === 'GET' && parts[5] === 'deltas') return send(200, { data: await this.application.building.deltas(blueprintId, url.searchParams.get('afterRevision') ?? 0) });

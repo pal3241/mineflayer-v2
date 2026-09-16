@@ -12,12 +12,15 @@ public final class RtsScreen extends Screen {
     private double targetX, targetY = 64, targetZ; private boolean targetSet;
     private int mapLeft, mapTop, mapRight, mapBottom; private double centerX, centerZ, scale = 4;
     public RtsScreen(Screen parent) { super(Text.literal("MineHive RTS")); this.parent = parent; }
+    // Keep the live world readable behind the tactical overlay. Calling the
+    // vanilla Screen background here enables the post-processing blur pass.
+    @Override public void renderBackground(DrawContext draw, int mouseX, int mouseY, float delta) {}
     @Override protected void init() {
         addDrawableChild(ButtonWidget.builder(Text.literal("Move selected"), b -> move()).dimensions(width / 2 - 104, height - 30, 100, 20).build());
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close()).dimensions(width / 2 + 4, height - 30, 100, 20).build());
     }
     @Override public void render(DrawContext draw, int mouseX, int mouseY, float delta) {
-        renderBackground(draw, mouseX, mouseY, delta); mapLeft = 24; mapTop = 42; mapRight = width - 24; mapBottom = height - 42;
+        draw.fill(0, 0, width, height, 0x22000000); mapLeft = 24; mapTop = 42; mapRight = width - 24; mapBottom = height - 42;
         draw.fill(mapLeft, mapTop, mapRight, mapBottom, 0xE0101815); draw.drawBorder(mapLeft, mapTop, mapRight - mapLeft, mapBottom - mapTop, 0xFF436953);
         JsonArray bots = bots(); calculateView(bots); for (int x = mapLeft; x < mapRight; x += 32) draw.fill(x, mapTop, x + 1, mapBottom, 0x303C5E4A); for (int y = mapTop; y < mapBottom; y += 32) draw.fill(mapLeft, y, mapRight, y + 1, 0x303C5E4A);
         for (JsonElement element : bots) { JsonObject bot = element.getAsJsonObject(), pos = object(bot, "position"); if (pos == null) continue; int sx = sx(pos.get("x").getAsDouble()), sy = sy(pos.get("z").getAsDouble()); String id = bot.get("id").getAsString(); draw.fill(sx - 5, sy - 5, sx + 6, sy + 6, selected.contains(id) ? 0xFF75E6A4 : 0xFF5C8D70); draw.drawTextWithShadow(textRenderer, Text.literal(bot.get("username").getAsString()), sx + 8, sy - 4, 0xFFFFFFFF); }

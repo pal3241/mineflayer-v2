@@ -26,7 +26,7 @@ public final class MineHiveApi {
     public JsonObject preview() { return preview.deepCopy(); }
 
     public CompletableFuture<JsonObject> connect(String playerName) {
-        JsonObject body = new JsonObject(); body.addProperty("clientName", "MineHive Fabric 1.1.0"); body.addProperty("playerName", playerName); status = "Connecting";
+        JsonObject body = new JsonObject(); body.addProperty("clientName", "MineHive Fabric 1.1.2"); body.addProperty("playerName", playerName); status = "Connecting";
         return request("POST", "/api/v1/client/sessions", body).thenApply(data -> { sessionId = data.get("id").getAsString(); status = "Connected"; return data; })
                 .exceptionally(error -> { failed(error); return new JsonObject(); });
     }
@@ -55,6 +55,13 @@ public final class MineHiveApi {
     }
     public CompletableFuture<JsonObject> loadPreview(String blueprintId) {
         return request("GET", "/api/v1/building/blueprints/" + encode(blueprintId) + "/preview3d", null).thenApply(data -> { preview = data; return data; });
+    }
+    public CompletableFuture<JsonObject> placeBlueprint(String blueprintId, int x, int y, int z) {
+        JsonObject body = new JsonObject(), target = new JsonObject();
+        target.addProperty("x", x); target.addProperty("y", y); target.addProperty("z", z);
+        body.add("target", target); body.addProperty("source", "minehive-client");
+        return request("POST", "/api/v1/building/blueprints/" + encode(blueprintId) + "/placement", body)
+                .thenCompose(ignored -> loadPreview(blueprintId));
     }
     private JsonObject sessionBody() { if (sessionId == null) throw new IllegalStateException("MineHive client has no session"); JsonObject body = new JsonObject(); body.addProperty("sessionId", sessionId); return body; }
     private CompletableFuture<JsonObject> request(String method, String path, JsonObject body) {
