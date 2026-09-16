@@ -389,6 +389,7 @@ async function loadCombat() {
     $('#combatProfiles').innerHTML = data.profiles.length ? data.profiles.map(profile => `<article class="goal-row"><div><b>${escapeHtml(profile.botId)} · ${escapeHtml(profile.combatRole)}</b><small>${escapeHtml(profile.combatRank)} · ${profile.combatPoints} CP · main ${escapeHtml(profile.mainState)}${profile.sideState ? ` · side ${escapeHtml(profile.sideState)}` : ''}${profile.combatSubstate ? ` · ${escapeHtml(profile.combatSubstate)}` : ''}</small></div><select data-combat-role="${escapeHtml(profile.botId)}">${['UNASSIGNED','TANK','FLANKER','RANGED','SUPPORT','SCOUT'].map(role => `<option ${role === profile.combatRole ? 'selected' : ''}>${role}</option>`).join('')}</select></article>`).join('') : empty('No combat profiles yet; connect a bot first.');
     $('#combatSquads').innerHTML = data.squadTargets.length ? data.squadTargets.map(squad => `<div class="goal-row"><div><b>${escapeHtml(squad.squadId)} → ${escapeHtml(squad.target.name ?? squad.target.id)}</b><small>${squad.botIds.map(escapeHtml).join(', ') || 'no assigned bots'} · ${new Date(squad.assignedAt).toLocaleTimeString()}</small></div><span class="badge">FOCUS</span></div>`).join('') : empty('No focus target assigned.');
     $('#combatEvents').textContent = data.events.slice(-60).reverse().map(event => `${event.createdAt} ${event.botId} ${event.type} ${event.reward >= 0 ? '+' : ''}${event.reward} ${event.action}`).join('\n') || 'No combat experience recorded.';
+    $('#combatDoctrines').innerHTML = data.doctrines?.length ? data.doctrines.map(doctrine => `<div class="goal-row"><div><b>${escapeHtml(doctrine.title)}</b><small>${doctrine.techniques.map(item => escapeHtml(item.action)).join(' · ')} · confidence ${Number(doctrine.confidence).toFixed(2)}</small></div><span class="badge">LEARNED</span></div>`).join('') : empty('No PvP text doctrine learned yet.');
     $$('[data-combat-role]').forEach(select => select.onchange = async () => { try { await api(`/api/v1/combat/bots/${encodeURIComponent(select.dataset.combatRole)}/role`, { method:'POST', body:JSON.stringify({ role: select.value }) }); toast('Combat role updated'); await loadCombat(); } catch (error) { toast(error.message, true); } });
   } catch (error) { $('#combatProfiles').innerHTML = empty(`ERROR: ${escapeHtml(error.message)}`); }
 }
@@ -396,4 +397,9 @@ $('#combatFocusForm').onsubmit = async event => {
   event.preventDefault();
   const botIds = $('#combatBotIds').value.split(',').map(value => value.trim()).filter(Boolean);
   try { await api('/api/v1/combat/focus', { method:'POST', body:JSON.stringify({ squadId: $('#combatSquadId').value.trim() || 'default', target: { id: $('#combatTargetId').value.trim(), name: $('#combatTargetName').value.trim() || undefined }, botIds }) }); toast('Focus target assigned'); await loadCombat(); } catch (error) { toast(error.message, true); }
+};
+
+$('#combatDoctrineForm').onsubmit = async event => {
+  event.preventDefault(); const text = $('#combatDoctrineText').value.trim(); if (!text) return;
+  try { const doctrine = await api('/api/v1/combat/doctrines', { method:'POST', body:JSON.stringify({ title: $('#combatDoctrineTitle').value.trim() || 'PvP notes', text }) }); $('#combatDoctrineText').value = ''; toast(`Learned ${doctrine.techniques.length} combat technique(s)`); await loadCombat(); } catch (error) { toast(error.message, true); }
 };
