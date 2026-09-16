@@ -35,6 +35,6 @@ jobs:
             gh release create v1.0.5 "$asset#MineHive Fabric Client 1.0.5" \
               --target "$GITHUB_SHA" \
               --title "MineHive 1.0.5 — LAN Client Fix" \
-              --notes "Memperbaiki kontrol realtime, kamera bot, dan arah pandangan." \
+              --notes "Memperbaiki koneksi kontrol, tubuh asli, dan preview blueprint tanpa blur." \
               --latest
           fi
