@@ -14,6 +14,7 @@ public final class RtsScreen extends Screen {
     public RtsScreen(Screen parent) { super(Text.literal("MineHive RTS")); this.parent = parent; }
     // Keep the live world readable behind the tactical overlay. Calling the
     // vanilla Screen background here enables the post-processing blur pass.
+    @Override public void blur() {}
     @Override public void renderBackground(DrawContext draw, int mouseX, int mouseY, float delta) {}
     @Override protected void init() {
         addDrawableChild(ButtonWidget.builder(Text.literal("Move selected"), b -> move()).dimensions(width / 2 - 104, height - 30, 100, 20).build());

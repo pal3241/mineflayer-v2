@@ -1,9 +1,10 @@
-name: Release MineHive 1.0.5
+name: Release MineHive Client
 
 on:
   push:
     paths:
       - '.github/workflows/release-v1.yml'
+      - 'client-mod/**'
   workflow_dispatch:
 
 permissions:
@@ -28,13 +29,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          asset="client-mod/build/libs/minehive-client-1.0.5.jar"
-          if gh release view v1.0.5 >/dev/null 2>&1; then
-            gh release upload v1.0.5 "$asset#MineHive Fabric Client 1.0.5" --clobber
+          version="$(sed -n 's/^mod_version=//p' client-mod/gradle.properties)"
+          tag="v${version}"
+          asset="client-mod/build/libs/minehive-client-${version}.jar"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$asset#MineHive Fabric Client ${version}" --clobber
           else
-            gh release create v1.0.5 "$asset#MineHive Fabric Client 1.0.5" \
+            gh release create "$tag" "$asset#MineHive Fabric Client ${version}" \
               --target "$GITHUB_SHA" \
-              --title "MineHive 1.0.5 — LAN Client Fix" \
-              --notes "Memperbaiki koneksi kontrol, tubuh asli, dan preview blueprint tanpa blur." \
+              --title "MineHive ${version}" \
+              --notes "Build Fabric terbaru untuk Minecraft 1.21.1. Memperbaiki blur RTS/blueprint dan menyertakan neural environment serta local command brain." \
               --latest
           fi

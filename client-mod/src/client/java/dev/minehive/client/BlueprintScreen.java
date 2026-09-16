@@ -18,6 +18,7 @@ public final class BlueprintScreen extends Screen {
     private void select(int delta) { JsonArray plans = blueprints(); if (plans.isEmpty()) return; blueprintIndex = Math.floorMod(blueprintIndex + delta, plans.size()); layer = -1; loadCurrent(); }
     private void loadCurrent() { JsonArray plans = blueprints(); if (plans.isEmpty()) { loading = "No imported blueprint"; return; } blueprintIndex = Math.min(blueprintIndex, plans.size() - 1); JsonObject plan = plans.get(blueprintIndex).getAsJsonObject(); loading = "Loading " + plan.get("name").getAsString(); MineHiveClient.INSTANCE.api().loadPreview(plan.get("id").getAsString()).whenComplete((data, error) -> loading = error == null ? "" : MineHiveClient.rootMessage(error)); }
     // Never invoke the vanilla blur pass: blueprints are an in-world overlay, not a pause menu.
+    @Override public void blur() {}
     @Override public void renderBackground(DrawContext draw, int mouseX, int mouseY, float delta) {}
 
     @Override public void render(DrawContext draw, int mouseX, int mouseY, float delta) {

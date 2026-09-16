@@ -78,7 +78,7 @@ public final class MineHiveClient implements ClientModInitializer {
     private void renderHud(net.minecraft.client.gui.DrawContext draw) {
         MinecraftClient client = MinecraftClient.getInstance(); if (!config.showHud || client.player == null) return;
         int color = api.status().startsWith("Error") ? 0xFFFF6666 : api.connected() ? 0xFF75E6A4 : 0xFFFFC857;
-        draw.fill(6, 6, 520, controlledBotId == null ? 31 : 43, 0xB0101815); draw.drawTextWithShadow(client.textRenderer, Text.literal("MineHive 1.2.0 · " + api.status()), 12, 11, color);
+        draw.fill(6, 6, 520, controlledBotId == null ? 31 : 43, 0xB0101815); draw.drawTextWithShadow(client.textRenderer, Text.literal("MineHive 1.2.1 · " + api.status()), 12, 11, color);
         if (controlledBotId != null) draw.drawTextWithShadow(client.textRenderer, Text.literal("BODY: " + controlledUsername + "  [V switch · X release]"), 12, 25, 0xFFFFFFFF);
     }
     private JsonObject botByUsername(String username) { JsonObject state = api.state(); if (!state.has("bots")) return null; for (JsonElement element : state.getAsJsonArray("bots")) { JsonObject bot = element.getAsJsonObject(); if (bot.has("username") && username.equalsIgnoreCase(bot.get("username").getAsString())) return bot; } return null; }
