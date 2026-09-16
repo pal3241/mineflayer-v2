@@ -5,7 +5,7 @@ $('#apiToken').value = state.token;
 
 async function api(path, options = {}) {
   const headers = { ...(options.body ? { 'content-type': 'application/json' } : {}), ...(state.token ? { authorization: `Bearer ${state.token}` } : {}), ...options.headers };
-  const response = await fetch(path, { ...options, headers, signal: options.signal ?? AbortSignal.timeout(15_000) }); const payload = await response.json().catch(() => ({}));
+  const response = await fetch(path, { ...options, headers, signal: options.signal ?? AbortSignal.timeout(60_000) }); const payload = await response.json().catch(() => ({}));
   if (!response.ok) { const error = new Error(payload.error?.message ?? `HTTP ${response.status}`); error.status = response.status; error.retryAfterMs = Math.max(0, Number(response.headers.get('retry-after') ?? 0) * 1000); throw error; } return payload.data ?? payload;
 }
 function toast(message, error = false) { const el = $('#toast'); el.textContent = message; el.className = `${error ? 'error ' : ''}show`; clearTimeout(toast.timer); toast.timer = setTimeout(() => { el.className = ''; }, 3500); }
@@ -21,7 +21,7 @@ async function refresh() {
   } catch (error) { state.polling.failures++; state.polling.retryAfterMs = error.retryAfterMs; $('#connectionDot').style.background = '#ff7474'; $('#connectionText').textContent = error.status === 429 ? 'Rate limited' : 'Disconnected'; $('#lastUpdate').textContent = error.message; }
   finally { state.polling.running = false; scheduleRefresh(); }
 }
-function scheduleRefresh() { clearTimeout(state.polling.timer); if (document.hidden) return; const backoff = Math.min(30_000, 3000 * (2 ** state.polling.failures)); const delay = Math.max(3000, state.polling.retryAfterMs ?? 0, backoff); state.polling.retryAfterMs = 0; state.polling.timer = setTimeout(refresh, delay); }
+function scheduleRefresh() { clearTimeout(state.polling.timer); if (document.hidden) return; const backoff = Math.min(120_000, 3000 * (2 ** state.polling.failures)); const delay = Math.max(3000, state.polling.retryAfterMs ?? 0, backoff); state.polling.retryAfterMs = 0; state.polling.timer = setTimeout(refresh, delay); }
 function render() {
   $('#statOnline').textContent = state.bots.filter(online).length; $('#statBots').textContent = state.bots.length;
   $('#statGoals').textContent = state.goals.filter(goal => goal.status === 'ACTIVE').length; $('#statHealth').textContent = state.health?.status ?? '—';
