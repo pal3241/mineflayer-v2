@@ -7,7 +7,7 @@ import { createCombatService } from '../src/combat/index.js';
 function bots(items) { return { list: () => items }; }
 
 test('combat profile keeps hierarchical state, points and ranks', async () => {
-  const combat = createCombatService({ repositories: { profiles: new MemoryRepository(), events: new MemoryRepository(), policies: new MemoryRepository() }, events: new EventBus(), bots: bots([{ id: 'tank', status: 'READY', runtime: { position: { x: 0, y: 64, z: 0 } }]) });
+  const combat = createCombatService({ repositories: { profiles: new MemoryRepository(), events: new MemoryRepository(), policies: new MemoryRepository() }, events: new EventBus(), bots: bots([{ id: 'tank', status: 'READY', runtime: { position: { x: 0, y: 64, z: 0 } } }]) });
   await combat.setRole('tank', 'tank');
   await combat.transition('tank', 'MINING', 'COMBAT_GUARD', 'INTERCEPT', { owner: 'builder' });
   const result = await combat.record({ botId: 'tank', type: 'ALLY_SAVED', action: 'INTERCEPT', outcome: 'SUCCESS' });
