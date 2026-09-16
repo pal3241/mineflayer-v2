@@ -9,6 +9,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.Entity;
+import net.minecraft.client.network.OtherClientPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.hit.EntityHitResult;
 import org.lwjgl.glfw.GLFW;
@@ -17,7 +18,7 @@ public final class MineHiveClient implements ClientModInitializer {
     public static MineHiveClient INSTANCE;
     private MineHiveConfig config; private MineHiveApi api;
     private KeyBinding controlKey, switchKey, releaseKey, rtsKey, blueprintKey;
-    private int ticks; private String controlledBotId, controlledUsername; private boolean previousAttack, previousUse; private long lastControlAt; private String lastControlSignature = "";
+    private int ticks; private String controlledBotId, controlledUsername; private boolean previousAttack, previousUse; private long lastControlAt; private String lastControlSignature = ""; private java.util.concurrent.CompletableFuture<?> controlInFlight = java.util.concurrent.CompletableFuture.completedFuture(null); private OtherClientPlayerEntity originalBodyAnchor;
 
     @Override public void onInitializeClient() {
         INSTANCE = this; config = MineHiveConfig.load(); api = new MineHiveApi(config);
@@ -41,12 +42,17 @@ public final class MineHiveClient implements ClientModInitializer {
         Entity entity = hit.getEntity(); String username = entity.getName().getString(); JsonObject bot = botByUsername(username);
         if (bot == null) { toast(client, username + " is not a registered MineHive bot"); return; }
         String botId = bot.get("id").getAsString(); api.switchBody(botId).thenAccept(result -> client.execute(() -> {
-            controlledBotId = botId; controlledUsername = username; client.setCameraEntity(entity); toast(client, "Controlling " + username + " · look at another bot and press V");
+            controlledBotId = botId; controlledUsername = username; createOriginalBodyAnchor(client); client.setCameraEntity(entity); toast(client, "Controlling " + username + " · look at another bot and press V");
         })).exceptionally(error -> { client.execute(() -> toast(client, rootMessage(error))); return null; });
     }
     public void release(MinecraftClient client) {
-        api.release().whenComplete((result, error) -> client.execute(() -> { controlledBotId = null; controlledUsername = null; if (client.player != null) client.setCameraEntity(client.player); toast(client, error == null ? "Bot control released" : rootMessage(error)); }));
+        api.release().whenComplete((result, error) -> client.execute(() -> { controlledBotId = null; controlledUsername = null; removeOriginalBodyAnchor(client); if (client.player != null) client.setCameraEntity(client.player); toast(client, error == null ? "Bot control released" : rootMessage(error)); }));
     }
+    private void createOriginalBodyAnchor(MinecraftClient client) {
+        removeOriginalBodyAnchor(client); if (client.player == null || client.world == null) return;
+        originalBodyAnchor = new OtherClientPlayerEntity(client.world, client.player.getGameProfile()); originalBodyAnchor.copyPositionAndRotation(client.player); originalBodyAnchor.setCustomName(Text.literal(client.player.getName().getString() + " · original body")); originalBodyAnchor.setCustomNameVisible(true); client.world.addEntity(originalBodyAnchor);
+    }
+    private void removeOriginalBodyAnchor(MinecraftClient client) { if (originalBodyAnchor != null && client.world != null) client.world.removeEntity(originalBodyAnchor.getId(), Entity.RemovalReason.DISCARDED); originalBodyAnchor = null; }
     private void keepCamera(MinecraftClient client) {
         if (controlledUsername == null || client.player == null) return;
         Entity target = findEntity(client, controlledUsername);
@@ -65,13 +71,14 @@ public final class MineHiveClient implements ClientModInitializer {
         long now = System.currentTimeMillis();
         // Four packets per second at most; idle state is not resent. This keeps the mobile host responsive.
         if (signature.equals(lastControlSignature) || now - lastControlAt < 250) { previousAttack = attack; previousUse = use; return; }
-        api.control(forward, back, left, right, jump, sprint, sneak, yaw, pitch, attack && !previousAttack, use && !previousUse);
+        if (!controlInFlight.isDone()) { previousAttack = attack; previousUse = use; return; }
+        controlInFlight = api.control(forward, back, left, right, jump, sprint, sneak, yaw, pitch, attack && !previousAttack, use && !previousUse);
         lastControlAt = now; lastControlSignature = signature; previousAttack = attack; previousUse = use;
     }
     private void renderHud(net.minecraft.client.gui.DrawContext draw) {
         MinecraftClient client = MinecraftClient.getInstance(); if (!config.showHud || client.player == null) return;
         int color = api.status().startsWith("Error") ? 0xFFFF6666 : api.connected() ? 0xFF75E6A4 : 0xFFFFC857;
-        draw.fill(6, 6, 520, controlledBotId == null ? 31 : 43, 0xB0101815); draw.drawTextWithShadow(client.textRenderer, Text.literal("MineHive 1.0.4 · " + api.status()), 12, 11, color);
+        draw.fill(6, 6, 520, controlledBotId == null ? 31 : 43, 0xB0101815); draw.drawTextWithShadow(client.textRenderer, Text.literal("MineHive 1.0.5 · " + api.status()), 12, 11, color);
         if (controlledBotId != null) draw.drawTextWithShadow(client.textRenderer, Text.literal("BODY: " + controlledUsername + "  [V switch · X release]"), 12, 25, 0xFFFFFFFF);
     }
     private JsonObject botByUsername(String username) { JsonObject state = api.state(); if (!state.has("bots")) return null; for (JsonElement element : state.getAsJsonArray("bots")) { JsonObject bot = element.getAsJsonObject(); if (bot.has("username") && username.equalsIgnoreCase(bot.get("username").getAsString())) return bot; } return null; }
