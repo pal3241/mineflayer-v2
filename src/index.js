@@ -45,3 +45,5 @@ export { EMERGENCY_TYPES, SYSTEM_MODES, createResilienceService } from './resili
 export { createMemoryIntegrityService } from './memory/memory-integrity-service.js';
 
 export { ClientBridgeService, createClientBridgeService } from './client/client-bridge-service.js';
+
+export { createCombatService, COMBAT_ROLES, COMBAT_RANKS } from './combat/index.js';
