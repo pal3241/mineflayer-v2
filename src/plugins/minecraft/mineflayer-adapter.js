@@ -37,7 +37,7 @@ export class MineflayerAdapter extends EventEmitter {
     this.status = 'CONNECTING'; this.lastAliveState = null; this.alive = false;
     this.client = factory(options);
     if (this.plugins) await this.#loadPlugins();
-    for (const name of ['login', 'spawn', 'end', 'kicked', 'error', 'health', 'move', 'chat', 'whisper']) this.client.on(name, (...args) => this.emit(name, ...args));
+    for (const name of ['login', 'spawn', 'end', 'kicked', 'error', 'health', 'move', 'chat', 'whisper', 'entityHurt', 'entityDead']) this.client.on(name, (...args) => this.emit(name, ...args));
     this.client.on('health', () => this.#captureAliveState()); this.client.on('move', () => this.#captureAliveState()); this.client.inventory?.on?.('updateSlot', () => { this.#captureAliveState(); this.emit('inventoryUpdate', this.snapshot().inventorySummary); });
     this.client.on('death', () => { const state = this.lastAliveState ?? recoveryState(this.client); this.alive = false; this.emit('death', { ...state, cause: deathCause(this.client), keepInventory: keepInventoryState(this.client), detectedAt: new Date().toISOString() }); });
     this.client.on('spawn', () => { this.status = 'READY'; this.alive = true; this.#captureAliveState(); void this.#configureMovement().catch(error => { this.status = 'DEGRADED'; this.emit('pluginError', { plugin: 'movement', error }); }); });
@@ -283,13 +283,32 @@ export class MineflayerAdapter extends EventEmitter {
     const bot = this.#ready('tree-planting'); const preferred = saplingForLog(site.log); const sapling = bot.inventory.items().find(item => item.name === preferred) ?? bot.inventory.items().find(item => item.name.endsWith('_sapling') || item.name.endsWith('_propagule')); if (!sapling) return false; const { Vec3 } = await import('vec3'); const plantPosition = new Vec3(Math.floor(site.x), Math.floor(site.y), Math.floor(site.z)); const target = bot.blockAt(plantPosition); const ground = bot.blockAt(plantPosition.offset(0, -1, 0)); if (!isAir(target) || !ground || !['dirt', 'grass_block', 'podzol', 'mud'].includes(ground.name)) return false; await bot.equip(sapling, 'hand'); await bot.placeBlock(ground, new Vec3(0, 1, 0)); return true;
   }
   async startCombat({ mode = 'guard', position, radius = 16 } = {}) {
-    const bot = this.#ready('combat'); if (!bot.pathfinder || !this.pathfinderModule) throw new ValidationError('Pathfinder plugin is unavailable'); const normalized = String(mode).toLowerCase(); if (!['guard', 'full_combat', 'meat'].includes(normalized)) throw new ValidationError(`Unsupported combat mode '${mode}'`); await this.stopCombat(); const anchor = position ?? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z }; this.combatAbort = new AbortController(); this.combatState = { mode: normalized.toUpperCase(), status: 'ACTIVE', anchor, radius: Math.max(4, Math.min(64, Number(radius) || 16)), startedAt: new Date().toISOString() }; void this.#combatLoop(this.combatAbort.signal).catch(error => { if (!this.combatAbort?.signal.aborted) this.emit('combatError', error); this.combatState = { ...this.combatState, status: 'FAILED', error: error.message }; }); return { ...this.combatState };
+    const bot = this.#ready('combat'); if (!bot.pathfinder || !this.pathfinderModule) throw new ValidationError('Pathfinder plugin is unavailable'); const normalized = String(mode).toLowerCase(); if (!['guard', 'full_combat', 'meat', 'squad'].includes(normalized)) throw new ValidationError(`Unsupported combat mode '${mode}'`); await this.stopCombat(); const anchor = position ?? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z }; this.combatAbort = new AbortController(); this.combatState = { mode: normalized.toUpperCase(), status: 'ACTIVE', role: String(arguments[0]?.role ?? 'UNASSIGNED').toUpperCase(), anchor, radius: Math.max(4, Math.min(64, Number(radius) || 16)), startedAt: new Date().toISOString() }; void this.#combatLoop(this.combatAbort.signal).catch(error => { if (!this.combatAbort?.signal.aborted) this.emit('combatError', error); this.combatState = { ...this.combatState, status: 'FAILED', error: error.message }; }); return { ...this.combatState };
   }
   async #combatLoop(signal) {
     const bot = this.#ready('combat'); while (!signal.aborted) { if (bot.health < 6) { this.combatState.status = 'RETREATING'; bot.pathfinder?.setGoal(null); return; } const anchor = this.combatState.anchor; const allowed = this.combatState.mode === 'MEAT' ? MEAT_MOBS : HOSTILE_MOBS; const target = bot.nearestEntity(entity => entity.type === 'mob' && allowed.has(entity.name) && entity.position && (this.combatState.mode !== 'GUARD' || distance3(entity.position, anchor) <= this.combatState.radius));
       if (!target) { if (this.combatState.mode === 'GUARD' && distance3(bot.entity.position, anchor) > 3) await this.navigate({ ...anchor, range: 2 }, { signal }).catch(() => {}); await delay(300); continue; }
-      this.combatState.target = { id: target.id, name: target.name }; await equipBestWeapon(bot); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; bot.pathfinder?.setGoal(new goals.GoalFollow(target, 2), true); if (distance3(bot.entity.position, target.position) <= 4) { await bot.lookAt(target.position.offset(0, target.height ?? 1, 0), true); bot.attack(target); } await delay(650);
+      this.combatState.target = { id: target.id, name: target.name }; await this.#combatEquipment(target); const goals = this.pathfinderModule.goals ?? this.pathfinderModule.default?.goals; bot.pathfinder?.setGoal(new goals.GoalFollow(target, 2), true); const distance = distance3(bot.entity.position, target.position); if (distance > 8 && await this.#tryRangedAttack(target)) { this.combatState.substate = 'RANGED_FIRE'; await delay(700); continue; } if (distance <= 4) { this.combatState.substate = target.name === 'creeper' ? 'HIT_RETREAT_FUSE' : target.name === 'skeleton' ? 'DIAGONAL_STRAFE' : 'MELEE_PRESSURE'; await bot.lookAt(target.position.offset(0, target.height ?? 1, 0), true); await bot.attack(target); if (target.name === 'creeper') await this.#combatRetreat(800); } await delay(650);
     }
+  }
+  async #combatEquipment(target) {
+    const bot = this.#ready('combat-equipment');
+    if (Number(bot.health ?? 20) <= 8) {
+      const heal = bot.inventory.items().find(item => ['golden_apple', 'enchanted_golden_apple', 'splash_potion_of_healing'].includes(item.name));
+      if (heal) { await bot.equip(heal, 'hand'); bot.activateItem?.(); await delay(350); bot.deactivateItem?.(); this.combatState.substate = 'SURVIVE_HEAL'; return; }
+    }
+    const axe = bot.inventory.items().find(item => item.name.endsWith('_axe'));
+    if (target?.metadata?.some?.(value => String(value).toLowerCase().includes('shield')) && axe) { await bot.equip(axe, 'hand'); this.combatState.substate = 'SHIELD_BREAK_WITH_AXE'; return; }
+    await equipBestWeapon(bot);
+  }
+  async #tryRangedAttack(target) {
+    const bot = this.#ready('combat-ranged'); const ranged = bot.inventory.items().find(item => item.name === 'crossbow') ?? bot.inventory.items().find(item => item.name === 'bow');
+    if (!ranged || !target?.position) return false;
+    const arrows = inventoryCount(bot, 'arrow') + inventoryCount(bot, 'spectral_arrow') + inventoryCount(bot, 'tipped_arrow'); if (!arrows) return false;
+    await bot.equip(ranged, 'hand'); await bot.lookAt(target.position.offset(0, target.height ?? 1, 0), true); bot.activateItem?.(); await delay(ranged.name === 'crossbow' ? 150 : 550); bot.deactivateItem?.(); return true;
+  }
+  async #combatRetreat(durationMs) {
+    const bot = this.#ready('combat-retreat'); bot.setControlState('back', true); try { await delay(durationMs); } finally { bot.setControlState('back', false); }
   }
   async stopCombat() { this.combatAbort?.abort(); this.combatAbort = null; if (this.combatState.mode !== 'OFF') this.combatState = { mode: 'OFF', status: 'IDLE', stoppedAt: new Date().toISOString() }; return { ...this.combatState }; }
   async craftItem({ item, count = 1 } = {}) {
@@ -474,7 +493,7 @@ export class MineflayerAdapter extends EventEmitter {
       return result;
     }, new Map());
     const slots = Array.isArray(bot?.inventory?.slots) ? bot.inventory.slots.slice(9, 45) : []; const inventorySlotsUsed = slots.filter(Boolean).length; const inventorySlotsFree = Math.max(0, 36 - inventorySlotsUsed); const freeItemCapacity = slots.reduce((total, item) => total + (item ? Math.max(0, Number(item.stackSize ?? 64) - Number(item.count ?? 0)) : 64), 0); const inventorySlots = slots.map(item => item ? { name: String(item.name).toLowerCase(), count: Number(item.count), stackSize: Number(item.stackSize ?? 64) } : null);
-    return { connection: this.status, position: bot?.entity?.position ? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z } : null,
+    return { connection: this.status, entityId: bot?.entity?.id ?? null, position: bot?.entity?.position ? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z } : null,
       health: bot?.health ?? null, food: bot?.food ?? null, alive: this.alive, dimension: bot?.game?.dimension ?? null,
       inventorySummary: [...inventory.values()], inventorySlots, inventorySlotsUsed, inventorySlotsFree, freeItemCapacity, plugins: { ...this.pluginStatus },
       camera: { active: Boolean(bot?.viewer), port: this.viewerPort ?? null, mode: this.viewerMode ?? null, version: bot?.version ?? null, renderVersion: this.viewerRenderVersion ?? null, versionSupported: this.viewerVersionSupported ?? null }, combat: { ...this.combatState }, timestamp: new Date().toISOString() };
