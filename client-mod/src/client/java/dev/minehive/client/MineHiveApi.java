@@ -26,7 +26,7 @@ public final class MineHiveApi {
     public JsonObject preview() { return preview.deepCopy(); }
 
     public CompletableFuture<JsonObject> connect(String playerName) {
-        JsonObject body = new JsonObject(); body.addProperty("clientName", "MineHive Fabric 1.1.3"); body.addProperty("playerName", playerName); status = "Connecting";
+        JsonObject body = new JsonObject(); body.addProperty("clientName", "MineHive Fabric 1.2.0"); body.addProperty("playerName", playerName); status = "Connecting";
         return request("POST", "/api/v1/client/sessions", body).thenApply(data -> { sessionId = data.get("id").getAsString(); status = "Connected"; return data; })
                 .exceptionally(error -> { failed(error); return new JsonObject(); });
     }

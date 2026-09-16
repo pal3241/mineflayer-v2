@@ -197,6 +197,9 @@ export class MineflayerAdapter extends EventEmitter {
     });
     return { maxDistance: radius, scannedAt: new Date().toISOString(), discoveries: uniqueDiscoveries(discoveries).slice(0, 32) };
   }
+  async environmentSnapshot() {
+    const bot = this.#ready('environment-observation'); const position = bot.entity.position; const hostiles = Object.values(bot.entities ?? {}).filter(entity => entity.type === 'mob' && HOSTILE_MOBS.has(entity.name) && entity.position && distance3(position, entity.position) <= 24).length; const lavaId = bot.registry.blocksByName?.lava?.id; const lava = Number.isInteger(lavaId) && (bot.findBlocks?.({ matching:lavaId, maxDistance:12, count:1 }) ?? []).length > 0; const feet = bot.blockAt(position.floored()); const below = bot.blockAt(position.floored().offset(0,-1,0)); const light = Number(feet?.light ?? feet?.skyLight ?? 15); const hour = Number(bot.time?.timeOfDay ?? 6000); const night = bot.time?.isNight === true || (hour >= 12542 && hour <= 23458); return { position:validRecoveryPosition(position), features:{ hostileDensity:Math.min(1,hostiles/8), deathRate:0, darkness:night ? Math.max(0.6,1-light/15) : Math.max(0,1-light/15), lava:lava?1:0, fallRisk:isAir(below)?0.7:0, waterRisk:['water','bubble_column'].includes(feet?.name)?0.5:0, healthLoss:Math.max(0,1-Number(bot.health??20)/20), trapped:0, distanceFromBase:0, friendlySupport:0 } };
+  }
   async findNearestStorage({ maxDistance, excludePositions = [] }) {
     const bot = this.#ready('storage-discovery'); const radius = Math.max(2, Math.min(64, Number(maxDistance))); if (!Number.isFinite(radius)) throw new ValidationError('Storage search distance must be numeric');
     const excluded = excludePositions.map(position => ({ x: Number(position.x), y: Number(position.y), z: Number(position.z) })); const positions = bot.findBlocks?.({ matching: candidate => isStorageBlock(candidate?.name), maxDistance: radius, count: 256 });

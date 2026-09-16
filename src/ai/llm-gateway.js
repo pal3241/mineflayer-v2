@@ -34,8 +34,8 @@ export class OllamaProvider {
 
 export class LlmGateway {
   #conversations = new Map();
-  constructor(config, logger) { this.config = config; this.logger = logger; const resolved = buildProvider(config); this.provider = resolved?.provider ?? null; this.providerName = resolved?.name ?? 'disabled'; }
-  status() { return { enabled: Boolean(this.provider), provider: this.providerName, model: this.provider?.model ?? null, endpoint: this.provider?.endpoint ?? null, ...(this.provider?.status?.() ?? {}) }; }
+  constructor(config, logger, localBrain = null) { this.config = config; this.logger = logger; this.localBrain = localBrain; const resolved = buildProvider(config); this.provider = resolved?.provider ?? null; this.providerName = resolved?.name ?? 'disabled'; }
+  status() { return { enabled: Boolean(this.provider) || Boolean(this.localBrain?.status().enabled), provider: this.localBrain?.status().mode === 'manual' ? 'local-neural' : this.providerName, model: this.localBrain?.status().mode === 'manual' ? this.localBrain.status().model : this.provider?.model ?? null, endpoint: this.provider?.endpoint ?? null, localBrain: this.localBrain?.status() ?? null, ...(this.provider?.status?.() ?? {}) }; }
   settings() { const openRouterKeys = uniqueKeys(this.config.openRouterApiKeys); const nvidiaKeys = uniqueKeys(this.config.nvidiaApiKeys); return { provider: this.config.provider, openrouter: { endpoint: this.config.openRouterEndpoint ?? 'https://openrouter.ai/api/v1', model: this.config.openRouterModel ?? 'openrouter/auto', configuredKeys: [0, 1, 2].map(index => Boolean(openRouterKeys[index])) }, nvidia: { endpoint: this.config.nvidiaEndpoint ?? 'https://integrate.api.nvidia.com/v1', model: this.config.nvidiaModel ?? 'nvidia/nemotron-3-nano-30b-a3b', configuredKeys: [0, 1, 2].map(index => Boolean(nvidiaKeys[index])) }, ollama: { endpoint: this.config.ollamaEndpoint ?? 'http://127.0.0.1:11434', model: this.config.ollamaModel ?? 'qwen3:1.7b' }, timeoutMs: this.config.timeoutMs ?? 90_000, maxTokens: 256 }; }
   configure(input) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ValidationError('LLM settings must be an object'); const provider = String(input.provider); if (!['none', 'openrouter', 'nvidia', 'ollama'].includes(provider)) throw new ValidationError('LLM provider must be none, openrouter, nvidia, or ollama');
@@ -46,12 +46,16 @@ export class LlmGateway {
   }
   async interpret(text, context = {}) {
     const deterministic = deterministicIntent(text, context.selector);
-    if (deterministic.intent !== 'converse' || !this.provider) return deterministic;
+    const localStatus = this.localBrain?.status();
+    if (localStatus?.enabled && localStatus.mode === 'manual') return this.#local(text, context.selector, deterministic);
+    if (deterministic.intent !== 'converse') return deterministic;
+    if (!this.provider) return localStatus?.enabled && localStatus.mode === 'fallback' ? this.#local(text, context.selector, deterministic) : deterministic;
     const conversationId = context.conversationId ?? 'default'; const history = this.#conversations.get(conversationId) ?? []; const userContent = JSON.stringify({ request: text, fleet: context.fleet ?? context.bots, relevantWorldMemories: context.memories ?? [], requestedSelector: context.selector ?? 'auto' });
     const messages = [{ role: 'system', content: 'You are a friendly Indonesian Minecraft bot coordinator and chat companion. The fleet data includes positions, inventories, nearby bots, and relevant shared world memories. Translate natural language into one safe intent and return only JSON. Intents: collect, craft, smelt, follow (continuous), come (one-time), move, set_home, home, farm, deforest, reforest, combat, survey, register_storage, store, retrieve, stock, remember, place, status, converse. smelt uses the output item registry name such as iron_ingot, cooked_beef, cooked_chicken, cooked_cod, cooked_salmon, or baked_potato. register_storage uses name. store and retrieve use item, count, and optional storage name. survey scans loaded chunks and uses radius. combat mode is guard, full_combat, or meat. Use converse with a short reply for questions or casual chat. selector must be auto, global, bot:<alias>, or class:<name>. Never invent tools or expose secrets.' }, ...history, { role: 'user', content: userContent }];
     try { const result = validateIntent(parseJson(await this.provider.complete(messages, commandSchema)), context.selector); this.#conversations.set(conversationId, [...history, { role: 'user', content: String(text).slice(0, 500) }, { role: 'assistant', content: JSON.stringify(result) }].slice(-6)); if (this.#conversations.size > 100) this.#conversations.delete(this.#conversations.keys().next().value); return result; }
-    catch (error) { this.logger?.warn('llm.interpretation.fallback', { error: error.message }); return deterministicIntent(text, context.selector); }
+    catch (error) { this.logger?.warn('llm.interpretation.fallback', { error: error.message }); if (localStatus?.enabled && localStatus.mode === 'fallback') return this.#local(text, context.selector, deterministic); return deterministic; }
   }
+  #local(text, selector, deterministic) { const prediction = this.localBrain.predict(text); if (prediction.confidence < 0.45) return deterministic; try { return neuralIntent(text, prediction.label, selector); } catch { return deterministic; } }
 }
 
 function validateSetting(value, name, maximum) { if (value === undefined || value === null || value === '') return undefined; if (typeof value !== 'string' || value.length > maximum || /[\r\n]/.test(value)) throw new ValidationError(`${name} is invalid`); return value.trim(); }
@@ -114,6 +118,23 @@ function deterministicIntent(text, selector = 'auto') {
   if (words.includes('home') || words.includes('pulang')) return validateIntent({ intent: 'home', selector, home: words.at(-1) === 'pulang' ? 'home' : words.at(-1) }, selector);
   if (words.includes('goto') || words.includes('move')) { const numbers = words.map(Number).filter(Number.isFinite); return validateIntent({ intent: 'move', selector, x: numbers[0], y: numbers[1], z: numbers[2] }, selector); }
   const answer = calculate(text); return validateIntent({ intent: 'converse', selector, reply: answer ?? 'LLM belum aktif, tetapi saya siap menerima perintah Minecraft.' }, selector);
+}
+function neuralIntent(text, intent, selector = 'auto') {
+  const words = String(text).toLowerCase().replace(/[^a-z0-9_.-]+/g, ' ').trim().split(/\s+/).filter(Boolean); const numbers = words.map(Number).filter(Number.isFinite); const count = Math.max(1, Math.min(64, numbers[0] ?? 1)); const ignored = new Set(['tolong','please','dong','bot','saya','aku','untuk','ke','di','dari','yang','sekarang','buatkan','bikin','buat','ambil','kumpulkan','masak','lebur','ikuti','kemari','pergi','pindah','tanam','pohon','cek','simpan','ingat']); const identifiers = words.filter(word => !ignored.has(word) && !/^\d+$/.test(word)); const value = identifiers.at(-1);
+  const base = { intent, selector, count };
+  if (intent === 'collect') return validateIntent({ ...base, block: value ?? 'stone' }, selector);
+  if (intent === 'craft') return validateIntent({ ...base, item: value }, selector);
+  if (intent === 'smelt') return validateIntent({ ...base, item: smeltingTarget(words) ?? value }, selector);
+  if (['follow','come'].includes(intent)) return validateIntent({ ...base, player: value }, selector);
+  if (intent === 'move') return validateIntent({ ...base, x: numbers[0], y: numbers[1], z: numbers[2] }, selector);
+  if (intent === 'set_home' || intent === 'home') return validateIntent({ ...base, home: value ?? 'home' }, selector);
+  if (intent === 'farm') return validateIntent({ ...base, crop: value ?? 'wheat' }, selector);
+  if (['deforest','reforest','survey','stock','status'].includes(intent)) return validateIntent(base, selector);
+  if (intent === 'combat') return validateIntent({ ...base, mode: words.some(word => ['jaga','guard'].includes(word)) ? 'guard' : words.some(word => ['daging','meat'].includes(word)) ? 'meat' : 'full_combat' }, selector);
+  if (intent === 'register_storage') return validateIntent({ ...base, name: value ?? 'storage' }, selector);
+  if (['store','retrieve'].includes(intent)) return validateIntent({ ...base, item: identifiers.at(-2) ?? value, name: identifiers.at(-1) }, selector);
+  if (['remember','place'].includes(intent)) return validateIntent({ ...base, name: value ?? 'place' }, selector);
+  return deterministicIntent(text, selector);
 }
 function after(words, candidates) { const index = words.findIndex(value => candidates.includes(value)); return words.slice(index + 1).find(value => !/^\d+$/.test(value)); }
 function identifierAfter(words, candidates) { const index = words.findIndex(value => candidates.includes(value)); const values = words.slice(index + 1).filter(value => !/^\d+$/.test(value) && !['tolong', 'please'].includes(value)); return values.length ? values.join('_') : undefined; }

@@ -263,6 +263,13 @@
             <button class="button primary full" type="submit">Apply LLM settings</button>
           </form>
           <p id="keyStatus" class="hint">API key tidak pernah ditampilkan kembali. Kolom kosong mempertahankan pool key provider tersebut.</p>
+          <div class="llm-provider-block"><p class="eyebrow">LOCAL NEURAL COMMAND BRAIN</p><span>Jaringan saraf kecil yang dilatih untuk memahami perintah MineHive. Mode fallback mengambil alih saat cloud gagal; mode manual selalu memakainya.</span></div>
+          <form id="localBrainSettingsForm" class="form-grid">
+            <label class="full">Mode<select id="localBrainMode"><option value="fallback">Fallback cloud</option><option value="manual">Selalu lokal</option><option value="disabled">Nonaktif</option></select></label>
+            <button class="button primary" type="submit">Apply local brain</button><button id="trainLocalBrain" class="button secondary" type="button">Train ulang</button>
+          </form>
+          <p id="localBrainStatus" class="hint">Memuat status model…</p>
+          <p id="environmentModelStatus" class="hint">Environmental model: memuat…</p>
         </section>
 
         <section class="panel">
