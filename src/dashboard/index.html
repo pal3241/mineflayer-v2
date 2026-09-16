@@ -247,7 +247,7 @@
         <section class="panel">
           <div class="panel-title"><div><p class="eyebrow">AI GATEWAY</p><h2>OpenRouter & NVIDIA NIM</h2></div><span id="llmSettingStatus" class="badge">—</span></div>
           <form id="llmSettingsForm" class="form-grid">
-            <label class="full">Provider<select id="llmProvider"><option value="none">Disabled</option><option value="openrouter">OpenRouter</option><option value="nvidia">NVIDIA NIM</option></select></label>
+            <label class="full">Provider<select id="llmProvider"><option value="none">Disabled</option><option value="openrouter">OpenRouter</option><option value="nvidia">NVIDIA NIM</option><option value="ollama">Ollama local</option></select></label>
             <div class="full llm-provider-block"><p class="eyebrow">OPENROUTER</p><span>Cloud model routing dengan tiga key failover.</span></div>
             <label>OpenRouter model<input id="openRouterModel" placeholder="openrouter/auto"></label>
             <label>OpenRouter endpoint<input id="openRouterEndpoint" placeholder="https://openrouter.ai/api/v1"></label>
@@ -259,7 +259,7 @@
             <label>NVIDIA NIM endpoint<input id="nvidiaNimEndpoint" placeholder="https://integrate.api.nvidia.com/v1"></label>
             <label>NVIDIA key 1<input id="nvidiaKey1" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
             <label>NVIDIA key 2<input id="nvidiaKey2" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label>
-            <label>NVIDIA key 3<input id="nvidiaKey3" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label><label>LLM timeout (ms)<input id="llmTimeout" type="number" min="5000" max="300000" step="1000" value="90000"></label>
+            <label>NVIDIA key 3<input id="nvidiaKey3" type="password" autocomplete="new-password" placeholder="Tidak diubah"></label><div class="full llm-provider-block"><p class="eyebrow">OLLAMA LOKAL</p><span>Model berjalan di perangkat yang sama dengan MineHive, tanpa API key.</span></div><label>Ollama model<input id="ollamaModel" placeholder="qwen3:1.7b"></label><label>Ollama endpoint<input id="ollamaEndpoint" placeholder="http://127.0.0.1:11434"></label><label>LLM timeout (ms)<input id="llmTimeout" type="number" min="5000" max="300000" step="1000" value="90000"></label>
             <button class="button primary full" type="submit">Apply LLM settings</button>
           </form>
           <p id="keyStatus" class="hint">API key tidak pernah ditampilkan kembali. Kolom kosong mempertahankan pool key provider tersebut.</p>
