@@ -25,6 +25,7 @@ const MOB_PROFILES = Object.freeze({
 
 export function createCombatService({ repositories, events, bots, ml, logger } = {}) {
   if (!repositories?.profiles || !repositories?.events || !repositories?.policies) throw new ValidationError('Combat repositories are required');
+  const doctrineRepository = repositories.doctrines ?? repositories.policies;
   const profileCache = new Map(); const squadTargets = new Map(); const bindings = new Map(); let queue = Promise.resolve();
   const mutate = operation => { const result = queue.then(operation); queue = result.then(() => undefined, () => undefined); return result; };
   const emit = (type, payload) => events?.publish(type, payload, { source: 'combat-superior', correlationId: payload.botId ?? payload.squadId ?? randomUUID() });
@@ -71,7 +72,8 @@ export function createCombatService({ repositories, events, bots, ml, logger } =
     else if (distance > 8 && (inventory.has('bow') || inventory.has('crossbow'))) action = 'RANGED_AIM';
     else if (distance > 16 && inventory.has('ender_pearl') && input.world?.pearlSafe === true) action = 'PEARL_CHASE';
     else if (!ROLE_ACTIONS[role].includes(action)) action = ROLE_ACTIONS[role][0];
-    return { action, role, mobProfile: mob, desiredDistance: p.desiredDistance, sideState: action === 'SURVIVE_HEAL' || action === 'EXTINGUISH' ? 'SURVIVAL' : 'COMBAT', combatSubstate: action, deterministic: ['EXTINGUISH', 'SURVIVE_HEAL', 'SHIELD_BREAK_WITH_AXE'].includes(action), safety: { avoidFriendlyFire: true, avoidProtectedBuild: true, pearlSafeRequired: true } };
+    const doctrines = await doctrineRepository.list(); const guidance = doctrines.filter(item => item.status === 'APPROVED' && doctrineMatches(item, { mob, role, action })).sort((a, b) => Number(b.confidence) - Number(a.confidence)).slice(0, 3);
+    return { action, role, mobProfile: mob, desiredDistance: p.desiredDistance, sideState: action === 'SURVIVE_HEAL' || action === 'EXTINGUISH' ? 'SURVIVAL' : 'COMBAT', combatSubstate: action, deterministic: ['EXTINGUISH', 'SURVIVE_HEAL', 'SHIELD_BREAK_WITH_AXE'].includes(action), safety: { avoidFriendlyFire: true, avoidProtectedBuild: true, pearlSafeRequired: true }, doctrine: guidance.map(item => ({ id: item.id, title: item.title, techniques: item.techniques, confidence: item.confidence })) };
   }
   async function assignFocus({ squadId = 'default', target, botIds = [] }) {
     if (!target?.id) throw new ValidationError('Focus target requires target.id');
@@ -97,13 +99,21 @@ export function createCombatService({ repositories, events, bots, ml, logger } =
     runtime.adapter.on('entityHurt', onHurt); runtime.adapter.on('death', onDeath);
     bindings.set(botId, () => { runtime.adapter.off('entityHurt', onHurt); runtime.adapter.off('death', onDeath); });
   }
+  async function ingestDoctrine(input = {}) {
+    const text = String(input.text ?? '').trim(); if (text.length < 12 || text.length > 20_000) throw new ValidationError('Combat doctrine text must be 12 to 20000 characters');
+    const title = String(input.title ?? 'Imported PvP technique').trim().slice(0, 120) || 'Imported PvP technique'; const techniques = extractTechniques(text);
+    if (!techniques.length) throw new ValidationError('No supported combat technique was found in this text');
+    const record = { id: 'doctrine:' + randomUUID(), title, source: String(input.source ?? 'owner-text').slice(0, 80), text, techniques, confidence: Math.max(0.3, Math.min(0.85, Number(input.confidence ?? 0.65))), status: 'APPROVED', learnedAt: new Date().toISOString(), schemaVersion: 1 };
+    const saved = await doctrineRepository.create(record); await emit('combat.doctrine.learned', { doctrine: saved }); return saved;
+  }
+  async function doctrines() { return (await doctrineRepository.list()).filter(item => String(item.id).startsWith('doctrine:')).sort((a,b) => String(b.learnedAt).localeCompare(String(a.learnedAt))); }
   async function status() {
-    const profiles = await Promise.all(bots.list().map(item => profile(item.id))); const eventsLog = await repositories.events.list(); const policies = await repositories.policies.list();
-    return { version: '1.1.0', profiles, squadTargets: [...squadTargets.values()], events: eventsLog.slice(-100), policy: policies.find(p => p.status === 'PRODUCTION') ?? { version: 'combat-rules-v1', status: 'SAFE_FALLBACK' }, rl: { mode: 'offline-experience', pythonBridge: 'ml/combat_trainer.py', records: eventsLog.length } };
+    const profiles = await Promise.all(bots.list().map(item => profile(item.id))); const eventsLog = await repositories.events.list(); const policies = await repositories.policies.list(); const doctrineList = await doctrines();
+    return { version: '1.1.0', profiles, squadTargets: [...squadTargets.values()], events: eventsLog.slice(-100), policy: policies.find(p => p.status === 'PRODUCTION') ?? { version: 'combat-rules-v1', status: 'SAFE_FALLBACK' }, rl: { mode: 'offline-experience', pythonBridge: 'ml/combat_trainer.py', records: eventsLog.length, doctrines: doctrineList.length }, doctrines: doctrineList };
   }
   async function trainingBatch(limit = 2048) { const records = await repositories.events.list(); return records.slice(-Math.max(1, Math.min(4096, Number(limit) || 2048))).map(item => ({ state: item.state, action: item.action, reward: item.reward, outcome: item.outcome, botId: item.botId, timestamp: item.createdAt })); }
   async function promotePolicy(policy) { if (!policy?.version) throw new ValidationError('Policy version is required'); const row = { id: String(policy.version), version: String(policy.version), status: 'PRODUCTION', metrics: compact(policy.metrics ?? {}), promotedAt: new Date().toISOString(), source: String(policy.source ?? 'python') }; const existing = (await repositories.policies.list()).find(x => x.id === row.id); const saved = existing ? await repositories.policies.update(existing.id, row) : await repositories.policies.create(row); await emit('combat.policy.promoted', saved); return saved; }
-  return Object.freeze({ profile, setRole, transition, record, decide, assignFocus, requestDefense, bind, status, trainingBatch, promotePolicy });
+  return Object.freeze({ profile, setRole, transition, record, decide, assignFocus, requestDefense, bind, status, trainingBatch, promotePolicy, ingestDoctrine, doctrines });
 }
 function defaultProfile(botId) { return normalizeProfile({ id: 'combat:' + botId, botId, combatRole: 'UNASSIGNED', assignedRole: 'UNASSIGNED', combatPoints: 0, combatRank: 'Recruit', mainState: 'IDLE', sideState: null, combatSubstate: null, stateHistory: [], allowedActions: ROLE_ACTIONS.UNASSIGNED, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }); }
 function normalizeProfile(value) { const points = Math.max(0, Number(value.combatPoints ?? 0)); const role = normalizeRole(value.combatRole ?? 'UNASSIGNED'); return { ...value, combatRole: role, assignedRole: normalizeRole(value.assignedRole ?? role), combatPoints: points, combatRank: rankFor(points), mainState: validState(value.mainState ?? 'IDLE'), sideState: value.sideState ? validState(value.sideState) : null, combatSubstate: value.combatSubstate ? validState(value.combatSubstate) : null, allowedActions: ROLE_ACTIONS[role] }; }
@@ -115,3 +125,16 @@ function compact(value) { if (!value || typeof value !== 'object') return value 
 function inventoryHasAxe(items) { return [...items].some(name => String(name).endsWith('_axe')); }
 function mlFeatures(event) { return { action: event.action, outcome: event.outcome, reward: Math.sign(event.reward), type: event.type }; }
 function defenderScore(profile, runtime, position) { const role = profile?.combatRole ?? 'UNASSIGNED'; const roleScore = { TANK:100, FLANKER:80, RANGED:75, SUPPORT:55, SCOUT:45, UNASSIGNED:20 }[role]; const pointScore = Math.min(50, Number(profile?.combatPoints ?? 0) / 100); const current = runtime.runtime?.position; const distancePenalty = current && position ? Math.min(60, Math.hypot(current.x-position.x,current.y-position.y,current.z-position.z)) : 20; return roleScore + pointScore - distancePenalty; }
+function extractTechniques(text) {
+  const lower = text.toLowerCase(); const found = [];
+  const add = (id, action, when, keywords) => { if (keywords.some(word => lower.includes(word))) found.push({ id, action, when, evidence: keywords.filter(word => lower.includes(word)) }); };
+  add('bow-spacing', 'RANGED_AIM', 'target distance > 8', ['bow', 'busur', 'crossbow', 'panah']);
+  add('shield-break', 'SHIELD_BREAK_WITH_AXE', 'enemy using shield', ['shield', 'perisai', 'axe', 'kapak']);
+  add('heal-threshold', 'SURVIVE_HEAL', 'low health', ['golden apple', 'gap', 'healing', 'potion', 'hp rendah']);
+  add('skeleton-strafe', 'DIAGONAL_STRAFE', 'skeleton ranged attack', ['skeleton', 'strafe', 'diagonal']);
+  add('creeper-reset', 'HIT_RETREAT_FUSE', 'creeper fuse', ['creeper', 'fuse', 'hissing']);
+  add('knockback-loop', 'KNOCKBACK_LOOP', 'slow melee mob', ['knockback', 'zombie', 'husk']);
+  add('retreat-discipline', 'RETREAT', 'outnumbered or unsafe', ['retreat', 'mundur', 'kabur', 'low health']);
+  return [...new Map(found.map(item => [item.id, item])).values()];
+}
+function doctrineMatches(doctrine, context) { return doctrine.techniques?.some(item => item.action === context.action || (context.mob === 'skeleton' && item.id === 'skeleton-strafe') || (context.mob === 'creeper' && item.id === 'creeper-reset')); }
