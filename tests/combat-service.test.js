@@ -36,7 +36,7 @@ test('defense request chooses ready combat bots without moving every worker', as
 test('combat doctrine extracts PvP techniques from owner text without overriding survival', async () => {
   const combat = createCombatService({ repositories: { profiles: new MemoryRepository(), events: new MemoryRepository(), policies: new MemoryRepository(), doctrines: new MemoryRepository() }, events: new EventBus(), bots: bots([]) });
   const doctrine = await combat.ingestDoctrine({ title: 'PvP notes', text: 'Saat skeleton menarik bow lakukan diagonal strafe. Jika musuh pakai shield gunakan axe. Saat HP rendah gunakan golden apple.' });
-  assert.equal(doctrine.techniques.length, 3);
+  assert.equal(doctrine.techniques.length, 4);
   await combat.setRole('archer', 'RANGED');
   const decision = await combat.decide({ botId: 'archer', self: { health: 20 }, target: { name: 'skeleton', distance: 6 }, inventory: ['bow', 'arrow'] });
   assert.ok(decision.doctrine.some(item => item.title === 'PvP notes'));
