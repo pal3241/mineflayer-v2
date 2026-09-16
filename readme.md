@@ -16,6 +16,7 @@ MineHive dirancang agar keputusan AI tetap berada di belakang validasi determini
 - Penyimpanan produksi SQLite, structured logging, backup, dan health monitoring
 - Goal planner, dependency graph, task queue, retry, timeout, cancellation, dan checkpoint
 - Logistik transaksional dengan storage registry, reservation, verified transfer, dan audit lifecycle
+- Fabric client 1.0.0 untuk switch-by-look antar tubuh bot, kontrol langsung, RTS fleet map, HUD, dan preview blueprint
 
 Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUAN_PENGGUNAAN.md`](PANDUAN_PENGGUNAAN.md).
 
@@ -38,5 +39,6 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 - v0.9.1 — Blueprint & Cooperative Construction — Implemented
 - v0.9.2 — Universal Task Memory — Implemented
 - v0.9.3 — Mass Logistics & Workshops — Implemented
+- [v1.0.0 — Fabric Hivemind Client](client-mod/README.md) — Implemented
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Roadmap hanya menampilkan phase yang belum selesai; histori phase yang selesai tersimpan permanen di folder [`updates/`](updates/README.md).
