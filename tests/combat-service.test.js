@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EventBus } from '../src/core/event-bus.js';
 import { MemoryRepository } from '../src/persistence/memory-repository.js';
 import { createCombatService } from '../src/combat/index.js';
+import { createCombatNeuralPolicy } from '../src/combat/combat-neural-policy.js';
 
 function bots(items) { return { list: () => items }; }
 
@@ -59,4 +60,25 @@ test('damage to a bound bot starts automatic guard combat once', async () => {
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0], { mode: 'guard', position: { x: 3, y: 64, z: 5 }, radius: 16, role: 'TANK' });
+});
+
+test('shared neural combat policy learns from reward without overriding before sufficient samples', () => {
+  const policy = createCombatNeuralPolicy();
+  for (let index = 0; index < 24; index++) policy.observe({ state: { health: 18, distance: 3, mob: 'zombie' }, action: 'MELEE_PRESSURE', reward: 12 });
+  const advice = policy.recommend({ health: 18, distance: 3, mob: 'zombie' }, 'RETREAT');
+  assert.equal(advice.active, true);
+  assert.ok(advice.samples >= 24);
+  assert.ok(policy.status().architecture.endsWith('-7'));
+});
+
+test('protection starts guard combat at the protected bot position', async () => {
+  const handlers = new Map(); const calls = [];
+  const adapter = position => ({ combatState: { status: 'IDLE' }, snapshot: () => ({ entityId: position.x, position, health: 20 }), on: (name, callback) => handlers.set(name + position.x, callback), off: () => {}, startCombat: async input => calls.push(input), stopCombat: async () => ({ status: 'IDLE' }) });
+  const tankAdapter = adapter({ x: 0, y: 64, z: 0 }); const builderAdapter = adapter({ x: 10, y: 64, z: 10 });
+  const fleet = [{ id: 'tank', status: 'READY', runtime: { position: { x: 0, y: 64, z: 0 } } }, { id: 'builder', status: 'READY', runtime: { position: { x: 10, y: 64, z: 10 } } }];
+  const combat = createCombatService({ repositories: { profiles: new MemoryRepository(), events: new MemoryRepository(), policies: new MemoryRepository() }, events: new EventBus(), bots: bots(fleet) });
+  await combat.bind({ bot: { id: 'tank' }, adapter: tankAdapter }); await combat.bind({ bot: { id: 'builder' }, adapter: builderAdapter });
+  const result = await combat.protect({ protectorId: 'tank', wardId: 'builder', radius: 12 });
+  assert.equal(result.wardId, 'builder');
+  assert.deepEqual(calls[0], { mode: 'guard', position: { x: 10, y: 64, z: 10 }, radius: 12, role: 'UNASSIGNED' });
 });
