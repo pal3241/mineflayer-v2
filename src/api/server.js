@@ -50,6 +50,9 @@ export class ApiServer {
         if (req.method === 'POST' && /^\/api\/v1\/combat\/bots\/[^/]+\/state$/.test(url.pathname)) { const input = await body(req); return send(200, { data: await this.application.combat.transition(decodeURIComponent(parts.at(-2)), input.mainState, input.sideState, input.combatSubstate, input.context) }); }
         if (req.method === 'POST' && url.pathname === '/api/v1/combat/decide') return send(200, { data: await this.application.combat.decide(await body(req)) });
         if (req.method === 'POST' && url.pathname === '/api/v1/combat/focus') return send(200, { data: await this.application.combat.assignFocus(await body(req)) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/combat/engage') return send(200, { data: await this.application.combat.engage(await body(req)) });
+        if (req.method === 'POST' && url.pathname === '/api/v1/combat/protect') return send(200, { data: await this.application.combat.protect(await body(req)) });
+        if (req.method === 'POST' && /^\/api\/v1\/combat\/bots\/[^/]+\/stop$/.test(url.pathname)) return send(200, { data: await this.application.combat.stopEngagement(decodeURIComponent(parts.at(-2))) });
         if (req.method === 'POST' && url.pathname === '/api/v1/combat/defend') return send(200, { data: await this.application.combat.requestDefense(await body(req)) });
         if (req.method === 'POST' && url.pathname === '/api/v1/combat/policy/promote') return send(200, { data: await this.application.combat.promotePolicy(await body(req)) });
         if (req.method === 'GET' && url.pathname === '/api/v1/memory/universal/status') return send(200, { data: await this.application.universalMemory.status() });
