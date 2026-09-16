@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "minehive_client",
+  "version": "${version}",
+  "name": "MineHive Client",
+  "description": "Direct Hivemind body control, RTS fleet commands, HUD, and blueprint preview.",
+  "authors": ["MineHive"],
+  "contact": { "sources": "https://github.com/pal3241/mineflayer-v2" },
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": { "client": ["dev.minehive.client.MineHiveClient"] },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
