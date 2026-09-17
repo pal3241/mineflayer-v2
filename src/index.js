@@ -38,6 +38,7 @@ export { createLogisticsService } from './logistics/logistics-service.js';
 export { createWorkshopService } from './logistics/workshop-service.js';
 export { createFleetTransferService } from './logistics/fleet-transfer-service.js';
 export { collectWorkerStates, createCoordinationMonitor, createHelpCommandService, createHelpService, scoreHelper, splitWeightedWork } from './help/index.js';
+export { createAutoHelpCoordinator } from './help/auto-help-coordinator.js';
 export { createSurvivalService, normalizeSurvivalPolicy, SurvivalCapabilityError } from './survival/index.js';
 export { createTaskReporter } from './tasks/task-reporter.js';
 export { NavigationError, createNavigationService, normalizeNavigationPolicy, normalizeNavigationRequest, normalizeNavigationTarget } from './navigation/index.js';

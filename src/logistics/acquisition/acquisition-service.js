@@ -307,8 +307,8 @@ export function createAcquisitionService({ bots, logistics, workshops = null, ev
         if (collected >= plan.requirement.count) break;
         const before = itemTotal(runtime, plan.requirement.item);
         try {
-          const heightPolicy = { minY: settings.minSearchY, maxY: settings.maxSearchY, maxDescend: settings.maxSearchDescend };
-          await runBatches(taskRunner, runtime, 'minecraft.collection', { block, maxDistance: settings.maxDistance, ...heightPolicy }, (plan.count ?? plan.requirement.count) - collected, batch => acquisitionResources([], [{ item: plan.requirement.item, count: batch }]), (count) => runtime.adapter.collect({ block, count, maxDistance: settings.maxDistance, ...heightPolicy }));
+          const heightPolicy = { minY: settings.minSearchY, maxY: settings.maxSearchY, maxDescend: settings.maxSearchDescend }; const mining = miningPolicy(plan.requirement);
+          await runBatches(taskRunner, runtime, 'minecraft.collection', { block, maxDistance: settings.maxDistance, ...heightPolicy, ...mining }, (plan.count ?? plan.requirement.count) - collected, batch => acquisitionResources([], [{ item: plan.requirement.item, count: batch }]), (count) => runtime.adapter.collect({ block, count, maxDistance: settings.maxDistance, ...heightPolicy, ...mining }));
         } catch (error) {
           request?.trace.push({ at: new Date().toISOString(), step: 'collect-source-failed', detail: `${block}: ${error.message}` });
           continue;
@@ -325,7 +325,7 @@ export function createAcquisitionService({ bots, logistics, workshops = null, ev
     }
     if (plan.status === 'SMELT_PLAN_CREATED') {
       const count = plan.count ?? plan.requirement.count;
-      const input = await acquire({ requesterBotId: runtime.id, type: 'ITEM', item: plan.formula.input.name, count: plan.formula.input.count }, depth + 1, budget);
+      const input = await acquire({ requesterBotId: runtime.id, type: 'ITEM', item: plan.formula.input.name, count: plan.formula.input.count, ...miningPolicy(plan.requirement) }, depth + 1, budget);
       const fuel = await acquire({ requesterBotId: runtime.id, type: 'ITEM', item: plan.formula.fuel.name, count: plan.formula.fuel.count }, depth + 1, budget);
       if (workshops?.prepare) await workshops.prepare({ runtime, kind: 'furnace', radius: Math.min(settings.maxDistance, 64) });
       const result = await runBatches(taskRunner, runtime, 'minecraft.smelting', { item: plan.requirement.item, fuel: plan.formula.fuel.name }, count, batch => acquisitionResources([{ item: plan.formula.input.name, count: batch }, { item: plan.formula.fuel.name, count: Math.ceil(batch / 8) }], [{ item: plan.requirement.item, count: batch }]), (batch) => runtime.adapter.smeltItem({ item: plan.requirement.item, count: batch, fuel: plan.formula.fuel.name })); if (workshops?.scan) await workshops.scan({ runtime, radius: 8 }).catch(() => {});
@@ -387,7 +387,11 @@ export function createAcquisitionService({ bots, logistics, workshops = null, ev
 }
 
 function acquisitionKey(input = {}) {
-  return [input.requesterBotId, input.type, input.item ?? input.category, input.count ?? 1, input.minimumTier ?? '', Array.isArray(input.sources) ? input.sources.join(',') : 'ANY'].join(':').toLowerCase();
+  return [input.requesterBotId, input.type, input.item ?? input.category, input.count ?? 1, input.minimumTier ?? '', Array.isArray(input.sources) ? input.sources.join(',') : 'ANY', input.strategy ?? '', input.avoidStripMining === true ? 'STRICT' : 'FALLBACK'].join(':').toLowerCase();
+}
+
+function miningPolicy(requirement = {}) {
+  return Object.fromEntries(['strategy','combatEscort','avoidStripMining','groupAnchor','maximumGroupDistance'].filter(key => requirement[key] !== undefined).map(key => [key, requirement[key]]));
 }
 
 async function runAdapter(taskRunner, runtime, capability, input, resources, fallback) {

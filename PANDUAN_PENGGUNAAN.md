@@ -187,7 +187,7 @@ Contoh: `!bot1` hanya mengontrol bot dengan alias `bot1`, `!miner` mengontrol se
 !global early_game bot1
 ```
 
-`bot1` menjadi pemimpin. Seluruh bot READY tetap dalam formasi 10–15 blok; pengumpulan dihentikan sementara bila ada anggota yang tertinggal. Urutan progres adalah kayu → batu → shelter → iron → warehouse/workshop. Blueprint bawaan hanya dibangun setelah makanan dan material cukup serta scanner menemukan permukaan yang luas, terang, relatif rata, tanpa hostile atau hazard. Blueprint otomatis yang boleh melewati approval hanya blueprint bawaan tepercaya, bukan file pengguna.
+`bot1` menjadi pemimpin. Seluruh bot READY tetap dalam formasi 10–15 blok; pengumpulan dihentikan sementara bila ada anggota yang tertinggal. Urutan progres adalah kayu → batu → shelter → persiapan gua → iron → warehouse/workshop. Sebelum ekspedisi iron, pemimpin wajib membawa minimal 16 makanan, senjata, dan 16 obor. Iron dicari melalui ore terbuka di gua dengan combat guard aktif; mode early-game tidak beralih ke strip-mine jika gua aman belum tersedia. Early game baru dinyatakan selesai setelah pemimpin memiliki iron chestplate, shield, dan iron pickaxe. Blueprint bawaan hanya dibangun setelah makanan dan material cukup serta scanner menemukan permukaan yang luas, terang, relatif rata, tanpa hostile atau hazard. Blueprint otomatis yang boleh melewati approval hanya blueprint bawaan tepercaya, bukan file pengguna.
 
 ### Melihat status bot
 
@@ -237,7 +237,9 @@ iron_ore
 sand
 ```
 
-Semua command `collect` otomatis melewati koordinator, termasuk command tanpa kata `ai`. MineHive mencari block dalam radius yang diizinkan, memeriksa persyaratan alat dari registry Minecraft, mendatangi block, menambangnya, lalu mengambil hasilnya.
+Semua command `collect` otomatis melewati koordinator, termasuk command tanpa kata `ai`. MineHive mencari block dalam radius yang diizinkan, memeriksa persyaratan alat dari registry Minecraft, mendatangi block, menambangnya, lalu mengambil hasilnya. Untuk semua ore di setiap tahap permainan, policy universal memprioritaskan ore terbuka di gua yang gelap dan bebas hazard, lalu ore terbuka permukaan. Ore tertutup hanya menjadi fallback dangkal (maksimal empat blok turun), sehingga bot tidak menggali lurus ke bawah secara ngawur. Area dengan lava/api disingkirkan dan hostile dalam radius mining diamankan terlebih dahulu.
+
+Task collect berjumlah minimal 8 akan otomatis dibagi ke anggota grup yang idle dan berada maksimal 15 blok dari pemilik task. Policy mining, batas grup, dan larangan strip-mine ikut diteruskan kepada helper. Output baru dihitung setelah handoff terverifikasi.
 
 ### Survei area dan shared memory
 

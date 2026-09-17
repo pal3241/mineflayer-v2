@@ -6,5 +6,6 @@ export function analyzeHelpTask(task) {
   const item = String(task.input?.item ?? task.input?.block ?? '').trim().toLowerCase();
   const target = Number(task.input?.count);
   if (!capability || !item || !Number.isInteger(target) || target < 1) throw new ValidationError(`Parent task '${task.id}' is not a supported collection task`);
-  return Object.freeze({ helpable: true, helpMode: 'RESOURCE_COLLECTION', progressMetric: 'VERIFIED_DELIVERY', splitUnit: 'ITEM', completionPolicy: 'CREDITED_OUTPUT', item, target });
+  const collectionPolicy = Object.fromEntries(['strategy','combatEscort','avoidStripMining','groupAnchor','maximumGroupDistance','maxDistance','minY','maxY','maxDescend'].filter(key => task.input?.[key] !== undefined).map(key => [key, task.input[key]]));
+  return Object.freeze({ helpable: true, helpMode: 'RESOURCE_COLLECTION', progressMetric: 'VERIFIED_DELIVERY', splitUnit: 'ITEM', completionPolicy: 'CREDITED_OUTPUT', item, target, collectionPolicy });
 }

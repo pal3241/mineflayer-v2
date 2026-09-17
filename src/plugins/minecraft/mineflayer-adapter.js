@@ -4,6 +4,7 @@ import { NavigationError } from '../../navigation/navigation-error.js';
 import { SurvivalCapabilityError } from '../../survival/survival-errors.js';
 import { createNavigationMovements } from '../../navigation/navigation-movements.js';
 import { inspectTerrainPosition } from '../../navigation/terrain-safety.js';
+import { isOreBlock, prioritizeMiningTargets } from './mining-policy.js';
 
 const SMELTING_RECIPES = Object.freeze({
   iron_ingot: 'raw_iron', gold_ingot: 'raw_gold', copper_ingot: 'raw_copper',
@@ -247,17 +248,34 @@ export class MineflayerAdapter extends EventEmitter {
     } finally { furnace.close(); }
   }
   setProtectedZones(zones = []) { this.protectedZones = zones.filter(zone => zone?.bounds?.min && zone?.bounds?.max).map(zone => structuredClone(zone)); return { zones: this.protectedZones.length }; }
-  async collect({ block, count = 1, maxDistance = 64, movement, minY = -64, maxY = 320, maxDescend = 12, allowProtected = false }, { signal } = {}) {
+  async collect({ block, count = 1, maxDistance = 64, movement, minY = -64, maxY = 320, maxDescend = 12, allowProtected = false, strategy, combatEscort = false, avoidStripMining = false, groupAnchor = null, maximumGroupDistance = 15 }, { signal } = {}) {
     const bot = this.#ready('collection'); if (!bot.collectBlock) throw new ValidationError('CollectBlock plugin is unavailable');
     const definition = bot.registry?.blocksByName?.[block]; if (!definition) throw new ValidationError(`Unknown block '${block}'`);
     const amount = Math.max(1, Math.min(64, Number.parseInt(count, 10) || 1));
     const radius = boundedDistance(maxDistance, 1, 128, 'Collection distance');
     const floor = Number(minY); const ceiling = Number(maxY); const descent = Number(maxDescend); if (![floor, ceiling, descent].every(Number.isFinite) || floor > ceiling || descent < 0) throw new ValidationError('Collection height policy is invalid');
-    const currentY = bot.entity.position.y; const positions = bot.findBlocks({ matching: candidate => candidate && candidate.name === block, maxDistance: radius, count: Math.min(256, amount * 8) });
-    const blocks = positions.map(position => bot.blockAt(position)).filter(Boolean).filter(target => target.position.y >= floor && target.position.y <= ceiling && target.position.y >= currentY - descent).filter(target => allowProtected || !this.protectedZones.some(zone => inBounds(target.position, zone.bounds)));
-    if (!blocks.length) throw new ValidationError(`No safe '${block}' found within ${maxDistance} blocks; search cannot descend below Y=${Math.max(floor, Math.ceil(currentY - descent))}`);
+    const current = bot.entity.position; const currentY = current.y; const ore = isOreBlock(block); const effectiveStrategy = String(strategy ?? (ore ? 'CAVE_FIRST' : 'NEAREST')).toUpperCase(); const positions = bot.findBlocks({ matching: candidate => candidate && candidate.name === block, maxDistance: radius, count: Math.min(256, amount * 8) });
+    const candidates = positions.map(position => bot.blockAt(position)).filter(Boolean).filter(target => target.position.y >= floor && target.position.y <= ceiling && target.position.y >= currentY - descent).filter(target => allowProtected || !this.protectedZones.some(zone => inBounds(target.position, zone.bounds)));
+    const profiles = candidates.map(target => miningProfile(bot, target, current, groupAnchor, maximumGroupDistance));
+    const blocks = ore ? prioritizeMiningTargets(profiles, { strategy: effectiveStrategy, avoidStripMining }) : candidates;
+    if (!blocks.length) { const reason = ore && avoidStripMining ? 'no exposed, hazard-free cave ore matched the group leash; strip-mining fallback is disabled' : `search cannot descend below Y=${Math.max(floor, Math.ceil(currentY - descent))}`; throw new ValidationError(`No safe '${block}' found within ${maxDistance} blocks: ${reason}`); }
     this.#applyMovementPolicy(movement ?? this.commandMovementPolicy ?? safeMovementPolicy()); const cleanup = this.#abort(signal, () => { void bot.collectBlock.cancelTask(); }); let collectedTargets = 0; let lastError = null;
-    try { for (const target of blocks) { if (collectedTargets >= amount || signal?.aborted) break; try { await bot.collectBlock.collect(target); collectedTargets++; } catch (error) { lastError = error; } } if (!collectedTargets) throw new ValidationError(`No reachable '${block}' found within ${maxDistance} blocks${lastError ? `: ${lastError.message}` : ''}`); return { block, requested: amount, collectedTargets, inventory: this.snapshot().inventorySummary }; } finally { cleanup(); this.#applyMovementPolicy(safeMovementPolicy()); }
+    try { for (const target of blocks) { if (collectedTargets >= amount || signal?.aborted) break; try { if (combatEscort || (ore && effectiveStrategy === 'CAVE_FIRST')) await this.#secureMiningArea(target.position, { signal }); await bot.collectBlock.collect(target); collectedTargets++; } catch (error) { lastError = error; } } if (!collectedTargets) throw new ValidationError(`No reachable '${block}' found within ${maxDistance} blocks${lastError ? `: ${lastError.message}` : ''}`); return { block, requested: amount, collectedTargets, strategy: effectiveStrategy, caveFirst: ore && effectiveStrategy === 'CAVE_FIRST', inventory: this.snapshot().inventorySummary }; } finally { cleanup(); this.#applyMovementPolicy(safeMovementPolicy()); }
+  }
+  async #secureMiningArea(anchor, { signal, radius = 12 } = {}) {
+    const bot = this.#ready('mining-combat'); const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      if (signal?.aborted) throw signal.reason ?? new ValidationError('Mining combat cancelled');
+      if (Number(bot.health ?? 20) <= 8) throw new ValidationError('Cave mining aborted: health is too low for combat');
+      const target = bot.nearestEntity(entity => entity.type === 'mob' && HOSTILE_MOBS.has(entity.name) && entity.position && distance3(entity.position, anchor) <= radius);
+      if (!target) return;
+      const shield = bot.inventory.items().find(item => item.name === 'shield'); if (shield) await bot.equip(shield, 'off-hand').catch(() => {});
+      await this.#combatEquipment(target); const distance = distance3(bot.entity.position, target.position);
+      if (distance > 4) await this.navigate({ x: target.position.x, y: target.position.y, z: target.position.z, range: 3 }, { signal });
+      else { await bot.lookAt(target.position.offset(0, target.height ?? 1, 0), true); await bot.attack(target); if (target.name === 'creeper') await this.#combatRetreat(900); }
+      await delay(450);
+    }
+    throw new ValidationError('Cave mining aborted: hostile area could not be secured within 20 seconds');
   }
   async #withStorage(position, capability, operation) { const bot = this.#ready(capability); const { Vec3 } = await import('vec3'); const target = new Vec3(Number(position.x), Number(position.y), Number(position.z)); await this.smartMove({ x: target.x, y: target.y, z: target.z, range: 2 }); const block = bot.blockAt(target); if (!block || !isStorageBlock(block.name)) throw new NotFoundError('Storage block', `${target.x},${target.y},${target.z}`); const container = await bot.openContainer(block); try { return await operation(container, block); } finally { container.close(); } }
   async farm({ crop = 'wheat', count = 16, maxDistance = 32, movement } = {}, { signal } = {}) {
@@ -578,6 +596,11 @@ async function setOpenableState(adapter, input, open, kind) { const expected = i
 function isOpenableKind(name, kind) { return kind === 'door' ? name.endsWith('_door') && !name.endsWith('_trapdoor') : name.endsWith('_trapdoor'); }
 function configureDoorNavigation(movements, registry) { movements.canOpenDoors = true; if (!(movements.openable instanceof Set)) return; for (const block of registry?.blocksArray ?? Object.values(registry?.blocksByName ?? {})) if (block?.name && isOpenableKind(block.name, 'door') && block.name !== 'iron_door' && Number.isInteger(block.id)) movements.openable.add(block.id); }
 function safeMovementPolicy() { return { allow1by1towers: false, allowBridge: false, allowJump: true, allowParkour: false, allowSprinting: true, allowFreeMotion: false, maxDropDown: 3, placeCost: Number.POSITIVE_INFINITY, scaffoldItems: [], water: { allowSwimming: true, allowEnterWater: true, allowDeepWater: false, allowUnderwaterRoute: false, maxDepth: 6, maxUnderwaterDurationMs: 10_000 } }; }
+function miningProfile(bot, block, origin, groupAnchor, maximumGroupDistance) {
+  const adjacent = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].map(([x,y,z]) => bot.blockAt(block.position.offset(x,y,z))).filter(Boolean);
+  const exposed = adjacent.filter(isAir); const hazards = new Set(['lava','fire','soul_fire','magma_block','campfire','soul_campfire']); const anchorDistance = groupAnchor ? distance3(block.position, groupAnchor) : 0;
+  return { block, exposedFaces: exposed.length, hazard: adjacent.some(value => hazards.has(value.name)), skyLight: Math.max(Number(block.skyLight ?? 0), ...exposed.map(value => Number(value.skyLight ?? 0))), distance: distance3(origin, block.position), descent: Math.max(0, origin.y - block.position.y), groupDistance: anchorDistance, withinGroup: !groupAnchor || anchorDistance <= boundedDistance(maximumGroupDistance, 1, 64, 'Maximum group distance') };
+}
 function sourceBlockOrder(left, right) { const leftDeepslate = left.startsWith('deepslate_'); const rightDeepslate = right.startsWith('deepslate_'); return Number(leftDeepslate) - Number(rightDeepslate) || left.localeCompare(right); }
 function positiveAmount(value, minimum, maximum, label) { const amount = Number(value); if (!Number.isInteger(amount) || amount < minimum || amount > maximum) throw new ValidationError(`${label} must be an integer between ${minimum} and ${maximum}`); return amount; }
 function nonNegativeAmount(value, minimum, maximum, label) { return positiveAmount(value, minimum, maximum, label); }

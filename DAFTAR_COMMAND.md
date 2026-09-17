@@ -52,7 +52,7 @@ Mengaktifkan progres otomatis untuk satu squad. Command wajib memakai selector `
 !global early_game bot1
 ```
 
-Squad mengumpulkan kayu, batu, makanan, iron, dan fuel secara berurutan. Bot tidak melanjutkan pencarian ketika anggota lain berada lebih dari 15 blok dari pemimpin. Shelter, warehouse, dan workshop hanya dibangun dari blueprint bawaan setelah material, cadangan makanan, keamanan, ruang, kerataan, dan paparan langit lolos pemeriksaan.
+Squad mengumpulkan kayu, batu, makanan, iron, dan fuel secara berurutan. Bot tidak melanjutkan pencarian ketika anggota lain berada lebih dari 15 blok dari pemimpin. Sebelum mencari iron, squad menyelesaikan shelter serta menyiapkan 16 makanan, senjata, dan 16 obor. Ekspedisi iron memakai gua terbuka, membersihkan hostile, dan tidak memakai fallback strip-mine. Early game baru selesai setelah pemimpin memiliki iron chestplate, shield, dan iron pickaxe. Shelter, warehouse, dan workshop hanya dibangun dari blueprint bawaan setelah material, cadangan makanan, keamanan, ruang, kerataan, dan paparan langit lolos pemeriksaan.
 
 ### `help`
 
@@ -63,6 +63,8 @@ Menampilkan ringkasan command yang tersedia.
 !miner help
 !global help
 ```
+
+Selain command manual, task collect berjumlah minimal 8 otomatis dibantu anggota grup yang idle, berada pada server/dimension yang sama, berjarak maksimal 15 blok, dan memiliki skor reliabilitas yang cukup. Hasil helper tetap wajib diserahkan dan diverifikasi; item yang hilang atau diambil pihak lain menurunkan reliabilitas bot terkait.
 
 ### `status`
 

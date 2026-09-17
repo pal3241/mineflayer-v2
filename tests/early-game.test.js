@@ -34,7 +34,13 @@ test('automatic early game follows wood, stone, shelter, then iron progression',
   setInventory(context.inventory, { bread: 12, oak_log: 24 }); await context.service.tick(); assert.equal(context.acquired.at(-1).item, 'cobblestone');
   setInventory(context.inventory, { bread: 12, oak_log: 24, cobblestone: 64 }); const shelter = await context.service.tick(); assert.equal(shelter.lastAction.reason, 'MATERIALS_NOT_READY');
   const shelterProject = [...context.projects.values()].find(value => value.metadata.templateId === 'early-shelter-v1'); shelterProject.status = 'COMPLETED';
-  await context.service.tick(); assert.equal(context.acquired.at(-1).item, 'iron_ingot');
+  await context.service.tick(); assert.equal(context.acquired.at(-1).item, 'bread'); assert.equal(context.acquired.at(-1).purpose, 'automatic early game iron_expedition_food');
+  setInventory(context.inventory, { bread: 16, oak_log: 24, cobblestone: 64 }); await context.service.tick(); assert.equal(context.acquired.at(-1).item, 'stone_sword');
+  setInventory(context.inventory, { bread: 16, oak_log: 24, cobblestone: 64, stone_sword: 1 }); await context.service.tick(); assert.equal(context.acquired.at(-1).item, 'torch');
+  setInventory(context.inventory, { bread: 16, oak_log: 24, cobblestone: 64, stone_sword: 1, torch: 16 }); await context.service.tick(); const iron = context.acquired.at(-1); assert.equal(iron.item, 'iron_ingot'); assert.equal(iron.strategy, 'CAVE_FIRST'); assert.equal(iron.combatEscort, true); assert.equal(iron.avoidStripMining, true);
+  setInventory(context.inventory, { bread: 16, oak_log: 24, cobblestone: 64, stone_sword: 1, torch: 16, iron_ingot: 12 }); await context.service.tick(); assert.equal(context.acquired.at(-1).item, 'iron_chestplate');
+  setInventory(context.inventory, { bread: 16, oak_log: 24, cobblestone: 64, stone_sword: 1, torch: 16, iron_ingot: 4, iron_chestplate: 1 }); await context.service.tick(); assert.equal(context.acquired.at(-1).item, 'shield');
+  setInventory(context.inventory, { bread: 16, oak_log: 24, cobblestone: 64, stone_sword: 1, torch: 16, iron_ingot: 3, iron_chestplate: 1, shield: 1 }); await context.service.tick(); assert.equal(context.acquired.at(-1).item, 'iron_pickaxe');
 });
 
 test('squad stops resource work and regroups beyond the 15 block leash', async () => {

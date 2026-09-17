@@ -172,13 +172,13 @@ test('smelting acquires input and fuel before executing the smelt task', async (
   const bot = { id: 'bot-a', status: 'READY', options: { host: 'localhost', port: 25565 }, adapter: {
     snapshot: () => ({ inventorySummary: items, dimension: 'overworld' }),
     findSourceBlocks: async ({ item }) => item === 'raw_iron' ? ['iron_ore'] : item === 'coal' ? ['coal_ore'] : [],
-    collect: async ({ block, count }) => { collected.push({ block, count }); items.push({ name: block === 'iron_ore' ? 'raw_iron' : 'coal', count }); },
+    collect: async input => { const { block, count, ...policy } = input; collected.push({ block, count, policy }); items.push({ name: block === 'iron_ore' ? 'raw_iron' : 'coal', count }); },
     smeltRequirements: async ({ item }) => item === 'iron_ingot' ? ({ item, input: { name: 'raw_iron', count: 1 }, fuel: { name: 'coal', count: 1 }, furnace: true }) : null,
     smeltItem: async ({ item, count }) => { smelted = true; items.push({ name: item, count }); return { item, count }; }
   } };
   const service = createAcquisitionService({ bots: { list: () => [bot], get: () => bot }, logistics: { stock: async () => [] }, events: { publish: async () => {} } });
-  const result = await service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'iron_ingot', count: 1 });
-  assert.equal(result.status, 'COMPLETED'); assert.equal(smelted, true); assert.deepEqual(collected, [{ block: 'iron_ore', count: 1 }, { block: 'coal_ore', count: 1 }]);
+  const result = await service.acquire({ requesterBotId: 'bot-a', type: 'ITEM', item: 'iron_ingot', count: 1, strategy: 'CAVE_FIRST', combatEscort: true, avoidStripMining: true, groupAnchor: { x: 1, y: 64, z: 2 }, maximumGroupDistance: 15 });
+  assert.equal(result.status, 'COMPLETED'); assert.equal(smelted, true); assert.equal(collected[0].block, 'iron_ore'); assert.equal(collected[0].policy.strategy, 'CAVE_FIRST'); assert.equal(collected[0].policy.combatEscort, true); assert.equal(collected[0].policy.avoidStripMining, true); assert.deepEqual(collected[0].policy.groupAnchor, { x: 1, y: 64, z: 2 }); assert.equal(collected[0].policy.maximumGroupDistance, 15); assert.equal(collected[1].block, 'coal_ore'); assert.equal(collected[1].policy.strategy, undefined);
 });
 
 test('craft-ready protects the complete quantity-aware ingredient contract', async () => {
