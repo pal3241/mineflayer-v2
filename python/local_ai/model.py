@@ -15,7 +15,9 @@ class ModelConfig:
     embedding_dim: int = 192
     hidden_size: int = 896
     layers: int = 2
-    sequence_length: int = 256
+    # This only controls how far the recurrent model is unrolled. It does not
+    # change the 8M neural-network parameter count.
+    sequence_length: int = 64
 
 class MineHiveLocalAI(nn.Module):
     def __init__(self, config: ModelConfig):
@@ -29,17 +31,22 @@ class MineHiveLocalAI(nn.Module):
     def parameter_count(self): return sum(parameter.numel() for parameter in self.parameters())
 
 class LanguageDataset(Dataset):
-    def __init__(self,texts:list[str],sequence_length:int,progress=None):
+    def __init__(self,texts:list[str],sequence_length:int,max_sequences:int=512,progress=None):
         stream=[]
         total_texts=max(1,len(texts))
         for index,text in enumerate(texts):
             encoded=list(str(text).encode('utf-8',errors='replace'))
             if encoded: stream.extend([BOS,*encoded,EOS])
             if progress and (index==0 or index+1==len(texts) or (index+1)%max(1,total_texts//100)==0):progress({'phase':'preparing','percent':round((index+1)*100/total_texts,1),'texts':index+1,'totalTexts':len(texts)})
-        self.rows=[]; stride=max(32,sequence_length//2)
+        self.rows=[]; stride=max(16,sequence_length)
         for start in range(0,max(1,len(stream)-1),stride):
             chunk=stream[start:start+sequence_length+1]
             if len(chunk)>=8:self.rows.append(chunk)
+        # A full dictionary replay can take hours on a phone. Keep an evenly
+        # distributed sample by default; 0 requests an unbounded full pass.
+        if max_sequences > 0 and len(self.rows) > max_sequences:
+            step=len(self.rows)/max_sequences
+            self.rows=[self.rows[min(len(self.rows)-1,int(index*step))] for index in range(max_sequences)]
     def __len__(self):return len(self.rows)
     def __getitem__(self,index):return self.rows[index]
 
@@ -49,11 +56,14 @@ def collate(rows):
         values=torch.tensor(row,dtype=torch.long); inputs[index,:len(row)-1]=values[:-1]; targets[index,:len(row)-1]=values[1:]
     return inputs,targets
 
-def train_model(texts:list[str],checkpoint:str|Path,epochs:int=12,batch_size:int=8,seed:int=1337,progress=None):
-    torch.manual_seed(seed); torch.set_num_threads(max(1,min(8,torch.get_num_threads()))); config=ModelConfig(); progress and progress({'phase':'preparing','percent':0,'texts':0,'totalTexts':len(texts)}); dataset=LanguageDataset(texts,config.sequence_length,progress)
+def train_model(texts:list[str],checkpoint:str|Path,epochs:int=12,batch_size:int=8,sequence_length:int=64,max_sequences:int=512,seed:int=1337,progress=None):
+    if not 16 <= int(sequence_length) <= 256: raise ValueError('sequence_length must be from 16 to 256')
+    if not 0 <= int(max_sequences) <= 100000: raise ValueError('max_sequences must be from 0 to 100000')
+    torch.manual_seed(seed); torch.set_num_threads(max(1,min(8,torch.get_num_threads()))); config=ModelConfig(sequence_length=int(sequence_length)); progress and progress({'phase':'preparing','percent':0,'texts':0,'totalTexts':len(texts)}); dataset=LanguageDataset(texts,config.sequence_length,int(max_sequences),progress)
     if not dataset:raise ValueError('Local AI training requires non-empty text')
     loader=DataLoader(dataset,batch_size=min(batch_size,len(dataset)),shuffle=True,collate_fn=collate,generator=torch.Generator().manual_seed(seed)); model=MineHiveLocalAI(config); optimizer=torch.optim.AdamW(model.parameters(),lr=0.0015,weight_decay=0.01); criterion=nn.CrossEntropyLoss(ignore_index=-100); model.train(); last_loss=0.0
     total_epochs=max(1,min(int(epochs),500))
+    progress and progress({'phase':'training','epoch':1,'epochs':total_epochs,'batch':0,'batches':len(loader),'percent':0,'loss':None,'sequences':len(dataset)})
     reported=-1
     for epoch in range(total_epochs):
         total=0.0;batches=0
