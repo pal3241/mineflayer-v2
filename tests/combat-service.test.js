@@ -45,21 +45,23 @@ test('combat doctrine extracts PvP techniques from owner text without overriding
 
 
 test('damage to a bound bot starts automatic guard combat once', async () => {
-  const handlers = new Map(); const calls = [];
+  const handlers = new Map(); const calls = []; const detected = [];
   const adapter = {
     combatState: { status: 'IDLE' },
-    snapshot: () => ({ entityId: 42, position: { x: 3, y: 64, z: 5 }, health: 18 }),
+    snapshot: () => ({ entityId: 42, position: { x: 3, y: 64, z: 5 }, health: 18, dimension: 'overworld', inventorySummary: [{ name: 'iron_sword', count: 1 }] }),
+    survivalStatus: () => ({ hostileCount: 2, isNight: true }),
     on: (name, callback) => handlers.set(name, callback),
     off: () => {},
     startCombat: async input => { calls.push(input); adapter.combatState.status = 'ACTIVE'; }
   };
-  const combat = createCombatService({ repositories: { profiles: new MemoryRepository(), events: new MemoryRepository(), policies: new MemoryRepository() }, events: new EventBus(), bots: bots([{ id: 'guard', status: 'READY', runtime: { position: { x: 3, y: 64, z: 5 } } }]) });
+  const combat = createCombatService({ repositories: { profiles: new MemoryRepository(), events: new MemoryRepository(), policies: new MemoryRepository() }, events: new EventBus(), bots: bots([{ id: 'guard', status: 'READY', runtime: { position: { x: 3, y: 64, z: 5 } } }]), threats: { detect: async input => { detected.push(input); return { response: 'DEFEND' }; } } });
   await combat.setRole('guard', 'TANK');
   await combat.bind({ bot: { id: 'guard' }, adapter });
   handlers.get('entityHurt')({ id: 42 });
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0], { mode: 'guard', position: { x: 3, y: 64, z: 5 }, radius: 16, role: 'TANK' });
+  assert.equal(detected.length, 1); assert.equal(detected[0].sourceBotId, 'guard'); assert.equal(detected[0].enemyCount, 2);
 });
 
 test('shared neural combat policy learns from reward without overriding before sufficient samples', () => {

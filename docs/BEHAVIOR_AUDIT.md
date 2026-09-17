@@ -15,6 +15,7 @@ actually reachable during a bot operation.
 | Hash text vectors | Active but intentionally non-semantic | `local-command-brain.js` uses the vector for intent classification. Semantic memory uses keyword/BM25 retrieval instead. | Keep the name/metadata explicit; never market this vector as a semantic embedding. |
 | Environment safety model | Fixed | Observations and learned areas were persisted, but no execution path consulted `areaAt()`. | Navigation now rejects destinations classified `DANGEROUS` before pathfinder starts. |
 | Litematica sync cache/threading | Fixed | Sync refreshed only preview data, so the cached project could retain a null target; completion callbacks also mutated GUI state off-thread. | Sync now refreshes client state strictly and GUI updates run on the Minecraft client thread. Disabled sub-regions fail explicitly. |
+| Runtime threat detection | Fixed | `ThreatService.detect()` was reachable only from the HTTP API; real combat damage never entered the threat/environment-learning pipeline. | A rate-limited hurt observation now records equipment, nearby hostiles, health, world and position, feeding the environment model automatically. |
 
 ## Verification
 

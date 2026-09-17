@@ -24,7 +24,7 @@ const MOB_PROFILES = Object.freeze({
   default: { substate: 'SAFE_ORBIT', desiredDistance: 4 }
 });
 
-export function createCombatService({ repositories, events, bots, ml, logger } = {}) {
+export function createCombatService({ repositories, events, bots, ml, threats = null, logger } = {}) {
   if (!repositories?.profiles || !repositories?.events || !repositories?.policies) throw new ValidationError('Combat repositories are required');
   const doctrineRepository = repositories.doctrines ?? repositories.policies;
   const profileCache = new Map(); const squadTargets = new Map(); const bindings = new Map(); const runtimes = new Map(); const neural = createCombatNeuralPolicy(); let queue = Promise.resolve();
@@ -121,13 +121,17 @@ export function createCombatService({ repositories, events, bots, ml, logger } =
   }
   async function bind(runtime) {
     const botId = runtime.bot.id; if (bindings.has(botId)) return;
-    await profile(botId); runtimes.set(botId, runtime); let lastAutoDefenseAt = 0;
+    await profile(botId); runtimes.set(botId, runtime); let lastAutoDefenseAt = 0; let lastThreatAt = 0;
     const onHurt = entity => {
       const snapshot = runtime.adapter.snapshot(); if (String(entity?.id) !== String(snapshot.entityId)) return;
       const now = Date.now(); const combatAlreadyActive = runtime.adapter.combatState?.status === 'ACTIVE';
       void transition(botId, (profileCache.get(botId)?.mainState ?? 'IDLE'), 'COMBAT', 'UNDER_ATTACK', { entityId: entity.id });
       void requestDefense({ botId, position: snapshot.position, attacker: null }).catch(error => logger?.warn?.('combat.defense.failed', { botId, error: error.message }));
       void record({ botId, type: 'DAMAGE_TAKEN', state: { health: snapshot.health }, action: 'UNDER_ATTACK' });
+      if (threats?.detect && snapshot.position && now - lastThreatAt >= 5_000) {
+        lastThreatAt = now;
+        void observeRuntimeThreat({ threats, runtime, bots, snapshot }).catch(error => logger?.warn?.('combat.threat-record.failed', { botId, error: error.message }));
+      }
       // A Mineflayer entityHurt event has no attacker reference. Guarding the bot's
       // current position makes it acquire the nearest hostile that can hit it.
       if (!combatAlreadyActive && now - lastAutoDefenseAt >= 2_000 && typeof runtime.adapter.startCombat === 'function') {
@@ -158,6 +162,8 @@ export function createCombatService({ repositories, events, bots, ml, logger } =
   async function promotePolicy(policy) { if (!policy?.version) throw new ValidationError('Policy version is required'); const row = { id: String(policy.version), version: String(policy.version), status: 'PRODUCTION', metrics: compact(policy.metrics ?? {}), promotedAt: new Date().toISOString(), source: String(policy.source ?? 'python') }; const existing = (await repositories.policies.list()).find(x => x.id === row.id); const saved = existing ? await repositories.policies.update(existing.id, row) : await repositories.policies.create(row); await emit('combat.policy.promoted', saved); return saved; }
   return Object.freeze({ profile, setRole, transition, record, decide, engage, stopEngagement, protect, assignFocus, requestDefense, bind, status, trainingBatch, promotePolicy, ingestDoctrine, doctrines });
 }
+async function observeRuntimeThreat({ threats, runtime, bots, snapshot }) { const survival=runtime.adapter.survivalStatus?.()??{};const inventory=snapshot.inventorySummary??survival.inventory??[];const names=inventory.map(item=>String(item.name??item));const home=snapshot.home;const position=snapshot.position;return threats.detect({entityType:'unknown_hostile',distance:4,botHealth:Number(snapshot.health??survival.health??20),armor:Math.min(1,names.filter(name=>/_(helmet|chestplate|leggings|boots)$/.test(name)).length/4),weapon:names.some(name=>/(sword|axe|bow|crossbow|trident)$/.test(name))?1:0,enemyCount:Math.max(1,Number(survival.hostileCount??1)),time:survival.isNight?'NIGHT':'DAY',nearbyFriendlyBots:Math.max(0,bots.list().filter(bot=>bot.id!==runtime.bot.id&&['READY','ACTIVE'].includes(bot.status)).length),distanceFromBase:home?distance(position,home):65,escapeRoute:Number(snapshot.health??20)>6,missionImportance:.5,worldKey:`${runtime.options?.host??'unknown'}:${runtime.options?.port??25565}`,dimension:String(snapshot.dimension??survival.dimension??'overworld').replace(/^minecraft:/,''),position,sourceBotId:runtime.bot.id}); }
+function distance(left,right){return Math.hypot(Number(left.x)-Number(right.x),Number(left.y)-Number(right.y),Number(left.z)-Number(right.z));}
 function defaultProfile(botId) { return normalizeProfile({ id: 'combat:' + botId, botId, combatRole: 'UNASSIGNED', assignedRole: 'UNASSIGNED', combatPoints: 0, combatRank: 'Recruit', mainState: 'IDLE', sideState: null, combatSubstate: null, stateHistory: [], allowedActions: ROLE_ACTIONS.UNASSIGNED, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }); }
 function normalizeProfile(value) { const points = Math.max(0, Number(value.combatPoints ?? 0)); const role = normalizeRole(value.combatRole ?? 'UNASSIGNED'); return { ...value, combatRole: role, assignedRole: normalizeRole(value.assignedRole ?? role), combatPoints: points, combatRank: rankFor(points), mainState: validState(value.mainState ?? 'IDLE'), sideState: value.sideState ? validState(value.sideState) : null, combatSubstate: value.combatSubstate ? validState(value.combatSubstate) : null, allowedActions: ROLE_ACTIONS[role] }; }
 function normalizeRole(value) { const role = String(value ?? '').toUpperCase(); if (!COMBAT_ROLES.includes(role)) throw new ValidationError('Combat role must be one of: ' + COMBAT_ROLES.join(', ')); return role; }
