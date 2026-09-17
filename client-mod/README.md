@@ -7,7 +7,7 @@ Fabric client mod for Minecraft Java 1.21.1. It connects directly to MineHive's 
 - **V**: look at a registered MineHive bot and switch to its camera/body. While inside that bot, look at another bot and press **V** again.
 - **X**: release the current bot and return to the player body.
 - **R**: RTS top-down fleet map. Select multiple bots, choose a destination, then issue a safe group movement order.
-- **B**: blueprint viewer using Building `preview3d`, with all-layer and per-layer views.
+- **N**: thin Litematica build-control panel (sync, approve, build). Litematica remains the in-world 3D ghost renderer.
 - **H**: configure the MineHive URL/API token and see connection state.
 
 Movement, view, jump, sprint, sneak, attack, and use inputs are forwarded to the leased bot. A short server lease automatically clears input when the client disappears.
@@ -26,4 +26,4 @@ Install `client-mod/build/libs/minehive-client-1.3.1.jar` with Fabric Loader and
 Use `http://127.0.0.1:3000` only when Minecraft and MineHive run on the same device. Otherwise set the MineHive device LAN address, for example `http://192.168.1.6:3000`. Copy `MINEHIVE_API_TOKEN` if API authentication is enabled.
 # Litematica placement sync
 
-Install Litematica normally (it remains optional). Import the same `.litematic` once into MineHive, select its placement in Litematica, then open the MineHive blueprint screen with `B` and press **Sync Litematica**. The placement origin is sent to MineHive; after approving the blueprint, press **Build**. MineHive verifies target blocks and never replaces an occupied block unless the project policy explicitly permits it.
+Install Litematica normally (it remains optional). Import the same `.litematic` once into MineHive using its original file name, select its placement in Litematica, then press **N** and choose **Sync selected placement**. MineHive rejects missing or ambiguous matches, copies origin/rotation/mirror, then lets you **Approve** and **Build**. Re-syncing before build is safe because transforms are recalculated from the original imported blueprint. The MineHive panel intentionally does not replace the Litematica ghost.

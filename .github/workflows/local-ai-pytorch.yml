@@ -13,12 +13,17 @@ on:
       - '.github/workflows/local-ai-pytorch.yml'
   workflow_dispatch:
 
+concurrency:
+  group: local-ai-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   smoke-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -23,7 +23,7 @@ public final class MineHiveClient implements ClientModInitializer {
     @Override public void onInitializeClient() {
         INSTANCE = this; config = MineHiveConfig.load(); api = new MineHiveApi(config);
         controlKey = key("key.minehive.control", GLFW.GLFW_KEY_H); switchKey = key("key.minehive.switch", GLFW.GLFW_KEY_V);
-        releaseKey = key("key.minehive.release", GLFW.GLFW_KEY_X); rtsKey = key("key.minehive.rts", GLFW.GLFW_KEY_R); blueprintKey = key("key.minehive.blueprint", GLFW.GLFW_KEY_B);
+        releaseKey = key("key.minehive.release", GLFW.GLFW_KEY_X); rtsKey = key("key.minehive.rts", GLFW.GLFW_KEY_R); blueprintKey = key("key.minehive.blueprint", GLFW.GLFW_KEY_N);
         ClientTickEvents.END_CLIENT_TICK.register(this::tick); HudRenderCallback.EVENT.register((draw, tickCounter) -> renderHud(draw));
     }
     private KeyBinding key(String id, int code) { return KeyBindingHelper.registerKeyBinding(new KeyBinding(id, InputUtil.Type.KEYSYM, code, "category.minehive")); }
@@ -78,7 +78,8 @@ public final class MineHiveClient implements ClientModInitializer {
     private void renderHud(net.minecraft.client.gui.DrawContext draw) {
         MinecraftClient client = MinecraftClient.getInstance(); if (!config.showHud || client.player == null) return;
         int color = api.status().startsWith("Error") ? 0xFFFF6666 : api.connected() ? 0xFF75E6A4 : 0xFFFFC857;
-        draw.fill(6, 6, 520, controlledBotId == null ? 31 : 43, 0xB0101815); draw.drawTextWithShadow(client.textRenderer, Text.literal("MineHive 1.3.1 · " + api.status()), 12, 11, color);
+        boolean litematica = LitematicaPlacementBridge.selected().state() != LitematicaPlacementBridge.State.NOT_LOADED;
+        draw.fill(6, 6, 520, controlledBotId == null ? 31 : 43, 0xB0101815); draw.drawTextWithShadow(client.textRenderer, Text.literal("MineHive 1.3.1 · " + api.status() + (litematica ? " · Litematica detected" : " · Litematica not loaded")), 12, 11, color);
         if (controlledBotId != null) draw.drawTextWithShadow(client.textRenderer, Text.literal("BODY: " + controlledUsername + "  [V switch · X release]"), 12, 25, 0xFFFFFFFF);
     }
     private JsonObject botByUsername(String username) { JsonObject state = api.state(); if (!state.has("bots")) return null; for (JsonElement element : state.getAsJsonArray("bots")) { JsonObject bot = element.getAsJsonObject(); if (bot.has("username") && username.equalsIgnoreCase(bot.get("username").getAsString())) return bot; } return null; }

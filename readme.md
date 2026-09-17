@@ -1,4 +1,4 @@
-# MineHive
+# MineHive 1.3.1
 
 MineHive adalah framework Mineflayer modular dan event-driven untuk menjalankan serta mengoordinasikan banyak bot Minecraft. Sistem ini menggabungkan runtime multi-bot, dashboard berbasis web, viewer first-person dan 3D berbasis canvas, task queue, shared memory per server, HiveMind, semantic memory, pembelajaran dari outcome, logistik transaksional, dan koordinasi bahasa natural melalui OpenRouter atau NVIDIA NIM.
 
@@ -16,7 +16,12 @@ MineHive dirancang agar keputusan AI tetap berada di belakang validasi determini
 - Penyimpanan produksi SQLite, structured logging, backup, dan health monitoring
 - Goal planner, dependency graph, task queue, retry, timeout, cancellation, dan checkpoint
 - Logistik transaksional dengan storage registry, reservation, verified transfer, dan audit lifecycle
-- Fabric client 1.0.0 untuk switch-by-look antar tubuh bot, kontrol langsung, RTS fleet map, HUD, dan preview blueprint
+- Fabric client untuk switch-by-look antar tubuh bot, kontrol langsung, RTS fleet map, HUD, preview blueprint, dan sinkronisasi placement Litematica (origin, rotasi, mirror)
+- Local Command Center PyTorch 8M parameter sebagai fallback ketika LLM cloud tidak tersedia
+
+## Status rilis
+
+Versi production saat ini adalah **1.3.1**. Fitur pada roadmap di bawah adalah histori pengembangan; status detail setiap rilis ada di [`updates/`](updates/README.md). Fitur yang memerlukan PyTorch, Rust native ML, canvas, atau prismarine viewer bersifat opsional dan tidak dibutuhkan untuk menjalankan core bot.
 
 Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUAN_PENGGUNAAN.md`](PANDUAN_PENGGUNAAN.md).
 
@@ -40,5 +45,6 @@ Panduan instalasi, konfigurasi, command, dashboard, dan API tersedia di [`PANDUA
 - v0.9.2 — Universal Task Memory — Implemented
 - v0.9.3 — Mass Logistics & Workshops — Implemented
 - [v1.0.0 — Fabric Hivemind Client](client-mod/README.md) — Implemented
+- v1.1.0–v1.3.1 — Client control, building placement, workshop memory, local AI, dan native ML — Implemented
 
 Persyaratan roadmap lengkap berada di [`instruksi/roadmap.txt`](instruksi/roadmap.txt). Roadmap hanya menampilkan phase yang belum selesai; histori phase yang selesai tersimpan permanen di folder [`updates/`](updates/README.md).

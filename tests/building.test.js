@@ -21,6 +21,17 @@ test('building moves a preview placement and recalculates world protection bound
   assert.equal(moved.deltas.at(-1).type, 'PLACEMENT_MOVED');
 });
 
+test('Litematica placement transforms are idempotent and retain the original blueprint', async () => {
+  const building = service(); await building.initialize();
+  const project = await building.import({ blueprint: { name: 'asymmetric', origin: { x: 0, y: 0, z: 0 }, blocks: [{ x: 1, y: 0, z: 0, name: 'oak_stairs', properties: { facing: 'east' } }] } });
+  const rotated = await building.transform(project.id, { rotation: 90, mirrorX: false, mirrorZ: false });
+  assert.deepEqual(rotated.blocks[0], { key: '0,0,1', x: 0, y: 0, z: 1, name: 'oak_stairs', properties: { facing: 'south' }, blockEntity: null, dependencies: [] });
+  const reset = await building.transform(project.id, { rotation: 0, mirrorX: false, mirrorZ: false });
+  assert.equal(reset.blocks[0].x, 1); assert.equal(reset.blocks[0].z, 0); assert.equal(reset.blocks[0].properties.facing, 'east');
+  const mirroredThenRotated = await building.transform(project.id, { rotation: 90, mirrorX: true, mirrorZ: false });
+  assert.equal(mirroredThenRotated.blocks[0].properties.facing, 'north');
+});
+
 test('building requires approval then completes verified cooperative placement', async () => {
   const building = service(); await building.initialize(); const project = await building.import({ blueprint, target: { x: 10, y: 64, z: 10 } }); await building.approve(project.id, { actor: 'owner' }); await building.build(project.id);
   await new Promise(resolve => setTimeout(resolve, 80)); const result = await building.get(project.id); assert.equal(result.status, 'COMPLETED'); assert.equal(result.progress.completed, 2); assert.equal(result.placements['0,1,0'].ownerBotId, 'builder');

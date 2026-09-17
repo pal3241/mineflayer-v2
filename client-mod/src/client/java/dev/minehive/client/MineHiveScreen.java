@@ -23,7 +23,7 @@ public final class MineHiveScreen extends Screen {
         renderBackground(draw, mouseX, mouseY, delta); super.render(draw, mouseX, mouseY, delta); draw.drawCenteredTextWithShadow(textRenderer, title, width / 2, 20, 0xFF75E6A4);
         draw.drawTextWithShadow(textRenderer, Text.literal("MineHive URL (use LAN IP, not localhost, from another device)"), width / 2 - 150, 45, 0xFFB7C9BE); draw.drawTextWithShadow(textRenderer, Text.literal("API token"), width / 2 - 150, 79, 0xFFB7C9BE);
         draw.drawCenteredTextWithShadow(textRenderer, Text.literal(MineHiveClient.INSTANCE.api().status()), width / 2, 193, 0xFFFFFFFF); JsonObject state = MineHiveClient.INSTANCE.api().state(); int bots = state.has("bots") ? state.getAsJsonArray("bots").size() : 0, plans = state.has("blueprints") ? state.getAsJsonArray("blueprints").size() : 0;
-        draw.drawCenteredTextWithShadow(textRenderer, Text.literal("Fleet: " + bots + " bots · Blueprints: " + plans), width / 2, 211, 0xFF94A89C); draw.drawCenteredTextWithShadow(textRenderer, Text.literal("H menu · V switch · X release · R RTS · B blueprint"), width / 2, height - 28, 0xFF94A89C);
+        draw.drawCenteredTextWithShadow(textRenderer, Text.literal("Fleet: " + bots + " bots · Blueprints: " + plans), width / 2, 211, 0xFF94A89C); draw.drawCenteredTextWithShadow(textRenderer, Text.literal("H menu · V switch · X release · R RTS · N Litematica build"), width / 2, height - 28, 0xFF94A89C);
     }
     @Override public void close() { client.setScreen(parent); }
 }

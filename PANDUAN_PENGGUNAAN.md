@@ -1,6 +1,6 @@
-# Panduan Penggunaan MineHive
+# Panduan Penggunaan MineHive 1.3.1
 
-Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive v0.7.3 Phase 1. MineHive membutuhkan Node.js 22 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses.
+Panduan ini menjelaskan cara menjalankan dan mengontrol MineHive 1.3.1. MineHive membutuhkan Node.js 22 atau lebih baru dan sebuah server Minecraft Java Edition yang dapat diakses. Catatan rilis dan status fitur terbaru ada di [`updates/`](updates/README.md).
 
 ## 1. Persiapan
 
@@ -21,7 +21,7 @@ npm --version
 Pasang dependency proyek:
 
 ```powershell
-Set-Location D:\mineflayer
+Set-Location D:\minehive
 npm install
 npm test
 ```

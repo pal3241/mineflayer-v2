@@ -7,36 +7,43 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.text.Text;
 import java.util.*;
 
+/** Thin command panel; Litematica remains the in-world 3D ghost renderer. */
 public final class BlueprintScreen extends Screen {
-    private final Screen parent; private int blueprintIndex, layer = -1; private String loading = "Choose a blueprint";
-    public BlueprintScreen(Screen parent) { super(Text.literal("MineHive Blueprint Preview")); this.parent = parent; }
+    private final Screen parent; private String message = "Select a Litematica placement, then Sync";
+    public BlueprintScreen(Screen parent) { super(Text.literal("MineHive · Litematica build control")); this.parent = parent; }
     @Override protected void init() {
-        addDrawableChild(ButtonWidget.builder(Text.literal("< Blueprint"), b -> select(-1)).dimensions(20, height - 30, 90, 20).build()); addDrawableChild(ButtonWidget.builder(Text.literal("Blueprint >"), b -> select(1)).dimensions(116, height - 30, 90, 20).build());
-        addDrawableChild(ButtonWidget.builder(Text.literal("Sync Litematica"), b -> syncLitematica()).dimensions(212, height - 30, 118, 20).build()); addDrawableChild(ButtonWidget.builder(Text.literal("Build"), b -> build()).dimensions(336, height - 30, 62, 20).build());
-        addDrawableChild(ButtonWidget.builder(Text.literal("Layer -"), b -> layer--).dimensions(width - 302, height - 30, 70, 20).build()); addDrawableChild(ButtonWidget.builder(Text.literal("All"), b -> layer = -1).dimensions(width - 226, height - 30, 55, 20).build());
-        addDrawableChild(ButtonWidget.builder(Text.literal("Layer +"), b -> layer++).dimensions(width - 165, height - 30, 70, 20).build()); addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close()).dimensions(width - 89, height - 30, 70, 20).build()); loadCurrent();
+        int left = width / 2 - 155;
+        addDrawableChild(ButtonWidget.builder(Text.literal("Sync selected placement"), b -> sync()).dimensions(left, height / 2 - 12, 150, 20).build());
+        addDrawableChild(ButtonWidget.builder(Text.literal("Approve"), b -> approve()).dimensions(left + 160, height / 2 - 12, 70, 20).build());
+        addDrawableChild(ButtonWidget.builder(Text.literal("Build"), b -> build()).dimensions(left + 240, height / 2 - 12, 70, 20).build());
+        addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close()).dimensions(width / 2 - 45, height / 2 + 18, 90, 20).build());
     }
-    private void select(int delta) { JsonArray plans = blueprints(); if (plans.isEmpty()) return; blueprintIndex = Math.floorMod(blueprintIndex + delta, plans.size()); layer = -1; loadCurrent(); }
-    private void loadCurrent() { JsonArray plans = blueprints(); if (plans.isEmpty()) { loading = "No imported blueprint"; return; } blueprintIndex = Math.min(blueprintIndex, plans.size() - 1); JsonObject plan = plans.get(blueprintIndex).getAsJsonObject(); loading = "Loading " + plan.get("name").getAsString(); MineHiveClient.INSTANCE.api().loadPreview(plan.get("id").getAsString()).whenComplete((data, error) -> loading = error == null ? "" : MineHiveClient.rootMessage(error)); }
-    private JsonObject current() { JsonArray plans = blueprints(); return plans.isEmpty() ? null : plans.get(Math.min(blueprintIndex, plans.size() - 1)).getAsJsonObject(); }
-    private void syncLitematica() { JsonObject plan = current(); LitematicaPlacementBridge.Placement placement = LitematicaPlacementBridge.selected(); if (plan == null) { loading = "Import the same .litematic into MineHive first"; return; } if (placement == null) { loading = "No selected Litematica placement (or Litematica missing)"; return; } loading = "Syncing " + placement.name() + " at " + placement.origin().toShortString(); MineHiveClient.INSTANCE.api().placeBlueprint(plan.get("id").getAsString(), placement.origin().getX(), placement.origin().getY(), placement.origin().getZ()).whenComplete((data,error) -> loading = error == null ? "Placement synced · approve then Build" : MineHiveClient.rootMessage(error)); }
-    private void build() { JsonObject plan = current(); if (plan == null) return; loading = "Starting protected build…"; MineHiveClient.INSTANCE.api().buildBlueprint(plan.get("id").getAsString()).whenComplete((data,error) -> loading = error == null ? "Bots are building from the Litematica placement" : MineHiveClient.rootMessage(error)); }
-    // Never invoke the vanilla blur pass: blueprints are an in-world overlay, not a pause menu.
+    private void sync() {
+        LitematicaPlacementBridge.Snapshot snapshot = LitematicaPlacementBridge.selected();
+        if (!snapshot.ready()) { message = snapshot.detail(); return; }
+        JsonObject project = match(snapshot.placement()); if (project == null) return;
+        message = "Syncing " + snapshot.placement().name() + " · " + pose(snapshot.placement());
+        MineHiveClient.INSTANCE.api().syncLitematicaPlacement(project.get("id").getAsString(), snapshot.placement()).whenComplete((data, error) -> message = error == null ? "Pose synced. Approve then Build." : MineHiveClient.rootMessage(error));
+    }
+    private void approve() { JsonObject project = matchedSelected(); if (project == null) return; MineHiveClient.INSTANCE.api().approveBlueprint(project.get("id").getAsString()).whenComplete((data, error) -> message = error == null ? "Blueprint approved. You can Build now." : MineHiveClient.rootMessage(error)); }
+    private void build() { JsonObject project = matchedSelected(); if (project == null) return; if (!project.has("target") || project.get("target").isJsonNull()) { message = "Sync a Litematica placement before Build"; return; } MineHiveClient.INSTANCE.api().buildBlueprint(project.get("id").getAsString(), project).whenComplete((data, error) -> message = error == null ? "Protected build started" : MineHiveClient.rootMessage(error)); }
+    private JsonObject matchedSelected() { LitematicaPlacementBridge.Snapshot snapshot = LitematicaPlacementBridge.selected(); if (!snapshot.ready()) { message = snapshot.detail(); return null; } return match(snapshot.placement()); }
+    private JsonObject match(LitematicaPlacementBridge.Placement placement) {
+        List<JsonObject> candidates = new ArrayList<>(); String file = normalize(placement.schematicFile()), name = normalize(placement.name());
+        for (JsonElement element : blueprints()) { JsonObject plan = element.getAsJsonObject(); String source = normalize(plan.has("sourceFile") && !plan.get("sourceFile").isJsonNull() ? plan.get("sourceFile").getAsString() : ""); String planName = normalize(plan.get("name").getAsString()); if ((!file.isEmpty() && file.equals(source)) || (!name.isEmpty() && name.equals(planName))) candidates.add(plan); }
+        if (candidates.size() == 1) return candidates.getFirst();
+        message = candidates.isEmpty() ? "No MineHive blueprint matches Litematica file/name. Import the same .litematic." : "Multiple MineHive blueprints match; rename the file or blueprint to make it unique.";
+        return null;
+    }
+    private JsonArray blueprints() { JsonObject state = MineHiveClient.INSTANCE.api().state(); return state.has("blueprints") ? state.getAsJsonArray("blueprints") : new JsonArray(); }
+    private static String normalize(String value) { String text = value == null ? "" : value.trim().toLowerCase(Locale.ROOT); int slash = Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\')); return slash >= 0 ? text.substring(slash + 1) : text; }
+    private static String pose(LitematicaPlacementBridge.Placement p) { return p.origin().toShortString() + " · " + p.rotation() + "°" + (p.mirrorX() ? " · mirror X" : "") + (p.mirrorZ() ? " · mirror Z" : ""); }
     @Override public void blur() {}
     @Override public void renderBackground(DrawContext draw, int mouseX, int mouseY, float delta) {}
-
     @Override public void render(DrawContext draw, int mouseX, int mouseY, float delta) {
-        draw.fill(0, 0, width, height, 0x22000000); JsonObject preview = MineHiveClient.INSTANCE.api().preview(); draw.drawCenteredTextWithShadow(textRenderer, title, width / 2, 12, 0xFF75E6A4); if (!loading.isBlank()) draw.drawCenteredTextWithShadow(textRenderer, Text.literal(loading), width / 2, 29, 0xFFFFC857); if (preview.has("blocks")) renderBlocks(draw, preview.getAsJsonArray("blocks"));
-        JsonArray plans = blueprints(); String name = plans.isEmpty() ? "No blueprint" : plans.get(Math.min(blueprintIndex, plans.size() - 1)).getAsJsonObject().get("name").getAsString(); draw.drawTextWithShadow(textRenderer, Text.literal(name + " · " + (layer < 0 ? "all layers" : "layer " + layer)), 20, 30, 0xFFFFFFFF); super.render(draw, mouseX, mouseY, delta);
+        int left = width / 2 - 190, top = height / 2 - 72; draw.fill(left, top, left + 380, top + 145, 0xD0101815); draw.drawBorder(left, top, 380, 145, 0xFF436953); draw.drawCenteredTextWithShadow(textRenderer, title, width / 2, top + 14, 0xFF75E6A4);
+        LitematicaPlacementBridge.Snapshot snapshot = LitematicaPlacementBridge.selected(); String placement = snapshot.ready() ? snapshot.placement().name() + " · " + pose(snapshot.placement()) + " · regions " + snapshot.placement().subRegionCount() : snapshot.state().name() + ": " + snapshot.detail();
+        draw.drawCenteredTextWithShadow(textRenderer, Text.literal(placement), width / 2, top + 35, 0xFFB7C9BE); draw.drawCenteredTextWithShadow(textRenderer, Text.literal(message), width / 2, top + 53, 0xFFFFC857); draw.drawCenteredTextWithShadow(textRenderer, Text.literal("Litematica ghost stays in-world; this panel only syncs and starts MineHive."), width / 2, top + 116, 0xFF94A89C); super.render(draw, mouseX, mouseY, delta);
     }
-    private void renderBlocks(DrawContext draw, JsonArray blocks) {
-        int originX = width / 2, originY = height / 2 + 60, tile = Math.max(2, Math.min(7, 900 / Math.max(1, (int)Math.sqrt(blocks.size()) * 4))); List<JsonObject> visible = new ArrayList<>(); int minY = Integer.MAX_VALUE;
-        for (JsonElement e : blocks) minY = Math.min(minY, e.getAsJsonObject().get("y").getAsInt()); for (JsonElement e : blocks) { JsonObject b = e.getAsJsonObject(); if (layer < 0 || b.get("y").getAsInt() - minY == layer) visible.add(b); }
-        visible.sort(Comparator.comparingInt(b -> b.get("x").getAsInt() + b.get("z").getAsInt() + b.get("y").getAsInt())); int drawn = 0;
-        for (JsonObject b : visible) { if (drawn++ > 12000) break; int x = b.get("x").getAsInt(), y = b.get("y").getAsInt() - minY, z = b.get("z").getAsInt(); int sx = originX + (x - z) * tile, sy = originY + (x + z) * tile / 2 - y * tile; draw.fill(sx - tile, sy - tile, sx + tile + 1, sy + tile / 2 + 1, color(b.get("name").getAsString(), b.has("status") ? b.get("status").getAsString() : "PENDING")); }
-        draw.drawTextWithShadow(textRenderer, Text.literal("Visible blocks: " + Math.min(drawn, 12000) + " / " + visible.size()), 20, 46, 0xFF94A89C);
-    }
-    private int color(String name, String status) { if ("COMPLETED".equals(status)) return 0xAA49C979; int hash = name.hashCode(); return 0xCC000000 | (80 + (hash >>> 16 & 127)) << 16 | (80 + (hash >>> 8 & 127)) << 8 | (80 + (hash & 127)); }
-    private JsonArray blueprints() { JsonObject state = MineHiveClient.INSTANCE.api().state(); return state.has("blueprints") ? state.getAsJsonArray("blueprints") : new JsonArray(); }
     @Override public void close() { client.setScreen(parent); }
 }

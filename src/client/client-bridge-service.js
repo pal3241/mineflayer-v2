@@ -10,7 +10,7 @@ export class ClientBridgeService {
     this.leaseTtlMs = Math.max(1_000, Number(leaseTtlMs) || 15_000); this.sessions = new Map(); this.botLeases = new Map();
     this.timer = setInterval(() => void this.cleanup(), Math.min(5_000, Math.max(500, Math.floor(this.leaseTtlMs / 2)))); this.timer.unref?.();
   }
-  protocol() { return { protocol: 'minehive.client', version: '1.0', apiVersion: 'v1', transports: ['http-json'], leaseTtlMs: this.leaseTtlMs, heartbeatMs: Math.max(500, Math.floor(this.leaseTtlMs / 3)), features: ['body-switch-by-look', 'direct-control', 'rts-multi-move', 'blueprint-preview3d', 'fleet-hud'] }; }
+  protocol() { return { protocol: 'minehive.client', version: '1.1', apiVersion: 'v1', transports: ['http-json'], leaseTtlMs: this.leaseTtlMs, heartbeatMs: Math.max(500, Math.floor(this.leaseTtlMs / 3)), features: ['body-switch-by-look', 'direct-control', 'rts-multi-move', 'blueprint-preview3d', 'litematica-placement-sync', 'fleet-hud'] }; }
   async open(input = {}) {
     await this.cleanup();
     const session = { id: randomUUID(), clientName: shortText(input.clientName ?? 'MineHive Fabric Client', 'clientName', 80), playerName: optionalText(input.playerName, 'playerName', 64), controlledBotId: null, lastSequence: -1, createdAt: new Date().toISOString(), lastSeenAt: Date.now(), expiresAt: Date.now() + this.leaseTtlMs };
@@ -18,7 +18,7 @@ export class ClientBridgeService {
   }
   async state(sessionId) {
     const session = await this.touch(sessionId); const blueprints = await (this.building?.list?.() ?? []);
-    return { protocol: this.protocol(), session: this.sessionView(session), bots: this.bots.list().map(bot => this.botView(bot)), blueprints: blueprints.map(item => ({ id: item.id, name: item.name, status: item.status, revision: item.revision, progress: item.progress, bounds: item.bounds, target: item.target })) };
+    return { protocol: this.protocol(), session: this.sessionView(session), bots: this.bots.list().map(bot => this.botView(bot)), blueprints: blueprints.map(item => ({ id: item.id, name: item.name, sourceFile: item.sourceFile ?? null, status: item.status, revision: item.revision, progress: item.progress, bounds: item.bounds, target: item.target, transform: item.transform ?? { rotation: 0, mirrorX: false, mirrorZ: false } })) };
   }
   async switchBody(input = {}) {
     const session = await this.touch(input.sessionId); const botId = shortText(input.botId, 'botId', 128); const runtime = this.readyRuntime(botId); const owner = this.botLeases.get(botId);

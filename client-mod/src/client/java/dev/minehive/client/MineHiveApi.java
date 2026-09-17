@@ -63,8 +63,21 @@ public final class MineHiveApi {
         return request("POST", "/api/v1/building/blueprints/" + encode(blueprintId) + "/placement", body)
                 .thenCompose(ignored -> loadPreview(blueprintId));
     }
-    public CompletableFuture<JsonObject> buildBlueprint(String blueprintId) {
-        return request("POST", "/api/v1/building/blueprints/" + encode(blueprintId) + "/build", new JsonObject());
+    /** Applies the selected Litematica placement as one idempotent server sync. */
+    public CompletableFuture<JsonObject> syncLitematicaPlacement(String blueprintId, LitematicaPlacementBridge.Placement placement) {
+        JsonObject transform = new JsonObject();
+        transform.addProperty("rotation", placement.rotation()); transform.addProperty("mirrorX", placement.mirrorX()); transform.addProperty("mirrorZ", placement.mirrorZ());
+        return request("POST", "/api/v1/building/blueprints/" + encode(blueprintId) + "/transform", transform)
+                .thenCompose(ignored -> placeBlueprint(blueprintId, placement.origin().getX(), placement.origin().getY(), placement.origin().getZ()));
+    }
+    public CompletableFuture<JsonObject> approveBlueprint(String blueprintId) {
+        JsonObject body = new JsonObject(); body.addProperty("actor", "minehive-client-litematica");
+        return request("POST", "/api/v1/building/blueprints/" + encode(blueprintId) + "/approve", body);
+    }
+    public CompletableFuture<JsonObject> buildBlueprint(String blueprintId, JsonObject project) {
+        JsonObject body = new JsonObject(); body.addProperty("source", "minehive-client-litematica");
+        if (project.has("target") && project.get("target").isJsonObject()) body.add("target", project.getAsJsonObject("target"));
+        return request("POST", "/api/v1/building/blueprints/" + encode(blueprintId) + "/build", body);
     }
     private JsonObject sessionBody() { if (sessionId == null) throw new IllegalStateException("MineHive client has no session"); JsonObject body = new JsonObject(); body.addProperty("sessionId", sessionId); return body; }
     private CompletableFuture<JsonObject> request(String method, String path, JsonObject body) {

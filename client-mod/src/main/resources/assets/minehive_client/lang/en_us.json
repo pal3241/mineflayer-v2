@@ -3,6 +3,6 @@
   "key.minehive.switch": "Switch to looked-at bot",
   "key.minehive.release": "Release controlled bot",
   "key.minehive.rts": "Open RTS command map",
-  "key.minehive.blueprint": "Open blueprint preview",
+  "key.minehive.blueprint": "Open Litematica build control",
   "category.minehive": "MineHive"
 }
