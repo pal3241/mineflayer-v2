@@ -1,52 +1,44 @@
 import { randomUUID } from 'node:crypto';
 import { ValidationError } from '../core/errors.js';
-import { NativeTaskModel } from './native-task-model.js';
-import { DenseClassifier } from './neural-network.js';
 
-const WIDTH = 64;
+const INTENTS = ['collect','craft','smelt','follow','come','move','set_home','home','farm','deforest','reforest','combat','survey','register_storage','store','retrieve','stock','remember','place','status','converse','unknown'];
+const CLASSES = ['worker','miner','scout','support','logistics','combat','other'];
+const DIMENSIONS = ['overworld','the_nether','the_end','other'];
+const NUMERIC = ['health','food','distance','hostileCount','inventoryStacks','fleetSize','durationEstimate'];
+export const TASK_SUCCESS_FEATURE_SCHEMA = Object.freeze({ version:4, numeric:NUMERIC, boolean:['night','hasTool'], categorical:{ intent:INTENTS, className:CLASSES, dimension:DIMENSIONS } });
+const WIDTH = NUMERIC.length + 2 + INTENTS.length + CLASSES.length + DIMENSIONS.length;
 
-// This is a trained success classifier, not a manually weighted score.
-export function createAdaptiveModel({ outcomeRepository, modelRepository, events, minimumSamples, nativeModel = new NativeTaskModel() }) {
+/** Explicit-feature Node.js logistic regression. Training is always explicit. */
+export function createAdaptiveModel({ outcomeRepository, modelRepository, events, minimumSamples = 20 }) {
   if (!outcomeRepository || !modelRepository) throw new ValidationError('ML outcome and model repositories are required');
-  let outcomeCache = null; let modelCache = null; let queue = Promise.resolve(); let active = null; let predictionCount = 0; let totalLatency = 0;
+  let outcomeCache = null; let modelCache = null; let active = null; let queue = Promise.resolve(); let predictionCount = 0; let totalLatency = 0;
   const outcomes = async () => outcomeCache ??= await outcomeRepository.list();
-  const storedModels = async () => modelCache ??= await modelRepository.list();
-  const enqueue = operation => { const result = queue.then(operation); queue = result.then(() => undefined, () => undefined); return result; };
-  const train = async () => {
-    const records = await outcomes(); const samples = records.map(record => ({ input: vector(record), success: record.success })); const previous = (await storedModels()).find(item => item.id === 'native-task-success-v1'); let model;
-    if (nativeModel.available()) {
-      const result = await nativeModel.train(samples, { weights: previous?.weights, bias: previous?.bias });
-      model = { id:'native-task-success-v1', version:1, status:'PRODUCTION', modelType:'rust-logistic-regression', featureVersion:3, weights:result.weights, bias:result.bias, metrics:{ samples:result.samples, loss:round(result.loss), accuracy:round(result.accuracy) }, trainedAt:new Date().toISOString() };
-    } else {
-      const network = new DenseClassifier({ inputSize:WIDTH, hiddenSize:24, labels:['FAILURE','SUCCESS'] });
-      const fallback = samples.length ? samples : [{ input:Array(WIDTH).fill(0), success:true }, { input:Array(WIDTH).fill(0), success:false }];
-      const metrics = network.train(fallback.map(item => ({ input:item.input, label:item.success ? 'SUCCESS' : 'FAILURE' })), { epochs:180, learningRate:0.035 });
-      model = { id:'native-task-success-v1', version:1, status:'PRODUCTION', modelType:'dense-neural-fallback', featureVersion:3, network:network.serialize(), metrics, trainedAt:new Date().toISOString() };
-    }
-    if (previous) await modelRepository.update(previous.id, model); else await modelRepository.create(model);
-    modelCache = [model, ...(await storedModels()).filter(item => item.id !== model.id)]; active = model;
-    await events?.publish('ml.trained', { model:model.modelType, metrics:model.metrics }, { source:'adaptive-model' }); return model;
-  };
-  const ensure = async () => active ?? (await storedModels()).find(item => item.id === 'native-task-success-v1') ?? train();
-  const recordOutcome = input => enqueue(async () => {
-    const value = normalize(input); const record = await outcomeRepository.create({ id:randomUUID(), ...value, createdAt:new Date().toISOString(), schemaVersion:1 }); outcomeCache = [record, ...await outcomes()];
-    if (outcomeCache.length >= minimumSamples) await train();
-    await events?.publish('ml.outcome.recorded', record, { source:'adaptive-model' }); return record;
+  const models = async () => modelCache ??= await modelRepository.list();
+  const enqueue = operation => { const result=queue.then(operation); queue=result.then(()=>undefined,()=>undefined); return result; };
+  const initialize = async () => { active=(await models()).find(item=>item.id==='task-success-logistic-v2')??null; return status(); };
+  const train = async ({ epochs=250, learningRate=0.08 }={}) => enqueue(async () => {
+    const records=await outcomes(); if(records.length<Math.max(4,minimumSamples)) throw new ValidationError(`Task success training requires at least ${Math.max(4,minimumSamples)} outcomes`);
+    const split=records.map(record=>({record,input:vector(record),target:record.success?1:0})); let validation=split.filter(item=>stableBucket(item.record.id)===0), training=split.filter(item=>stableBucket(item.record.id)!==0); if(!validation.length){validation=split.slice(-1);training=split.slice(0,-1);}
+    let weights=Array(WIDTH).fill(0),bias=0; const rate=Math.max(0.001,Math.min(0.5,Number(learningRate)||0.08));
+    for(let epoch=0;epoch<Math.max(1,Math.min(2000,Number(epochs)||250));epoch++){const gradient=Array(WIDTH).fill(0);let biasGradient=0;for(const sample of training){const error=sigmoid(dot(weights,sample.input)+bias)-sample.target;for(let i=0;i<WIDTH;i++)gradient[i]+=error*sample.input[i];biasGradient+=error;}const scale=1/Math.max(1,training.length);for(let i=0;i<WIDTH;i++)weights[i]-=rate*(gradient[i]*scale+weights[i]*0.0005);bias-=rate*biasGradient*scale;}
+    const metrics=evaluate(weights,bias,training,validation); const model={id:'task-success-logistic-v2',version:2,status:'PRODUCTION',modelType:'node-logistic-regression',featureSchema:TASK_SUCCESS_FEATURE_SCHEMA,weights,bias,metrics,trainedAt:new Date().toISOString()}; const previous=(await models()).find(item=>item.id===model.id); if(previous)await modelRepository.update(model.id,model);else await modelRepository.create(model); active=model;modelCache=[model,...(await models()).filter(item=>item.id!==model.id)];await events?.publish('ml.trained',{model:model.modelType,metrics},{source:'task-success-model'});return model;
   });
-  const predict = async input => {
-    const started = performance.now(); if (!input?.botId) throw new ValidationError('ML prediction requires botId'); const model = await ensure(); const inputVector = vector({ botId:String(input.botId), intent:String(input.intent ?? 'unknown'), features:normalizeFeatures(input.features ?? {}) }); let probability;
-    if (model.modelType === 'rust-logistic-regression' && nativeModel.available()) probability = (await nativeModel.predict(inputVector, model)).probability;
-    else probability = DenseClassifier.restore(model.network).predict(inputVector).probabilities.SUCCESS;
-    predictionCount++; totalLatency += performance.now() - started; const sampleCount = (await outcomes()).filter(item => item.intent === String(input.intent ?? 'unknown')).length;
-    return { prediction:round(probability), confidence:round(Math.min(.99, 1 - Math.exp(-sampleCount / Math.max(2, minimumSamples)))), modelVersion:'native-task-success-v1', sampleCount, model:model.modelType, timestamp:new Date().toISOString() };
-  };
-  const status = async () => { const records=await outcomes(); return { status:'HEALTHY', outcomeCount:records.length, inferenceVersion:'native-task-success-v1', productionModel:await ensure(), monitoring:{ predictionCount, averagePredictionLatencyMs:predictionCount ? round(totalLatency / predictionCount) : 0, nativeAvailable:nativeModel.available(), byIntent:summarize(records,'intent'), byBot:summarize(records,'botId') } }; };
-  return Object.freeze({ recordOutcome, predict, status, train, models:storedModels, outcomes });
+  const recordOutcome = input => enqueue(async () => { const value=normalize(input);const record=await outcomeRepository.create({id:randomUUID(),...value,createdAt:new Date().toISOString(),schemaVersion:2});outcomeCache=[record,...await outcomes()];await events?.publish('ml.outcome.recorded',record,{source:'task-success-model'});return record; });
+  const predict = async input => { const started=performance.now();if(!input?.botId)throw new ValidationError('ML prediction requires botId');if(active===null)active=(await models()).find(item=>item.id==='task-success-logistic-v2')??false;const records=await outcomes();const intent=String(input.intent??'unknown');const evidence=records.filter(item=>item.intent===intent&&item.botId===String(input.botId));const intentEvidence=records.filter(item=>item.intent===intent);let probability,modelName;
+    if(active){probability=sigmoid(dot(active.weights,vector({intent,features:normalizeFeatures(input.features??{})}))+active.bias);modelName=active.modelType;}else{const source=evidence.length?evidence:intentEvidence;probability=(source.filter(item=>item.success).length+1)/(source.length+2);modelName='empirical-beta-baseline';}
+    predictionCount++;totalLatency+=performance.now()-started;const sampleCount=evidence.length||intentEvidence.length;return {prediction:round(probability),failureProbability:round(1-probability),confidence:round(sampleCount/(sampleCount+Math.max(2,minimumSamples))),modelVersion:active?'task-success-logistic-v2':'empirical-beta-v1',sampleCount,model:modelName,featureSchemaVersion:TASK_SUCCESS_FEATURE_SCHEMA.version,timestamp:new Date().toISOString()}; };
+  const status = async () => { const records=await outcomes();if(active===null)active=(await models()).find(item=>item.id==='task-success-logistic-v2')??false;return {status:'HEALTHY',outcomeCount:records.length,inferenceVersion:active?'task-success-logistic-v2':'empirical-beta-v1',productionModel:active||{id:null,status:'UNTRAINED',modelType:'empirical-beta-baseline',featureSchema:TASK_SUCCESS_FEATURE_SCHEMA},trainingPolicy:'explicit-only',monitoring:{predictionCount,averagePredictionLatencyMs:predictionCount?round(totalLatency/predictionCount):0,byIntent:summarize(records,'intent'),byBot:summarize(records,'botId')}}; };
+  return Object.freeze({initialize,recordOutcome,predict,status,train,models,outcomes,featureSchema:()=>TASK_SUCCESS_FEATURE_SCHEMA});
 }
-function normalize(input) { if (typeof input.success !== 'boolean') throw new ValidationError('ML outcome success must be boolean'); if (!input.botId) throw new ValidationError('ML outcome requires botId'); return { botId:String(input.botId), intent:String(input.intent ?? 'unknown'), success:input.success, durationMs:Math.max(0, Number(input.durationMs) || 0), features:normalizeFeatures(input.features ?? {}), source:String(input.source ?? 'coordinator') }; }
-function normalizeFeatures(value) { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ValidationError('ML features must be an object'); return Object.fromEntries(Object.entries(value).filter(([, item]) => ['string','number','boolean'].includes(typeof item) && (typeof item !== 'number' || Number.isFinite(item))).slice(0, 32)); }
-function vector(value) { const result=Array(WIDTH).fill(0); add(result, `bot:${value.botId}`, 1); add(result, `intent:${value.intent}`, 1); for (const [key,item] of Object.entries(value.features ?? {})) add(result, typeof item === 'number' ? `num:${key}` : `${key}:${item}`, typeof item === 'number' ? Math.max(-1, Math.min(1, item)) : 1); const norm=Math.hypot(...result) || 1; return result.map(item => item / norm); }
-function add(vector, key, value) { vector[hash(key) % WIDTH] += value; }
-function hash(value) { let result=2166136261; for (const char of String(value)) { result ^= char.charCodeAt(0); result = Math.imul(result, 16777619); } return result >>> 0; }
-function round(value) { return Math.round(Number(value ?? 0) * 10000) / 10000; }
-function summarize(records, field) { const result={}; for(const item of records) { const key=item[field]; const value=result[key]??={samples:0,successes:0,durationMs:0}; value.samples++; value.successes+=item.success?1:0; value.durationMs+=item.durationMs; } return Object.fromEntries(Object.entries(result).map(([key,value])=>[key,{samples:value.samples,successRate:round(value.successes/value.samples),averageDurationMs:Math.round(value.durationMs/value.samples)}])); }
+function normalize(input){if(typeof input.success!=='boolean')throw new ValidationError('ML outcome success must be boolean');if(!input.botId)throw new ValidationError('ML outcome requires botId');return {botId:String(input.botId),intent:String(input.intent??'unknown'),success:input.success,durationMs:Math.max(0,Number(input.durationMs)||0),features:normalizeFeatures(input.features??{}),source:String(input.source??'coordinator')};}
+function normalizeFeatures(value){if(!value||typeof value!=='object'||Array.isArray(value))throw new ValidationError('ML features must be an object');return {health:ratio(value.health,20),food:ratio(value.food,20),distance:ratio(value.distance,256),hostileCount:ratio(value.hostileCount,16),inventoryStacks:ratio(value.inventoryStacks,36),fleetSize:ratio(value.fleetSize,32),durationEstimate:ratio(value.durationEstimate,300000),night:Boolean(value.night),hasTool:Boolean(value.hasTool),className:category(value.className,CLASSES,'other'),dimension:category(String(value.dimension??'overworld').replace(/^minecraft:/,''),DIMENSIONS,'other')};}
+function vector(value){const f=normalizeFeatures(value.features??{}),result=[];for(const name of NUMERIC)result.push(f[name]);result.push(f.night?1:0,f.hasTool?1:0);oneHot(result,category(value.intent,INTENTS,'unknown'),INTENTS);oneHot(result,f.className,CLASSES);oneHot(result,f.dimension,DIMENSIONS);return result;}
+function oneHot(target,value,labels){for(const label of labels)target.push(value===label?1:0);}
+function category(value,allowed,fallback){const normalized=String(value??'').toLowerCase();return allowed.includes(normalized)?normalized:fallback;}
+function ratio(value,max){const number=Number(value);return Number.isFinite(number)?Math.max(0,Math.min(1,number/max)):0;}
+function sigmoid(value){return 1/(1+Math.exp(-Math.max(-30,Math.min(30,value))));}
+function dot(left,right){let sum=0;for(let i=0;i<Math.min(left.length,right.length);i++)sum+=left[i]*right[i];return sum;}
+function evaluate(weights,bias,training,validation){const metric=samples=>{let correct=0,loss=0,brier=0;for(const sample of samples){const p=sigmoid(dot(weights,sample.input)+bias),bounded=Math.max(1e-7,Math.min(1-1e-7,p));correct+=Number((p>=.5)===Boolean(sample.target));loss+=-(sample.target*Math.log(bounded)+(1-sample.target)*Math.log(1-bounded));brier+=(p-sample.target)**2;}return {samples:samples.length,accuracy:round(correct/Math.max(1,samples.length)),logLoss:round(loss/Math.max(1,samples.length)),brier:round(brier/Math.max(1,samples.length))};};return {train:metric(training),validation:metric(validation),holdout:true};}
+function stableBucket(value){let hash=2166136261;for(const char of String(value)){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619);}return (hash>>>0)%5;}
+function round(value){return Math.round(Number(value??0)*10000)/10000;}
+function summarize(records,field){const result={};for(const item of records){const key=item[field];const value=result[key]??={samples:0,successes:0,durationMs:0};value.samples++;value.successes+=item.success?1:0;value.durationMs+=item.durationMs;}return Object.fromEntries(Object.entries(result).map(([key,value])=>[key,{samples:value.samples,successRate:round(value.successes/value.samples),averageDurationMs:Math.round(value.durationMs/value.samples)}]));}

@@ -5,6 +5,8 @@ import { loadTrainingSources } from '../src/ml/training-source-loader.js';
 import { createLocalCommandBrain } from '../src/ml/local-command-brain.js';
 import { PythonLocalAiBridge } from '../src/ml/python-local-ai-bridge.js';
 import { createEnvironmentSafetyModel } from '../src/ml/environment-safety-model.js';
+import { createAdaptiveModel } from '../src/ml/adaptive-model.js';
+import { createHashEmbeddingProvider, createSemanticMemory } from '../src/memory/semantic-memory.js';
 import { LlmGateway } from '../src/ai/llm-gateway.js';
 import { MemoryRepository } from '../src/persistence/memory-repository.js';
 
@@ -20,9 +22,10 @@ test('dense neural classifier trains, predicts, and restores persisted weights',
   assert.ok(metrics.accuracy >= 0.75); const restored = DenseClassifier.restore(network.serialize()); assert.equal(restored.predict([1,1]).label, network.predict([1,1]).label);
 });
 
-test('local command brain performs real training and persists its neural model', async () => {
+test('local command brain trains only after an explicit training request', async () => {
   const models = new MemoryRepository(); const brain = createLocalCommandBrain(options({ modelRepository:models })); await brain.initialize();
-  const prediction = brain.predict('buat chest 2'); assert.equal(prediction.label, 'craft'); assert.ok(brain.status().metrics.samples >= 60); assert.equal((await models.list())[0].network.architecture, 'dense-relu-softmax-v1'); assert.ok(brain.status().parameterCount >= 8_000_000); assert.equal(brain.status().backend,'python-pytorch');
+  assert.equal(brain.status().intentModel, 'not-trained'); assert.equal((await models.list()).length, 0);
+  await brain.train({epochs:1}); const prediction = brain.predict('buat chest 2'); assert.equal(prediction.label, 'craft'); assert.ok(brain.status().metrics.trainSamples >= 200); assert.ok(brain.status().metrics.validation.samples > 0); assert.equal(brain.status().metrics.holdout,true); assert.equal((await models.list())[0].network.architecture, 'dense-relu-softmax-v1'); assert.ok(brain.status().parameterCount >= 8_000_000); assert.equal(brain.status().trainingPolicy,'explicit-only');
 });
 
 test('8M PyTorch bridge reports the autoregressive GRU architecture', async () => {
@@ -48,6 +51,14 @@ test('environment neural model learns universal area safety memory', async () =>
   const areas = new MemoryRepository(); const remembered = []; const model = createEnvironmentSafetyModel({ observationRepository:new MemoryRepository(), modelRepository:new MemoryRepository(), areaRepository:areas, memory:{ recordAreaSafety: async area => remembered.push(area) } }); await model.initialize();
   const result = await model.observe({ worldKey:'localhost:25565', dimension:'overworld', position:{x:64,y:64,z:64}, label:'DANGEROUS', features:{ hostileDensity:1, deathRate:1, darkness:1, healthLoss:1, trapped:1 } });
   assert.equal(result.area.classification, 'DANGEROUS'); assert.equal(remembered.length, 1); assert.equal((await model.areas()).length, 1); assert.equal((await model.areaAt({ worldKey:'localhost:25565', dimension:'overworld', position:{x:70,y:70,z:70} })).id, result.area.id); assert.equal(await model.areaAt({ worldKey:'localhost:25565', dimension:'overworld', position:{x:256,y:70,z:256} }), null);
+});
+
+test('task success logistic model uses explicit schema and holdout evaluation', async () => {
+  const ml=createAdaptiveModel({outcomeRepository:new MemoryRepository(),modelRepository:new MemoryRepository(),minimumSamples:4});await ml.initialize();for(let index=0;index<10;index++)await ml.recordOutcome({botId:`bot-${index%2}`,intent:'collect',success:index%2===0,durationMs:100+index,features:{health:index%2===0?20:5,food:18,className:'miner',dimension:'overworld',hasTool:index%2===0}});assert.equal((await ml.status()).productionModel.status,'UNTRAINED');const model=await ml.train({epochs:80});assert.equal(model.modelType,'node-logistic-regression');assert.equal(model.metrics.holdout,true);assert.ok(model.metrics.validation.samples>0);assert.equal(model.featureSchema.version,4);
+});
+
+test('memory retrieval identifies itself as BM25 and ranks keyword evidence', async () => {
+  const memory=createSemanticMemory({repository:new MemoryRepository(),embeddingProvider:createHashEmbeddingProvider({dimensions:64,version:'test'}),maxRecords:100});await memory.remember({content:'desa oak berada dekat sungai',importance:.5});await memory.remember({content:'tambang deepslate berada di bawah basis',importance:.5});const result=await memory.search({text:'desa oak sungai'});assert.match(result[0].content,/desa oak/);assert.equal(result[0].embedding.model,'minehive-keyword-bm25');
 });
 
 test('LLM gateway can manually use the local neural command center', async () => {

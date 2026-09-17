@@ -71,10 +71,10 @@ test('structure observer automatically persists important discoveries', async ()
   const structures = await worldMemory.search({ host: 'server', port: 25565, dimension: 'overworld', type: 'stronghold' }); assert.equal(structures.length, 1); const memories = await semanticMemory.search({ text: 'stronghold portal', worldKey: 'server:25565', dimension: 'overworld', limit: 5 }); assert.equal(memories[0].type, 'LONG_TERM'); assert.equal(memories[0].source, 'structure-observer'); assert.equal(observer.status().discoveries, 1); observer.stop();
 });
 
-test('contextual ML weights matching bot evidence and exposes monitoring', async () => {
-  const ml = createAdaptiveModel({ outcomeRepository: new MemoryRepository(), modelRepository: new MemoryRepository(), events: new EventBus(), minimumSamples: 2 }); const features = { className: 'miner', healthBand: 20, hasTool: true };
+test('task success model uses recorded outcomes without training on record', async () => {
+  const models = new MemoryRepository(); const ml = createAdaptiveModel({ outcomeRepository: new MemoryRepository(), modelRepository: models, events: new EventBus(), minimumSamples: 2 }); const features = { className: 'miner', health: 20, food: 20, hasTool: true };
   await ml.recordOutcome({ botId: 'one', intent: 'collect', success: true, durationMs: 100, features, source: 'test' }); await ml.recordOutcome({ botId: 'two', intent: 'collect', success: false, durationMs: 300, features: { ...features, hasTool: false }, source: 'test' });
-  const one = await ml.predict({ botId: 'one', intent: 'collect', features }); const two = await ml.predict({ botId: 'two', intent: 'collect', features: { ...features, hasTool: false } }); assert.ok(one.prediction > two.prediction); assert.equal(one.modelVersion, 'contextual-beta-v2'); const status = await ml.status(); assert.equal(status.monitoring.predictionCount, 2); assert.equal(status.monitoring.byIntent.collect.samples, 2);
+  const one = await ml.predict({ botId: 'one', intent: 'collect', features }); const two = await ml.predict({ botId: 'two', intent: 'collect', features: { ...features, hasTool: false } }); assert.ok(one.prediction > two.prediction); assert.equal(one.modelVersion, 'empirical-beta-v1'); assert.equal((await models.list()).length,0); const status = await ml.status(); assert.equal(status.monitoring.predictionCount, 2); assert.equal(status.monitoring.byIntent.collect.samples, 2); assert.equal(status.trainingPolicy,'explicit-only');
 });
 
 function countItem(inventory, name) { return inventory.filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0); }

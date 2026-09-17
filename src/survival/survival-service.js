@@ -1,6 +1,6 @@
 import { ValidationError } from '../core/errors.js';
 
-const DEFAULT_POLICY = Object.freeze({ enabled: true, autoEquipArmor: true, minimumDurabilityPercent: 10, preferProtection: true, preferDurability: false, allowBindingCurse: false, allowAnimalKill: false, minimumSheepReserve: 2, minimumCowReserve: 2, interactionCooldownMs: 500, entitySearchDistance: 48 });
+const DEFAULT_POLICY = Object.freeze({ enabled: true, supervisorEnabled: true, supervisorIntervalMs: 1000, criticalHealth: 8, panicHealth: 6, eatAtFood: 16, minimumFoodItems: 4, autoSleep: true, autoEquipArmor: true, minimumDurabilityPercent: 10, preferProtection: true, preferDurability: false, allowBindingCurse: false, allowAnimalKill: false, minimumSheepReserve: 2, minimumCowReserve: 2, interactionCooldownMs: 500, entitySearchDistance: 48 });
 
 export function createSurvivalService({ acquisition, events, logger, config }) {
   if (!acquisition || typeof acquisition.registerSpecialSource !== 'function') throw new ValidationError('Survival service requires acquisition special-source support');
@@ -9,6 +9,8 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
   const armorRunning = new Set();
   const sleepRunning = new Set();
   const sleepLastAttempt = new Map();
+  const supervisorRunning = new Set();
+  const foodLastAttempt = new Map();
   const assignedBeds = new Map();
   const bedOwners = new Map();
   const publish = async (type, payload, runtime) => events?.publish(type, { botId: runtime.bot.id, ...payload }, { source: 'survival' });
@@ -53,7 +55,7 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
     if (attached.has(runtime.bot.id)) return attached.get(runtime.bot.id);
     const evaluateArmor = () => { if (!policy.enabled || !policy.autoEquipArmor || armorRunning.has(runtime.bot.id)) return; armorRunning.add(runtime.bot.id); void call(runtime, 'autoEquipArmor', armorPolicy(policy), {}, 'armor.equipped').catch(error => { logger?.error?.('armor.auto-equip.failed', { botId: runtime.bot.id, error: error.message, code: error.code }); void publish('armor.auto-equip.failed', { error: error.message, code: error.code ?? 'CAPABILITY_UNAVAILABLE' }, runtime); }).finally(() => armorRunning.delete(runtime.bot.id)); };
     const evaluateSleep = async () => {
-      if (!policy.enabled || runtime.bot.metadata?.autoSleep !== true || sleepRunning.has(runtime.bot.id) || runtime.snapshot().status !== 'READY') return;
+      if (!policy.enabled || !policy.autoSleep || runtime.bot.metadata?.autoSleep === false || sleepRunning.has(runtime.bot.id) || runtime.snapshot().status !== 'READY') return;
       const lastAttempt = sleepLastAttempt.get(runtime.bot.id) ?? 0; if (Date.now() - lastAttempt < 30_000) return;
       let status; try { status = await runtime.adapter.sleepStatus(); } catch { return; }
       if (status.sleeping || !status.isNight) return;
@@ -62,9 +64,23 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
       catch (error) { logger?.warn?.('sleep.auto.failed', { botId: runtime.bot.id, error: error.message, code: error.code }); }
       finally { sleepRunning.delete(runtime.bot.id); }
     };
+    const supervise = async () => {
+      if (!policy.enabled || !policy.supervisorEnabled || supervisorRunning.has(runtime.bot.id) || runtime.snapshot().status !== 'READY') return;
+      supervisorRunning.add(runtime.bot.id);
+      try {
+        const state = typeof runtime.adapter.survivalStatus === 'function' ? await runtime.adapter.survivalStatus() : runtime.adapter.snapshot();
+        const emergency = state.onFire || state.inLava || state.oxygen !== null && state.oxygen !== undefined && state.oxygen <= 4;
+        if (emergency) { await runtime.adapter.stopActions?.(); const result=await runtime.adapter.emergencySurvival?.({ reason:state.onFire||state.inLava?'FIRE_OR_LAVA':'DROWNING', state }); await publish('survival.supervisor.interrupted',{priority:1,reason:state.onFire||state.inLava?'FIRE_OR_LAVA':'DROWNING',result},runtime); return; }
+        if (Number(state.health) <= policy.criticalHealth) { await runtime.adapter.stopActions?.(); const result=await runtime.adapter.emergencySurvival?.({reason:Number(state.health)<=policy.panicHealth?'PANIC_HEALTH':'LOW_HEALTH',state}); await publish('survival.supervisor.interrupted',{priority:2,reason:Number(state.health)<=policy.panicHealth?'PANIC_HEALTH':'LOW_HEALTH',result,requestBackup:true},runtime); return; }
+        const foodItems=Number(state.foodItems??0); if(Number(state.food)<policy.eatAtFood){ if(foodItems>0){await runtime.adapter.stopActions?.();const result=await runtime.adapter.eatNow?.();await publish('survival.supervisor.interrupted',{priority:3,reason:'HUNGER',result},runtime);return;} const last=foodLastAttempt.get(runtime.bot.id)??0;if(Date.now()-last>=60_000){foodLastAttempt.set(runtime.bot.id,Date.now());void acquisition.acquire({requesterBotId:runtime.bot.id,type:'ITEM',item:'bread',count:policy.minimumFoodItems,purpose:'survival food reserve',priority:100,consume:false}).then(result=>publish('survival.food.restocked',{result},runtime)).catch(error=>publish('survival.food.restock.failed',{error:error.message},runtime));} }
+        if(foodItems<policy.minimumFoodItems){const last=foodLastAttempt.get(runtime.bot.id)??0;if(Date.now()-last>=60_000){foodLastAttempt.set(runtime.bot.id,Date.now());void acquisition.acquire({requesterBotId:runtime.bot.id,type:'ITEM',item:'bread',count:policy.minimumFoodItems-foodItems,purpose:'survival food reserve',priority:95,consume:false}).then(result=>publish('survival.food.restocked',{result},runtime)).catch(error=>publish('survival.food.restock.failed',{error:error.message},runtime));}}
+        await evaluateSleep();
+      } catch(error) { logger?.warn?.('survival.supervisor.failed',{botId:runtime.bot.id,error:error.message}); }
+      finally { supervisorRunning.delete(runtime.bot.id); }
+    };
     const onSpawn = () => { evaluateArmor(); void evaluateSleep(); }; const onInventoryUpdate = () => evaluateArmor(); runtime.adapter.on('spawn', onSpawn); runtime.adapter.on('inventoryUpdate', onInventoryUpdate);
-    const sleepTimer = setInterval(() => void evaluateSleep(), 5_000); sleepTimer.unref?.();
-    const detach = () => { clearInterval(sleepTimer); runtime.adapter.removeListener('spawn', onSpawn); runtime.adapter.removeListener('inventoryUpdate', onInventoryUpdate); armorRunning.delete(runtime.bot.id); sleepRunning.delete(runtime.bot.id); sleepLastAttempt.delete(runtime.bot.id); releaseBed(runtime.bot.id); attached.delete(runtime.bot.id); };
+    const sleepTimer = setInterval(() => void evaluateSleep(), 5_000); sleepTimer.unref?.(); const supervisorTimer=setInterval(()=>void supervise(),policy.supervisorIntervalMs);supervisorTimer.unref?.();
+    const detach = () => { clearInterval(sleepTimer);clearInterval(supervisorTimer); runtime.adapter.removeListener('spawn', onSpawn); runtime.adapter.removeListener('inventoryUpdate', onInventoryUpdate); armorRunning.delete(runtime.bot.id); sleepRunning.delete(runtime.bot.id);supervisorRunning.delete(runtime.bot.id);foodLastAttempt.delete(runtime.bot.id); sleepLastAttempt.delete(runtime.bot.id); releaseBed(runtime.bot.id); attached.delete(runtime.bot.id); };
     attached.set(runtime.bot.id, detach);
     return detach;
   };
@@ -105,8 +121,9 @@ export function createSurvivalService({ acquisition, events, logger, config }) {
 export function normalizeSurvivalPolicy(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ValidationError('Survival policy must be an object');
   const policy = { ...DEFAULT_POLICY, ...input };
-  for (const field of ['enabled', 'autoEquipArmor', 'preferProtection', 'preferDurability', 'allowBindingCurse', 'allowAnimalKill']) if (typeof policy[field] !== 'boolean') throw new ValidationError(`Survival policy '${field}' must be a boolean`);
-  for (const [field, minimum, maximum] of [['minimumDurabilityPercent', 0, 100], ['minimumSheepReserve', 0, 100], ['minimumCowReserve', 0, 100], ['interactionCooldownMs', 100, 10_000], ['entitySearchDistance', 4, 128]]) if (!Number.isInteger(policy[field]) || policy[field] < minimum || policy[field] > maximum) throw new ValidationError(`Survival policy '${field}' must be an integer between ${minimum} and ${maximum}`);
+  for (const field of ['enabled','supervisorEnabled','autoSleep', 'autoEquipArmor', 'preferProtection', 'preferDurability', 'allowBindingCurse', 'allowAnimalKill']) if (typeof policy[field] !== 'boolean') throw new ValidationError(`Survival policy '${field}' must be a boolean`);
+  for (const [field, minimum, maximum] of [['supervisorIntervalMs',250,10_000],['criticalHealth',1,20],['panicHealth',1,20],['eatAtFood',1,20],['minimumFoodItems',1,64],['minimumDurabilityPercent', 0, 100], ['minimumSheepReserve', 0, 100], ['minimumCowReserve', 0, 100], ['interactionCooldownMs', 100, 10_000], ['entitySearchDistance', 4, 128]]) if (!Number.isInteger(policy[field]) || policy[field] < minimum || policy[field] > maximum) throw new ValidationError(`Survival policy '${field}' must be an integer between ${minimum} and ${maximum}`);
+  if(policy.panicHealth>policy.criticalHealth)throw new ValidationError("Survival panicHealth must not exceed criticalHealth");
   return policy;
 }
 

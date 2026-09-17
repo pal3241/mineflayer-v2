@@ -10,12 +10,8 @@ def main():
         try:
             request=json.loads(line);action=request.get('action')
             if action=='initialize':
-                texts=request.get('texts',[]);expected=fingerprint(texts)
-                if checkpoint.exists():
-                    loaded,payload=load_model(checkpoint)
-                    if payload.get('dataset_fingerprint')==expected:model,metadata=loaded,payload
-                    else:result=train_model(texts,checkpoint,request.get('epochs',12),sequence_length=request.get('sequenceLength',32),max_sequences=request.get('maxSequences',384),progress=lambda value:progress(request,value));model,metadata=result['model'],result['payload']
-                else:result=train_model(texts,checkpoint,request.get('epochs',12),sequence_length=request.get('sequenceLength',32),max_sequences=request.get('maxSequences',384),progress=lambda value:progress(request,value));model,metadata=result['model'],result['payload']
+                # Startup is load-only. Training is an explicit CLI/dashboard action.
+                if checkpoint.exists():model,metadata=load_model(checkpoint)
                 respond(request,status(model,metadata,checkpoint))
             elif action=='train':
                 result=train_model(request.get('texts',[]),checkpoint,request.get('epochs',12),sequence_length=request.get('sequenceLength',32),max_sequences=request.get('maxSequences',384),progress=lambda value:progress(request,value));model,metadata=result['model'],result['payload'];respond(request,status(model,metadata,checkpoint))
