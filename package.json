@@ -12,6 +12,7 @@
     "start": "node src/cli.js start",
     "dev": "node --watch src/cli.js start",
     "test": "node --test",
+    "test:survival-e2e": "MINEHIVE_E2E_SURVIVAL=1 node --test tests/integration/survival-overnight.test.js",
     "health": "node src/cli.js health",
     "ai": "node src/cli.js ai",
     "ai:setup": "node scripts/setup-local-ai.js",
