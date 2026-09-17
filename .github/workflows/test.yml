@@ -18,6 +18,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-local-ai.txt
+      - name: Install local AI dependencies
+        run: python -m pip install -r requirements-local-ai.txt
       - name: Install dependencies
         run: npm ci
       - name: Run tests
