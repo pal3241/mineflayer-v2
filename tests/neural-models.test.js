@@ -61,5 +61,5 @@ test('LLM gateway speaks through the local neural model when cloud is unavailabl
 });
 
 test('training source loader reads the base command-center text', async () => {
-  const loaded = await loadTrainingSources(['training/local-ai/command-center.jsonl']); assert.ok(loaded.samples.length >= 20); assert.ok(loaded.documents.length >= 20); assert.equal(loaded.samples[0].label, 'identity');
+  const progress=[]; const loaded = await loadTrainingSources(['training/local-ai/command-center.jsonl'],{onProgress:value=>progress.push(value)}); assert.ok(loaded.samples.length >= 20); assert.ok(loaded.documents.length >= 20); assert.equal(loaded.samples[0].label, 'identity'); assert.deepEqual(progress.map(value=>value.phase),['reading','read']);
 });
