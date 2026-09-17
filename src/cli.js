@@ -25,11 +25,14 @@ if (command === 'start') {
 } else if (command === 'ai') {
   const action = process.argv[3] ?? 'status';
   await app.initialize();
-  if (action === 'training' || action === 'train') { const sources = process.argv.slice(4).filter(value => !value.startsWith('--')); const loaded = await loadTrainingSources(sources); console.log(JSON.stringify(await app.localBrain.importTraining(loaded), null, 2)); }
+  if (action === 'training' || action === 'train') { const options=parseTrainingArguments(process.argv.slice(4)); const loaded=await loadTrainingSources(options.sources,{maxBytes:options.maxBytes}); console.log(JSON.stringify(await app.localBrain.importTraining({...loaded,epochs:options.epochs}),null,2)); }
   else if (action === 'status') console.log(JSON.stringify(app.localBrain.status(), null, 2));
-  else if (action === 'talk') { const text = process.argv.slice(4).join(' ').trim(); if (!text) throw new Error('Use: npm run ai -- talk <text>'); console.log(app.localBrain.respond(text).reply); }
-  else throw new Error(`Unknown AI action '${action}'. Use: training [sources...], status, talk <text>`);
+  else if (action === 'talk') { const text = process.argv.slice(4).join(' ').trim(); if (!text) throw new Error('Use: npm run ai -- talk <text>'); console.log((await app.localBrain.respond(text)).reply); }
+  else if (action === 'save') { const target=process.argv[4]??join(resolve(app.config.dataPath),'local-ai','minehive-local-ai-export.pt'); console.log(JSON.stringify(await app.localBrain.save(resolve(target)),null,2)); }
+  else throw new Error(`Unknown AI action '${action}'. Use: training [--epochs N] [sources...], save [model.pt], status, talk <text>`);
   await app.stop();
 } else {
   console.error(`Unknown command '${command}'. Use: start, health, status, backup [name.sqlite], ai training|status|talk`); process.exitCode = 1;
 }
+
+function parseTrainingArguments(args){ let epochs=12,maxBytes=100_000_000;const sources=[];for(let i=0;i<args.length;i++){const value=args[i];if(value==='--epochs'){epochs=Number(args[++i]);continue;}if(value.startsWith('--epochs=')){epochs=Number(value.slice(9));continue;}if(value==='--max-bytes'){maxBytes=Number(args[++i]);continue;}if(value.startsWith('--max-bytes=')){maxBytes=Number(value.slice(12));continue;}sources.push(value);}if(!Number.isInteger(epochs)||epochs<1||epochs>500)throw new Error('--epochs must be an integer from 1 to 500');if(!Number.isInteger(maxBytes)||maxBytes<1024||maxBytes>1_000_000_000)throw new Error('--max-bytes must be between 1024 and 1000000000');return {epochs,maxBytes,sources};}

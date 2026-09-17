@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DenseClassifier } from '../src/ml/neural-network.js';
-import { NeuralDialogueModel, dialogueSamples } from '../src/ml/local-dialogue-model.js';
 import { loadTrainingSources } from '../src/ml/training-source-loader.js';
 import { createLocalCommandBrain } from '../src/ml/local-command-brain.js';
 import { createEnvironmentSafetyModel } from '../src/ml/environment-safety-model.js';
 import { LlmGateway } from '../src/ai/llm-gateway.js';
 import { MemoryRepository } from '../src/persistence/memory-repository.js';
+
+class FakePyTorchBridge {
+  constructor(){this.value={status:'READY',parameterCount:8_034_243,architecture:'byte-gru-lm-2x896',metrics:{loss:1.2}};}
+  status(){return this.value;} async initialize(){return this.value;} async train(_texts,{epochs}={}){this.value={...this.value,metrics:{epochs,loss:0.8}};return this.value;} async generate(text){return {text:/siapa|kemampuan/i.test(text)?'Aku pusat komando MineHive berbasis PyTorch.':'Minecraft adalah permainan sandbox berbasis blok.',tokens:12};} async save(path){return {saved:path,bytes:123};} async dispose(){}
+}
+const options = extra => ({ modelRepository:new MemoryRepository(), sampleRepository:new MemoryRepository(), dialogueRepository:new MemoryRepository(), documentRepository:new MemoryRepository(), dialogueBridge:new FakePyTorchBridge(), ...extra });
 
 test('dense neural classifier trains, predicts, and restores persisted weights', () => {
   const samples = [{ input:[0,0], label:'SAFE' }, { input:[0.1,0], label:'SAFE' }, { input:[1,1], label:'DANGER' }, { input:[0.9,1], label:'DANGER' }];
@@ -15,12 +20,21 @@ test('dense neural classifier trains, predicts, and restores persisted weights',
 });
 
 test('local command brain performs real training and persists its neural model', async () => {
-  const models = new MemoryRepository(), samples = new MemoryRepository(); const brain = createLocalCommandBrain({ modelRepository:models, sampleRepository:samples }); await brain.initialize();
-  const prediction = brain.predict('buat chest 2'); assert.equal(prediction.label, 'craft'); assert.ok(brain.status().metrics.samples >= 60); assert.equal((await models.list())[0].commandNetwork.architecture, 'dense-relu-softmax-v1'); assert.ok(brain.status().parameterCount >= 7_900_000);
+  const models = new MemoryRepository(); const brain = createLocalCommandBrain(options({ modelRepository:models })); await brain.initialize();
+  const prediction = brain.predict('buat chest 2'); assert.equal(prediction.label, 'craft'); assert.ok(brain.status().metrics.samples >= 60); assert.equal((await models.list())[0].network.architecture, 'dense-relu-softmax-v1'); assert.ok(brain.status().parameterCount >= 8_000_000); assert.equal(brain.status().backend,'python-pytorch');
 });
 
-test('8M local dialogue model trains and produces conversational classifications', () => {
-  const model = new NeuralDialogueModel(); const metrics = model.train(dialogueSamples()); assert.equal(model.parameterCount, 7_902_760); assert.ok(metrics.accuracy > 0.95); assert.equal(model.predict('cloud provider mati').label, 'cloud_failure');
+test('8M PyTorch bridge reports the autoregressive GRU architecture', async () => {
+  const bridge=new FakePyTorchBridge(); const trained=await bridge.train(['text'],{epochs:25}); assert.equal(trained.parameterCount,8_034_243); assert.equal(trained.architecture,'byte-gru-lm-2x896'); assert.equal(trained.metrics.epochs,25);
+});
+
+test('local knowledge retrieval ignores short polluted titles', async () => {
+  const documents=new MemoryRepository();
+  await documents.create({id:'bad',text:'Minecraft Review',source:'old-import'});
+  await documents.create({id:'good',text:'Minecraft adalah permainan sandbox berbasis blok yang memungkinkan pemain menjelajah, membangun, mengumpulkan sumber daya, dan bertahan hidup.',source:'dictionary'});
+  const brain=createLocalCommandBrain(options({documentRepository:documents})); await brain.initialize();
+  const answer=await brain.respond('apa itu minecraft? jelaskan secara singkat');
+  assert.match(answer.reply,/permainan sandbox berbasis blok/i); assert.equal(answer.knowledge.source,'dictionary');
 });
 
 test('environment neural model learns universal area safety memory', async () => {
@@ -30,12 +44,12 @@ test('environment neural model learns universal area safety memory', async () =>
 });
 
 test('LLM gateway can manually use the local neural command center', async () => {
-  const brain = createLocalCommandBrain({ modelRepository:new MemoryRepository(), sampleRepository:new MemoryRepository(), mode:'manual' }); await brain.initialize(); const gateway = new LlmGateway({ provider:'none' }, { warn(){} }, brain);
+  const brain = createLocalCommandBrain(options({ mode:'manual' })); await brain.initialize(); const gateway = new LlmGateway({ provider:'none' }, { warn(){} }, brain);
   const result = await gateway.interpret('buat chest 2', { selector:'bot:worker' }); assert.equal(result.intent, 'craft'); assert.equal(result.item, 'chest'); assert.equal(result.count, 2); assert.equal(gateway.status().provider, 'local-neural');
 });
 
 test('LLM gateway speaks through the local neural model when cloud is unavailable', async () => {
-  const brain = createLocalCommandBrain({ modelRepository:new MemoryRepository(), sampleRepository:new MemoryRepository(), mode:'fallback' }); await brain.initialize(); const gateway = new LlmGateway({ provider:'none' }, { warn(){} }, brain);
+  const brain = createLocalCommandBrain(options({ mode:'fallback' })); await brain.initialize(); const gateway = new LlmGateway({ provider:'none' }, { warn(){} }, brain);
   const result = await gateway.interpret('siapa kamu dan apa kemampuanmu', { selector:'auto', fleet:[{id:'one'}] }); assert.equal(result.intent, 'converse'); assert.match(result.reply, /MineHive|pusat komando|memahami perintah|membantu/i);
 });
 

@@ -1,0 +1,47 @@
+name: Local AI PyTorch
+
+on:
+  push:
+    paths:
+      - 'python/local_ai/**'
+      - 'requirements-local-ai.txt'
+      - '.github/workflows/local-ai-pytorch.yml'
+  pull_request:
+    paths:
+      - 'python/local_ai/**'
+      - 'requirements-local-ai.txt'
+      - '.github/workflows/local-ai-pytorch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements-local-ai.txt
+      - name: Train, save, load, and generate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from python.local_ai.model import generate, load_model, train_model
+
+          corpus = [
+              '[USER] apa itu minecraft?\n[ASSISTANT] Minecraft adalah permainan sandbox berbasis blok.\n',
+              '[USER] siapa kamu?\n[ASSISTANT] Aku pusat komando lokal MineHive.\n',
+          ]
+          with TemporaryDirectory() as directory:
+              checkpoint = Path(directory) / 'local-ai.pt'
+              result = train_model(corpus, checkpoint, epochs=1, batch_size=2)
+              assert result['model'].parameter_count == 8_034_243
+              model, payload = load_model(checkpoint)
+              assert payload['metrics']['epochs'] == 1
+              assert isinstance(generate(model, 'apa itu minecraft?', max_tokens=8)['text'], str)
+          PY

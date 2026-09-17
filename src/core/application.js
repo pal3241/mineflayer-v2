@@ -38,6 +38,7 @@ import { createAdaptiveModel } from '../ml/adaptive-model.js';
 import { createLocalCommandBrain } from '../ml/local-command-brain.js';
 import { createEnvironmentSafetyModel } from '../ml/environment-safety-model.js';
 import { createEnvironmentObserver } from '../ml/environment-observer.js';
+import { PythonLocalAiBridge } from '../ml/python-local-ai-bridge.js';
 import { createHiveService } from '../hivemind/hive-service.js';
 import { createAutonomyService } from '../autonomy/autonomy-service.js';
 import { SqliteDatabase } from '../database/sqlite-database.js';
@@ -96,7 +97,8 @@ export class Application {
     this.memoryLifecycle = createMemoryLifecycle({ memory: this.semanticMemory, logger: this.logger, intervalMs: config.semanticMemory.consolidationIntervalMs ?? 60_000 });
     this.discovery = createDiscoveryService({ worldMemory: this.worldMemory, semanticMemory: this.semanticMemory, events: this.events }); this.structureObserver = createStructureObserver({ discovery: this.discovery, logger: this.logger, intervalMs: 15_000, minimumDistance: 16, maxDistance: 64 });
     this.ml = createAdaptiveModel({ outcomeRepository: repository('ml-outcomes'), modelRepository: repository('ml-models'), events: this.events, minimumSamples: config.ml.minimumSamples });
-    this.localBrain = createLocalCommandBrain({ modelRepository: repository('local-command-models'), sampleRepository: repository('local-command-samples'), dialogueRepository: repository('local-dialogue-samples'), documentRepository: repository('local-training-documents'), events: this.events, enabled: true, mode: 'fallback' });
+    this.localAiBridge = new PythonLocalAiBridge({ checkpoint:join(resolve(config.dataPath),'local-ai','minehive-local-ai.pt'), python:process.env.MINEHIVE_PYTHON ?? 'python3', logger:this.logger });
+    this.localBrain = createLocalCommandBrain({ modelRepository: repository('local-command-models'), sampleRepository: repository('local-command-samples'), dialogueRepository: repository('local-dialogue-samples'), documentRepository: repository('local-training-documents'), dialogueBridge:this.localAiBridge, events: this.events, enabled: true, mode: 'fallback' });
     this.environmentModel = createEnvironmentSafetyModel({ observationRepository: repository('environment-observations'), modelRepository: repository('environment-models'), areaRepository: repository('environment-areas'), events: this.events, memory: this.universalMemory });
     this.environmentObserver = createEnvironmentObserver({ model: this.environmentModel, logger: this.logger });
     this.hive = createHiveService({ repositories: { messages: repository('hive-messages'), state: repository('hive-state'), locks: repository('hive-locks'), decisions: repository('hive-decisions') }, events: this.events, ml: this.ml, heartbeatTimeoutMs: config.hive.heartbeatTimeoutMs });
@@ -191,7 +193,7 @@ export class Application {
   }
   async stop() {
     if (['STOPPED', 'CREATED'].includes(this.state)) { this.state = 'STOPPED'; await this.logStore?.flush(); return; }
-    this.state = 'SHUTTING_DOWN'; this.autonomy.stop(); this.memoryLifecycle.stop(); this.environmentObserver.stop(); this.environmentModel.dispose(); this.workingMemory.dispose(); this.episodicMemory.dispose(); this.knowledge.dispose(); this.memoryIntegrity.dispose(); this.universalMemory.dispose(); this.memoryEventStream.dispose(); this.coordination.dispose(); this.structureObserver.stop(); this.survival.stop(); this.taskReporter.stop(); await this.clientBridge.dispose(); await this.navigation.stop(); await this.api.stop(); await this.goals.stop(); await this.bots.stopAll();
+    this.state = 'SHUTTING_DOWN'; this.autonomy.stop(); this.memoryLifecycle.stop(); this.environmentObserver.stop(); this.environmentModel.dispose(); this.workingMemory.dispose(); this.episodicMemory.dispose(); this.knowledge.dispose(); this.memoryIntegrity.dispose(); this.universalMemory.dispose(); this.memoryEventStream.dispose(); this.coordination.dispose(); this.structureObserver.stop(); this.survival.stop(); this.taskReporter.stop(); await this.localBrain.dispose(); await this.clientBridge.dispose(); await this.navigation.stop(); await this.api.stop(); await this.goals.stop(); await this.bots.stopAll();
     await this.plugins.run('stop', this.context(), { reverse: true }); await this.modules.run('stop', this.context(), { reverse: true });
     this.state = 'STOPPED'; await this.events.publish('application.stopped', {}, { source: 'application' }); this.events.clear(); this.database?.close(); this.logger.info('application.stopped'); await this.logStore?.flush();
   }

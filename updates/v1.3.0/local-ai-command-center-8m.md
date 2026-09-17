@@ -5,7 +5,7 @@ MineHive now includes a real local neural command-and-dialogue center for cloud 
 ## Model
 
 - 8,192-token hashed vocabulary.
-- 960-dimensional int8 embedding table.
+- This first implementation has been superseded by the PyTorch language model in v1.3.1; the JavaScript dialogue classifier is no longer used.
 - 40-way FP32 Softmax dialogue head.
 - 7,902,760 dialogue parameters; about 7,909,981 parameters including command intent classification.
 - Supervised training metrics, persisted checkpoint, confidence output, and offline inference.

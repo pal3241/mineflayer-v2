@@ -1,4 +1,4 @@
-# MineHive Client 1.3.0
+# MineHive Client 1.3.1
 
 Fabric client mod for Minecraft Java 1.21.1. It connects directly to MineHive's authenticated v1 client bridge.
 
@@ -21,6 +21,6 @@ cd client-mod
 gradle build
 ```
 
-Install `client-mod/build/libs/minehive-client-1.3.0.jar` with Fabric Loader and Fabric API for Minecraft 1.21.1. Litematica is an optional compatibility provider, not a required dependency.
+Install `client-mod/build/libs/minehive-client-1.3.1.jar` with Fabric Loader and Fabric API for Minecraft 1.21.1. Litematica is an optional compatibility provider, not a required dependency.
 
 Use `http://127.0.0.1:3000` only when Minecraft and MineHive run on the same device. Otherwise set the MineHive device LAN address, for example `http://192.168.1.6:3000`. Copy `MINEHIVE_API_TOKEN` if API authentication is enabled.

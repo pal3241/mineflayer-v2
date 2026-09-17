@@ -1,5 +1,11 @@
 # MineHive Local AI Training
 
+Install Python dependencies once:
+
+```bash
+npm run ai:setup
+```
+
 Run the default command-center dataset:
 
 ```bash
@@ -11,6 +17,10 @@ Train from one or more local files, directories, or web pages:
 ```bash
 npm run ai -- training training/local-ai/command-center.jsonl
 npm run ai -- training ./datasets https://id.wikipedia.org/wiki/Minecraft
+npm run ai -- training --epochs 50 kbbi.txt english-dictionary.txt
+npm run ai -- save ./models/minehive-local-ai.pt
 ```
 
-Supported local formats are JSON, JSONL, CSV, and TXT. JSON records use `text` plus a dialogue `label`; optional `response`, `answer`, or `knowledge` text is stored as local knowledge. Plain text and HTML pages are split and automatically labelled. Internet content is downloaded only during training; runtime inference remains offline.
+Supported local formats are JSON, JSONL, CSV, and TXT. JSON records use `text` plus an optional `response`, `answer`, or `knowledge`. Plain text and HTML pages become language-model corpus and local knowledge. Internet content is downloaded only during training; runtime inference remains offline.
+
+`--epochs` accepts 1–500. More epochs mean more passes over the corpus and longer training. Every successful training automatically saves the active PyTorch checkpoint under `data/local-ai/`; `ai save` exports a copy that contains the neural weights, model configuration, metrics, and corpus fingerprint.

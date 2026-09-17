@@ -1,0 +1,16 @@
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { ValidationError } from '../core/errors.js';
+
+export class PythonLocalAiBridge {
+  #worker = null; #pending = new Map(); #sequence = 0; #stderr = ''; #cachedStatus = { status:'STOPPED', parameterCount:8_034_243, metrics:{} };
+  constructor({ checkpoint, python = process.env.MINEHIVE_PYTHON ?? 'python3', logger = null }) { this.checkpoint = checkpoint; this.python = python; this.logger = logger; }
+  async initialize(texts, options = {}) { this.#start(); this.#cachedStatus = await this.#request('initialize', { texts, epochs:options.epochs ?? 12 }, 900_000); return this.status(); }
+  async train(texts, options = {}) { this.#start(); this.#cachedStatus = await this.#request('train', { texts, epochs:options.epochs ?? 12 }, 3_600_000); return this.status(); }
+  async generate(text, options = {}) { this.#start(); return this.#request('generate', { text:String(text).slice(0,2000), maxTokens:options.maxTokens ?? 180, temperature:options.temperature ?? 0.75 }, 120_000); }
+  async save(path) { this.#start(); return this.#request('save', { path }, 30_000); }
+  status() { return { ...this.#cachedStatus, backend:'python-pytorch', checkpoint:this.checkpoint }; }
+  async dispose() { if (!this.#worker) return; try { await this.#request('shutdown', {}, 2000); } catch {} this.#worker.kill(); this.#worker = null; }
+  #start() { if (this.#worker) return; this.#stderr=''; const worker = spawn(this.python, ['-m','python.local_ai.worker','serve','--checkpoint',this.checkpoint], { stdio:['pipe','pipe','pipe'] }); this.#worker = worker; const lines=createInterface({input:worker.stdout}); lines.on('line',line=>{ let value; try{value=JSON.parse(line);}catch{return;} const pending=this.#pending.get(value.id); if(!pending)return; this.#pending.delete(value.id); clearTimeout(pending.timer); value.error?pending.reject(new Error(value.error)):pending.resolve(value.result); }); worker.stderr.on('data',data=>{this.#stderr=`${this.#stderr}${String(data)}`.slice(-4000);this.logger?.warn?.('local-ai.python.stderr',{message:String(data).trim().slice(0,1000)});}); worker.on('exit',(code,signal)=>{ const detail=this.#stderr.trim().split('\n').slice(-3).join(' '); const error=new Error(`PyTorch local AI worker stopped (${code ?? signal}). Run "npm run ai:setup".${detail?` ${detail}`:''}`); for(const pending of this.#pending.values()){clearTimeout(pending.timer);pending.reject(error);} this.#pending.clear(); this.#worker=null; }); worker.on('error',error=>{this.logger?.error?.('local-ai.python.failed',{error:error.message});}); }
+  #request(action,payload,timeoutMs){ if(!this.#worker?.stdin?.writable) throw new ValidationError('PyTorch local AI worker is unavailable. Install requirements-local-ai.txt'); const id=++this.#sequence; return new Promise((resolve,reject)=>{ const timer=setTimeout(()=>{this.#pending.delete(id);reject(new Error(`PyTorch local AI ${action} timed out`));},timeoutMs); timer.unref?.(); this.#pending.set(id,{resolve,reject,timer}); this.#worker.stdin.write(`${JSON.stringify({id,action,...payload})}\n`); }); }
+}
