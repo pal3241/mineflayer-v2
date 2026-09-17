@@ -1,3 +1,5 @@
+import { ValidationError } from '../core/errors.js';
+
 export const MINECRAFT_CAPABILITIES = Object.freeze([
   'minecraft.blueprint-place', 'minecraft.navigation-recovery',
   'minecraft.navigation-terrain-scan',
@@ -12,8 +14,8 @@ export function registerMinecraftCapabilities(registry, botManager, survival) {
   registry.register({ name: 'minecraft.navigation', execute: (input, context) => adapter(context).navigateTo({ position: input.target ?? input.position ?? input, tolerance: input.tolerance ?? input.range, mode: input.mode, policy: input.policy, movement: input.movement }, context) });
   registry.register({ name: 'minecraft.navigation-stop', execute: (_input, context) => adapter(context).stopNavigation() });
   registry.register({ name: 'minecraft.navigation-target', execute: (input, context) => adapter(context).resolveNavigationTarget(input.target) });
-  registry.register({ name: 'minecraft.navigation-terrain-scan', execute: (input, context) => { const target = adapter(context); return target.inspectNavigationTerrain ? target.inspectNavigationTerrain(input) : { position: input.position, hazards: [], fallDistance: 0, safe: true, blockedTypes: [], unavailable: true }; } });
-  registry.register({ name: 'minecraft.navigation-precision', execute: (input, context) => { const target = adapter(context); return target.precisionNavigate ? target.precisionNavigate(input, context) : { position: input.target, distance: 0, stableSamples: 1, attempts: 1, aligned: false, verified: true, unavailable: true }; } });
+  registry.register({ name: 'minecraft.navigation-terrain-scan', execute: (input, context) => invokeRequired(adapter(context), 'inspectNavigationTerrain', input) });
+  registry.register({ name: 'minecraft.navigation-precision', execute: (input, context) => invokeRequired(adapter(context), 'precisionNavigate', input, context) });
   registry.register({ name: 'minecraft.navigation-recovery', execute: (input, context) => adapter(context).controlledRecovery(input, context) });
   registry.register({ name: 'minecraft.navigation-pillar', execute: (input, context) => adapter(context).safePillarStep(input, context) });
   registry.register({ name: 'minecraft.navigation-bridge', execute: (input, context) => adapter(context).safeBridgeStep(input, context) });
@@ -69,3 +71,5 @@ export function registerMinecraftCapabilities(registry, botManager, survival) {
   registry.register({ name: 'minecraft.inventory', execute: (_input, context) => adapter(context).snapshot().inventorySummary });
   registry.register({ name: 'minecraft.stop', execute: async (_input, context) => { await adapter(context).stopActions(); return { stopped: true }; } });
 }
+
+function invokeRequired(target,method,...args){const operation=target?.[method];if(typeof operation!=='function')throw new ValidationError(`Minecraft capability requires adapter method '${method}'`);return operation.call(target,...args);}
