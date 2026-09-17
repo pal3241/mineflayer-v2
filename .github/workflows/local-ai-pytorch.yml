@@ -25,6 +25,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
+          cache-dependency-path: requirements-local-ai.txt
       - run: python -m pip install -r requirements-local-ai.txt
       - name: Train, save, load, and generate
         run: |
