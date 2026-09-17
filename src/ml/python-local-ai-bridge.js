@@ -5,8 +5,8 @@ import { ValidationError } from '../core/errors.js';
 export class PythonLocalAiBridge {
   #worker = null; #pending = new Map(); #sequence = 0; #stderr = ''; #cachedStatus = { status:'STOPPED', parameterCount:8_034_243, metrics:{} };
   constructor({ checkpoint, python = process.env.MINEHIVE_PYTHON ?? 'python3', logger = null }) { this.checkpoint = checkpoint; this.python = python; this.logger = logger; }
-  async initialize(texts, options = {}) { this.#start(); const initialEpochs=Number(process.env.MINEHIVE_LOCAL_AI_INITIAL_EPOCHS ?? 12); this.#cachedStatus = await this.#request('initialize', { texts, epochs:options.epochs ?? initialEpochs, sequenceLength:options.sequenceLength ?? 64, maxSequences:options.maxSequences ?? 512 }, 900_000, options.onProgress); return this.status(); }
-  async train(texts, options = {}) { this.#start(); this.#cachedStatus = await this.#request('train', { texts, epochs:options.epochs ?? 12, sequenceLength:options.sequenceLength ?? 64, maxSequences:options.maxSequences ?? 512 }, 3_600_000, options.onProgress); return this.status(); }
+  async initialize(texts, options = {}) { this.#start(); const initialEpochs=Number(process.env.MINEHIVE_LOCAL_AI_INITIAL_EPOCHS ?? 12); this.#cachedStatus = await this.#request('initialize', { texts, epochs:options.epochs ?? initialEpochs, sequenceLength:options.sequenceLength ?? 32, maxSequences:options.maxSequences ?? 384 }, 900_000, options.onProgress); return this.status(); }
+  async train(texts, options = {}) { this.#start(); this.#cachedStatus = await this.#request('train', { texts, epochs:options.epochs ?? 12, sequenceLength:options.sequenceLength ?? 32, maxSequences:options.maxSequences ?? 384 }, 3_600_000, options.onProgress); return this.status(); }
   async generate(text, options = {}) { this.#start(); return this.#request('generate', { text:String(text).slice(0,2000), maxTokens:options.maxTokens ?? 180, temperature:options.temperature ?? 0.75 }, 120_000); }
   async save(path) { this.#start(); return this.#request('save', { path }, 30_000); }
   status() { return { ...this.#cachedStatus, backend:'python-pytorch', checkpoint:this.checkpoint }; }

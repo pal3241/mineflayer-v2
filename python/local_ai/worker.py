@@ -14,11 +14,11 @@ def main():
                 if checkpoint.exists():
                     loaded,payload=load_model(checkpoint)
                     if payload.get('dataset_fingerprint')==expected:model,metadata=loaded,payload
-                    else:result=train_model(texts,checkpoint,request.get('epochs',12),sequence_length=request.get('sequenceLength',64),max_sequences=request.get('maxSequences',512),progress=lambda value:progress(request,value));model,metadata=result['model'],result['payload']
-                else:result=train_model(texts,checkpoint,request.get('epochs',12),sequence_length=request.get('sequenceLength',64),max_sequences=request.get('maxSequences',512),progress=lambda value:progress(request,value));model,metadata=result['model'],result['payload']
+                    else:result=train_model(texts,checkpoint,request.get('epochs',12),sequence_length=request.get('sequenceLength',32),max_sequences=request.get('maxSequences',384),progress=lambda value:progress(request,value));model,metadata=result['model'],result['payload']
+                else:result=train_model(texts,checkpoint,request.get('epochs',12),sequence_length=request.get('sequenceLength',32),max_sequences=request.get('maxSequences',384),progress=lambda value:progress(request,value));model,metadata=result['model'],result['payload']
                 respond(request,status(model,metadata,checkpoint))
             elif action=='train':
-                result=train_model(request.get('texts',[]),checkpoint,request.get('epochs',12),sequence_length=request.get('sequenceLength',64),max_sequences=request.get('maxSequences',512),progress=lambda value:progress(request,value));model,metadata=result['model'],result['payload'];respond(request,status(model,metadata,checkpoint))
+                result=train_model(request.get('texts',[]),checkpoint,request.get('epochs',12),sequence_length=request.get('sequenceLength',32),max_sequences=request.get('maxSequences',384),progress=lambda value:progress(request,value));model,metadata=result['model'],result['payload'];respond(request,status(model,metadata,checkpoint))
             elif action=='generate':
                 if model is None:model,metadata=load_model(checkpoint)
                 respond(request,generate(model,request.get('text',''),request.get('maxTokens',180),request.get('temperature',0.75)))

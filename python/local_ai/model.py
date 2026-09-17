@@ -56,14 +56,28 @@ def collate(rows):
         values=torch.tensor(row,dtype=torch.long); inputs[index,:len(row)-1]=values[:-1]; targets[index,:len(row)-1]=values[1:]
     return inputs,targets
 
-def train_model(texts:list[str],checkpoint:str|Path,epochs:int=12,batch_size:int=8,sequence_length:int=64,max_sequences:int=512,seed:int=1337,progress=None):
+def train_model(texts:list[str],checkpoint:str|Path,epochs:int=12,batch_size:int=16,sequence_length:int=32,max_sequences:int=384,seed:int=1337,progress=None,resume:bool=True,threads:int|None=None):
     if not 16 <= int(sequence_length) <= 256: raise ValueError('sequence_length must be from 16 to 256')
     if not 0 <= int(max_sequences) <= 100000: raise ValueError('max_sequences must be from 0 to 100000')
-    torch.manual_seed(seed); torch.set_num_threads(max(1,min(8,torch.get_num_threads()))); config=ModelConfig(sequence_length=int(sequence_length)); progress and progress({'phase':'preparing','percent':0,'texts':0,'totalTexts':len(texts)}); dataset=LanguageDataset(texts,config.sequence_length,int(max_sequences),progress)
+    torch.manual_seed(seed)
+    worker_threads=max(1,min(4,threads if threads is not None else (torch.get_num_threads() or 1)))
+    torch.set_num_threads(worker_threads)
+    try: torch.set_num_interop_threads(1)
+    except RuntimeError: pass
+    config=ModelConfig(sequence_length=int(sequence_length)); progress and progress({'phase':'preparing','percent':0,'texts':0,'totalTexts':len(texts)}); dataset=LanguageDataset(texts,config.sequence_length,int(max_sequences),progress)
     if not dataset:raise ValueError('Local AI training requires non-empty text')
-    loader=DataLoader(dataset,batch_size=min(batch_size,len(dataset)),shuffle=True,collate_fn=collate,generator=torch.Generator().manual_seed(seed)); model=MineHiveLocalAI(config); optimizer=torch.optim.AdamW(model.parameters(),lr=0.0015,weight_decay=0.01); criterion=nn.CrossEntropyLoss(ignore_index=-100); model.train(); last_loss=0.0
+    loader=DataLoader(dataset,batch_size=min(batch_size,len(dataset)),shuffle=True,collate_fn=collate,generator=torch.Generator().manual_seed(seed),num_workers=0)
+    checkpoint_path=Path(checkpoint)
+    model=MineHiveLocalAI(config)
+    resumed=False
+    if resume and checkpoint_path.exists():
+        try:
+            previous=torch.load(checkpoint_path,map_location='cpu',weights_only=False)
+            if previous.get('config',{}) == asdict(config): model.load_state_dict(previous['state_dict']); resumed=True
+        except (OSError, KeyError, RuntimeError, ValueError): pass
+    optimizer=torch.optim.AdamW(model.parameters(),lr=0.0015,weight_decay=0.01); criterion=nn.CrossEntropyLoss(ignore_index=-100); model.train(); last_loss=0.0
     total_epochs=max(1,min(int(epochs),500))
-    progress and progress({'phase':'training','epoch':1,'epochs':total_epochs,'batch':0,'batches':len(loader),'percent':0,'loss':None,'sequences':len(dataset)})
+    progress and progress({'phase':'training','epoch':1,'epochs':total_epochs,'batch':0,'batches':len(loader),'percent':0,'loss':None,'sequences':len(dataset),'resumed':resumed})
     reported=-1
     for epoch in range(total_epochs):
         total=0.0;batches=0
@@ -73,8 +87,9 @@ def train_model(texts:list[str],checkpoint:str|Path,epochs:int=12,batch_size:int
             percent=round(((epoch+(batch_index+1)/batch_count)*100)/total_epochs,1)
             if progress and (int(percent)!=reported or batch_index+1==batch_count):reported=int(percent);progress({'phase':'training','epoch':epoch+1,'epochs':total_epochs,'batch':batch_index+1,'batches':batch_count,'percent':percent,'loss':round(total/batches,6),'sequences':len(dataset)})
         last_loss=total/max(1,batches)
+        progress and progress({'phase':'epoch','epoch':epoch+1,'epochs':total_epochs,'loss':round(last_loss,6),'sequences':len(dataset),'resumed':resumed})
     progress and progress({'phase':'saving','percent':100})
-    metrics={'epochs':total_epochs,'loss':round(last_loss,6),'sequences':len(dataset),'texts':len(texts),'perplexity':round(float(torch.exp(torch.tensor(min(last_loss,20.0)))),4)}; checkpoint_path=Path(checkpoint);checkpoint_path.parent.mkdir(parents=True,exist_ok=True);payload={'format':'minehive-pytorch-gru-lm-v1','config':asdict(config),'state_dict':model.state_dict(),'metrics':metrics,'dataset_fingerprint':fingerprint(texts)};torch.save(payload,checkpoint_path);model.eval();return {'model':model,'payload':payload,'checkpoint':str(checkpoint_path)}
+    metrics={'epochs':total_epochs,'loss':round(last_loss,6),'sequences':len(dataset),'texts':len(texts),'perplexity':round(float(torch.exp(torch.tensor(min(last_loss,20.0)))),4),'resumed':resumed,'sequenceLength':config.sequence_length,'batchSize':min(batch_size,len(dataset))}; checkpoint_path.parent.mkdir(parents=True,exist_ok=True);payload={'format':'minehive-pytorch-gru-lm-v1','config':asdict(config),'state_dict':model.state_dict(),'metrics':metrics,'dataset_fingerprint':fingerprint(texts)};torch.save(payload,checkpoint_path);model.eval();return {'model':model,'payload':payload,'checkpoint':str(checkpoint_path)}
 
 def load_model(checkpoint:str|Path):
     payload=torch.load(checkpoint,map_location='cpu',weights_only=False);config=ModelConfig(**payload['config']);model=MineHiveLocalAI(config);model.load_state_dict(payload['state_dict']);model.eval();return model,payload
