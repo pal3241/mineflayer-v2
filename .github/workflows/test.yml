@@ -29,4 +29,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run tests
+        env:
+          MINEHIVE_LOCAL_AI_INITIAL_EPOCHS: '1'
         run: npm test
