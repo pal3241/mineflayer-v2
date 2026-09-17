@@ -29,11 +29,13 @@ class MineHiveLocalAI(nn.Module):
     def parameter_count(self): return sum(parameter.numel() for parameter in self.parameters())
 
 class LanguageDataset(Dataset):
-    def __init__(self,texts:list[str],sequence_length:int):
+    def __init__(self,texts:list[str],sequence_length:int,progress=None):
         stream=[]
-        for text in texts:
+        total_texts=max(1,len(texts))
+        for index,text in enumerate(texts):
             encoded=list(str(text).encode('utf-8',errors='replace'))
             if encoded: stream.extend([BOS,*encoded,EOS])
+            if progress and (index==0 or index+1==len(texts) or (index+1)%max(1,total_texts//100)==0):progress({'phase':'preparing','percent':round((index+1)*100/total_texts,1),'texts':index+1,'totalTexts':len(texts)})
         self.rows=[]; stride=max(32,sequence_length//2)
         for start in range(0,max(1,len(stream)-1),stride):
             chunk=stream[start:start+sequence_length+1]
@@ -48,16 +50,20 @@ def collate(rows):
     return inputs,targets
 
 def train_model(texts:list[str],checkpoint:str|Path,epochs:int=12,batch_size:int=8,seed:int=1337,progress=None):
-    torch.manual_seed(seed); torch.set_num_threads(max(1,min(8,torch.get_num_threads()))); config=ModelConfig(); dataset=LanguageDataset(texts,config.sequence_length)
+    torch.manual_seed(seed); torch.set_num_threads(max(1,min(8,torch.get_num_threads()))); config=ModelConfig(); progress and progress({'phase':'preparing','percent':0,'texts':0,'totalTexts':len(texts)}); dataset=LanguageDataset(texts,config.sequence_length,progress)
     if not dataset:raise ValueError('Local AI training requires non-empty text')
     loader=DataLoader(dataset,batch_size=min(batch_size,len(dataset)),shuffle=True,collate_fn=collate,generator=torch.Generator().manual_seed(seed)); model=MineHiveLocalAI(config); optimizer=torch.optim.AdamW(model.parameters(),lr=0.0015,weight_decay=0.01); criterion=nn.CrossEntropyLoss(ignore_index=-100); model.train(); last_loss=0.0
     total_epochs=max(1,min(int(epochs),500))
+    reported=-1
     for epoch in range(total_epochs):
         total=0.0;batches=0
-        for inputs,targets in loader:
+        batch_count=len(loader)
+        for batch_index,(inputs,targets) in enumerate(loader):
             optimizer.zero_grad(set_to_none=True);logits,_=model(inputs);loss=criterion(logits.reshape(-1,config.vocab_size),targets.reshape(-1));loss.backward();nn.utils.clip_grad_norm_(model.parameters(),1.0);optimizer.step();total+=float(loss.detach());batches+=1
+            percent=round(((epoch+(batch_index+1)/batch_count)*100)/total_epochs,1)
+            if progress and (int(percent)!=reported or batch_index+1==batch_count):reported=int(percent);progress({'phase':'training','epoch':epoch+1,'epochs':total_epochs,'batch':batch_index+1,'batches':batch_count,'percent':percent,'loss':round(total/batches,6),'sequences':len(dataset)})
         last_loss=total/max(1,batches)
-        if progress:progress({'phase':'training','epoch':epoch+1,'epochs':total_epochs,'percent':round((epoch+1)*100/total_epochs,1),'loss':round(last_loss,6),'sequences':len(dataset)})
+    progress and progress({'phase':'saving','percent':100})
     metrics={'epochs':total_epochs,'loss':round(last_loss,6),'sequences':len(dataset),'texts':len(texts),'perplexity':round(float(torch.exp(torch.tensor(min(last_loss,20.0)))),4)}; checkpoint_path=Path(checkpoint);checkpoint_path.parent.mkdir(parents=True,exist_ok=True);payload={'format':'minehive-pytorch-gru-lm-v1','config':asdict(config),'state_dict':model.state_dict(),'metrics':metrics,'dataset_fingerprint':fingerprint(texts)};torch.save(payload,checkpoint_path);model.eval();return {'model':model,'payload':payload,'checkpoint':str(checkpoint_path)}
 
 def load_model(checkpoint:str|Path):
