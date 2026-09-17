@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
+/** @deprecated Optional legacy backend. Runtime adaptive learning uses adaptive-model.js. */
 export class NativeTaskModel {
   constructor({ binary = process.env.MINEHIVE_NATIVE_ML_BIN ?? defaultBinary() } = {}) { this.binary = binary; }
   available() { return existsSync(this.binary); }
