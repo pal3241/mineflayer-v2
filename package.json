@@ -14,7 +14,9 @@
     "test": "node --test",
     "health": "node src/cli.js health",
     "ai": "node src/cli.js ai",
-    "ai:setup": "node scripts/setup-local-ai.js"
+    "ai:setup": "node scripts/setup-local-ai.js",
+    "ml:build": "cargo build --manifest-path native-ml/Cargo.toml --release",
+    "ml:setup": "node scripts/setup-native-ml.js"
   },
   "engines": {
     "node": ">=22"

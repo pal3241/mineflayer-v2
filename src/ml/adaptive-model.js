@@ -1,33 +1,52 @@
 import { randomUUID } from 'node:crypto';
 import { ValidationError } from '../core/errors.js';
+import { NativeTaskModel } from './native-task-model.js';
+import { DenseClassifier } from './neural-network.js';
 
-export function createAdaptiveModel({ outcomeRepository, modelRepository, events, minimumSamples }) {
+const WIDTH = 64;
+
+// This is a trained success classifier, not a manually weighted score.
+export function createAdaptiveModel({ outcomeRepository, modelRepository, events, minimumSamples, nativeModel = new NativeTaskModel() }) {
   if (!outcomeRepository || !modelRepository) throw new ValidationError('ML outcome and model repositories are required');
-  if (!Number.isInteger(minimumSamples) || minimumSamples < 2) throw new ValidationError('ML minimumSamples must be at least 2');
-
-  let modelInitialization = null; let outcomesPromise = null; let modelsPromise = null; let mutationQueue = Promise.resolve(); let predictionCount = 0; let predictionLatencyMs = 0;
-  const loadOutcomes = () => { outcomesPromise ??= outcomeRepository.list(); return outcomesPromise; }; const loadModels = () => { modelsPromise ??= modelRepository.list(); return modelsPromise; };
-  const mutate = operation => { const result = mutationQueue.then(operation); mutationQueue = result.then(() => undefined, () => undefined); return result; };
-  const recordOutcome = input => mutate(async () => {
-    const outcome = normalizeOutcome(input); const outcomes = await loadOutcomes(); const models = await loadModels(); const record = await outcomeRepository.create({ ...outcome, id: randomUUID(), createdAt: new Date().toISOString(), schemaVersion: 1 });
-    outcomesPromise = Promise.resolve([record, ...outcomes]); modelInitialization ??= ensureModel(modelRepository, () => Promise.resolve(models), minimumSamples); const model = await modelInitialization; modelsPromise = Promise.resolve(models.length ? models : [model]); await events?.publish('ml.outcome.recorded', record, { source: 'adaptive-model' }); return record;
+  let outcomeCache = null; let modelCache = null; let queue = Promise.resolve(); let active = null; let predictionCount = 0; let totalLatency = 0;
+  const outcomes = async () => outcomeCache ??= await outcomeRepository.list();
+  const storedModels = async () => modelCache ??= await modelRepository.list();
+  const enqueue = operation => { const result = queue.then(operation); queue = result.then(() => undefined, () => undefined); return result; };
+  const train = async () => {
+    const records = await outcomes(); const samples = records.map(record => ({ input: vector(record), success: record.success })); const previous = (await storedModels()).find(item => item.id === 'native-task-success-v1'); let model;
+    if (nativeModel.available()) {
+      const result = await nativeModel.train(samples, { weights: previous?.weights, bias: previous?.bias });
+      model = { id:'native-task-success-v1', version:1, status:'PRODUCTION', modelType:'rust-logistic-regression', featureVersion:3, weights:result.weights, bias:result.bias, metrics:{ samples:result.samples, loss:round(result.loss), accuracy:round(result.accuracy) }, trainedAt:new Date().toISOString() };
+    } else {
+      const network = new DenseClassifier({ inputSize:WIDTH, hiddenSize:24, labels:['FAILURE','SUCCESS'] });
+      const fallback = samples.length ? samples : [{ input:Array(WIDTH).fill(0), success:true }, { input:Array(WIDTH).fill(0), success:false }];
+      const metrics = network.train(fallback.map(item => ({ input:item.input, label:item.success ? 'SUCCESS' : 'FAILURE' })), { epochs:180, learningRate:0.035 });
+      model = { id:'native-task-success-v1', version:1, status:'PRODUCTION', modelType:'dense-neural-fallback', featureVersion:3, network:network.serialize(), metrics, trainedAt:new Date().toISOString() };
+    }
+    if (previous) await modelRepository.update(previous.id, model); else await modelRepository.create(model);
+    modelCache = [model, ...(await storedModels()).filter(item => item.id !== model.id)]; active = model;
+    await events?.publish('ml.trained', { model:model.modelType, metrics:model.metrics }, { source:'adaptive-model' }); return model;
+  };
+  const ensure = async () => active ?? (await storedModels()).find(item => item.id === 'native-task-success-v1') ?? train();
+  const recordOutcome = input => enqueue(async () => {
+    const value = normalize(input); const record = await outcomeRepository.create({ id:randomUUID(), ...value, createdAt:new Date().toISOString(), schemaVersion:1 }); outcomeCache = [record, ...await outcomes()];
+    if (outcomeCache.length >= minimumSamples) await train();
+    await events?.publish('ml.outcome.recorded', record, { source:'adaptive-model' }); return record;
   });
   const predict = async input => {
-    const started = performance.now(); const botId = String(input.botId ?? ''); const intent = String(input.intent ?? 'unknown'); if (!botId) throw new ValidationError('ML prediction requires botId'); const features = normalizeFeatures(input.features ?? {});
-    const candidates = (await loadOutcomes()).filter(item => item.intent === intent || item.intent === 'unknown'); const weighted = candidates.map(outcome => ({ outcome, weight: evidenceWeight(outcome, botId, features) })); const successWeight = weighted.filter(item => item.outcome.success).reduce((sum, item) => sum + item.weight, 0); const failureWeight = weighted.filter(item => !item.outcome.success).reduce((sum, item) => sum + item.weight, 0); const totalWeight = successWeight + failureWeight; const probability = (successWeight + 1) / (totalWeight + 2); const exact = candidates.filter(item => item.botId === botId && item.intent === intent);
-    predictionCount++; predictionLatencyMs += performance.now() - started;
-    return { prediction: round(probability), confidence: round(Math.min(0.98, 1 - Math.exp(-totalWeight / Math.max(2, minimumSamples * 2)))), modelVersion: 'contextual-beta-v2', sampleCount: candidates.length, evidence: { exactSamples: exact.length, fleetSamples: candidates.length - exact.length, successWeight: round(successWeight), failureWeight: round(failureWeight), expectedDurationMs: weightedDuration(weighted) }, timestamp: new Date().toISOString() };
+    const started = performance.now(); if (!input?.botId) throw new ValidationError('ML prediction requires botId'); const model = await ensure(); const inputVector = vector({ botId:String(input.botId), intent:String(input.intent ?? 'unknown'), features:normalizeFeatures(input.features ?? {}) }); let probability;
+    if (model.modelType === 'rust-logistic-regression' && nativeModel.available()) probability = (await nativeModel.predict(inputVector, model)).probability;
+    else probability = DenseClassifier.restore(model.network).predict(inputVector).probabilities.SUCCESS;
+    predictionCount++; totalLatency += performance.now() - started; const sampleCount = (await outcomes()).filter(item => item.intent === String(input.intent ?? 'unknown')).length;
+    return { prediction:round(probability), confidence:round(Math.min(.99, 1 - Math.exp(-sampleCount / Math.max(2, minimumSamples)))), modelVersion:'native-task-success-v1', sampleCount, model:model.modelType, timestamp:new Date().toISOString() };
   };
-  const status = async () => { const outcomes = await loadOutcomes(); const models = await loadModels(); const recent = outcomes.slice(0, 50); const older = outcomes.slice(50, 100); const drift = Math.abs(successRate(recent) - successRate(older)); return { status: 'HEALTHY', outcomeCount: outcomes.length, inferenceVersion: 'contextual-beta-v2', productionModel: models.find(model => model.status === 'PRODUCTION') ?? null, monitoring: { predictionCount, averagePredictionLatencyMs: predictionCount ? round(predictionLatencyMs / predictionCount) : 0, successRate: round(successRate(outcomes)), byIntent: summarize(outcomes, 'intent'), byBot: summarize(outcomes, 'botId') }, drift: { detected: older.length >= minimumSamples && drift > 0.25, magnitude: round(drift) } }; };
-  return Object.freeze({ recordOutcome, predict, status, models: loadModels, outcomes: loadOutcomes });
+  const status = async () => { const records=await outcomes(); return { status:'HEALTHY', outcomeCount:records.length, inferenceVersion:'native-task-success-v1', productionModel:await ensure(), monitoring:{ predictionCount, averagePredictionLatencyMs:predictionCount ? round(totalLatency / predictionCount) : 0, nativeAvailable:nativeModel.available(), byIntent:summarize(records,'intent'), byBot:summarize(records,'botId') } }; };
+  return Object.freeze({ recordOutcome, predict, status, train, models:storedModels, outcomes });
 }
-
-function normalizeOutcome(input) { if (typeof input.success !== 'boolean') throw new ValidationError('ML outcome success must be boolean'); const durationMs = Number(input.durationMs); if (!Number.isFinite(durationMs) || durationMs < 0) throw new ValidationError('ML outcome durationMs must be a non-negative number'); const botId = String(input.botId ?? ''); if (!botId) throw new ValidationError('ML outcome requires botId'); return { botId, intent: String(input.intent ?? 'unknown'), success: input.success, durationMs, features: normalizeFeatures(input.features ?? {}), labelVersion: 1, featureVersion: 2, source: String(input.source ?? 'coordinator') }; }
-async function ensureModel(repository, loadModels, minimumSamples) { const existing = await loadModels(); if (existing.length) return existing[0]; const now = new Date().toISOString(); return repository.create({ id: 'contextual-beta-v2', version: 2, task: 'task-success', modelType: 'hierarchical-contextual-beta', featureVersion: 2, labelVersion: 1, minimumSamples, metrics: {}, status: 'PRODUCTION', createdAt: now, promotedAt: now }); }
-function normalizeFeatures(features) { if (!features || typeof features !== 'object' || Array.isArray(features)) throw new ValidationError('ML features must be an object'); return Object.fromEntries(Object.entries(features).filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value) && (typeof value !== 'number' || Number.isFinite(value))).slice(0, 32)); }
-function evidenceWeight(outcome, botId, features) { const agent = outcome.botId === botId ? 2.5 : 0.75; const intent = outcome.intent === 'unknown' ? 0.5 : 1; const ageDays = Math.max(0, (Date.now() - Date.parse(outcome.createdAt)) / 86_400_000); return agent * intent * Math.max(0.25, Math.exp(-ageDays / 30)) * featureSimilarity(outcome.features ?? {}, features); }
-function featureSimilarity(left, right) { const keys = Object.keys(right); if (!keys.length) return 1; const matched = keys.reduce((sum, key) => sum + (left[key] === right[key] ? 1 : 0), 0); return 0.5 + 0.5 * matched / keys.length; }
-function weightedDuration(weighted) { const total = weighted.reduce((sum, item) => sum + item.weight, 0); return total ? Math.round(weighted.reduce((sum, item) => sum + item.outcome.durationMs * item.weight, 0) / total) : null; }
-function summarize(outcomes, field) { const groups = new Map(); for (const outcome of outcomes) { const key = outcome[field]; const current = groups.get(key) ?? { samples: 0, successes: 0, durationMs: 0 }; current.samples++; current.successes += outcome.success ? 1 : 0; current.durationMs += outcome.durationMs; groups.set(key, current); } return Object.fromEntries([...groups].map(([key, value]) => [key, { samples: value.samples, successRate: round(value.successes / value.samples), averageDurationMs: Math.round(value.durationMs / value.samples) }])); }
-function successRate(records) { return records.length ? records.filter(record => record.success).length / records.length : 0.5; }
-function round(value) { return Math.round(value * 1000) / 1000; }
+function normalize(input) { if (typeof input.success !== 'boolean') throw new ValidationError('ML outcome success must be boolean'); if (!input.botId) throw new ValidationError('ML outcome requires botId'); return { botId:String(input.botId), intent:String(input.intent ?? 'unknown'), success:input.success, durationMs:Math.max(0, Number(input.durationMs) || 0), features:normalizeFeatures(input.features ?? {}), source:String(input.source ?? 'coordinator') }; }
+function normalizeFeatures(value) { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ValidationError('ML features must be an object'); return Object.fromEntries(Object.entries(value).filter(([, item]) => ['string','number','boolean'].includes(typeof item) && (typeof item !== 'number' || Number.isFinite(item))).slice(0, 32)); }
+function vector(value) { const result=Array(WIDTH).fill(0); add(result, `bot:${value.botId}`, 1); add(result, `intent:${value.intent}`, 1); for (const [key,item] of Object.entries(value.features ?? {})) add(result, typeof item === 'number' ? `num:${key}` : `${key}:${item}`, typeof item === 'number' ? Math.max(-1, Math.min(1, item)) : 1); const norm=Math.hypot(...result) || 1; return result.map(item => item / norm); }
+function add(vector, key, value) { vector[hash(key) % WIDTH] += value; }
+function hash(value) { let result=2166136261; for (const char of String(value)) { result ^= char.charCodeAt(0); result = Math.imul(result, 16777619); } return result >>> 0; }
+function round(value) { return Math.round(Number(value ?? 0) * 10000) / 10000; }
+function summarize(records, field) { const result={}; for(const item of records) { const key=item[field]; const value=result[key]??={samples:0,successes:0,durationMs:0}; value.samples++; value.successes+=item.success?1:0; value.durationMs+=item.durationMs; } return Object.fromEntries(Object.entries(result).map(([key,value])=>[key,{samples:value.samples,successRate:round(value.successes/value.samples),averageDurationMs:Math.round(value.durationMs/value.samples)}])); }
