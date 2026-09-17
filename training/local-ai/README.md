@@ -6,6 +6,8 @@ Install Python dependencies once:
 npm run ai:setup
 ```
 
+On Termux this installs the official `python-torch` package. On Linux desktop it installs the CPU PyTorch wheel with pip.
+
 Run the default command-center dataset:
 
 ```bash

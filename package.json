@@ -14,7 +14,7 @@
     "test": "node --test",
     "health": "node src/cli.js health",
     "ai": "node src/cli.js ai",
-    "ai:setup": "python3 -m pip install -r requirements-local-ai.txt"
+    "ai:setup": "node scripts/setup-local-ai.js"
   },
   "engines": {
     "node": ">=22"

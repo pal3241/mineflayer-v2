@@ -3,6 +3,7 @@ import test from 'node:test';
 import { DenseClassifier } from '../src/ml/neural-network.js';
 import { loadTrainingSources } from '../src/ml/training-source-loader.js';
 import { createLocalCommandBrain } from '../src/ml/local-command-brain.js';
+import { PythonLocalAiBridge } from '../src/ml/python-local-ai-bridge.js';
 import { createEnvironmentSafetyModel } from '../src/ml/environment-safety-model.js';
 import { LlmGateway } from '../src/ai/llm-gateway.js';
 import { MemoryRepository } from '../src/persistence/memory-repository.js';
@@ -26,6 +27,12 @@ test('local command brain performs real training and persists its neural model',
 
 test('8M PyTorch bridge reports the autoregressive GRU architecture', async () => {
   const bridge=new FakePyTorchBridge(); const trained=await bridge.train(['text'],{epochs:25}); assert.equal(trained.parameterCount,8_034_243); assert.equal(trained.architecture,'byte-gru-lm-2x896'); assert.equal(trained.metrics.epochs,25);
+});
+
+test('PyTorch bridge reports a stopped worker without an unhandled EPIPE', async () => {
+  const bridge=new PythonLocalAiBridge({checkpoint:'/tmp/minehive-missing.pt',python:'/bin/false'});
+  await assert.rejects(bridge.train(['hello'],{epochs:1}),/worker stopped|Unable to contact/);
+  await bridge.dispose();
 });
 
 test('local knowledge retrieval ignores short polluted titles', async () => {
