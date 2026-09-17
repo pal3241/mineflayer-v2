@@ -24,3 +24,6 @@ gradle build
 Install `client-mod/build/libs/minehive-client-1.3.1.jar` with Fabric Loader and Fabric API for Minecraft 1.21.1. Litematica is an optional compatibility provider, not a required dependency.
 
 Use `http://127.0.0.1:3000` only when Minecraft and MineHive run on the same device. Otherwise set the MineHive device LAN address, for example `http://192.168.1.6:3000`. Copy `MINEHIVE_API_TOKEN` if API authentication is enabled.
+# Litematica placement sync
+
+Install Litematica normally (it remains optional). Import the same `.litematic` once into MineHive, select its placement in Litematica, then open the MineHive blueprint screen with `B` and press **Sync Litematica**. The placement origin is sent to MineHive; after approving the blueprint, press **Build**. MineHive verifies target blocks and never replaces an occupied block unless the project policy explicitly permits it.

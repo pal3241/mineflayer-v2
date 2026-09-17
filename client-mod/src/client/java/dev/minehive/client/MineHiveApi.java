@@ -63,6 +63,9 @@ public final class MineHiveApi {
         return request("POST", "/api/v1/building/blueprints/" + encode(blueprintId) + "/placement", body)
                 .thenCompose(ignored -> loadPreview(blueprintId));
     }
+    public CompletableFuture<JsonObject> buildBlueprint(String blueprintId) {
+        return request("POST", "/api/v1/building/blueprints/" + encode(blueprintId) + "/build", new JsonObject());
+    }
     private JsonObject sessionBody() { if (sessionId == null) throw new IllegalStateException("MineHive client has no session"); JsonObject body = new JsonObject(); body.addProperty("sessionId", sessionId); return body; }
     private CompletableFuture<JsonObject> request(String method, String path, JsonObject body) {
         MineHiveConfig current = config;
