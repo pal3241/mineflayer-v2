@@ -44,6 +44,16 @@ Untuk command yang dapat dibagi, jumlah pekerjaan class/global dibagikan ke bebe
 
 ## 3. Command status dan bantuan
 
+### `early_game <leader>`
+
+Mengaktifkan progres otomatis untuk satu squad. Command wajib memakai selector `global`; nama setelah command adalah alias/nama bot pemimpin.
+
+```text
+!global early_game bot1
+```
+
+Squad mengumpulkan kayu, batu, makanan, iron, dan fuel secara berurutan. Bot tidak melanjutkan pencarian ketika anggota lain berada lebih dari 15 blok dari pemimpin. Shelter, warehouse, dan workshop hanya dibangun dari blueprint bawaan setelah material, cadangan makanan, keamanan, ruang, kerataan, dan paparan langit lolos pemeriksaan.
+
 ### `help`
 
 Menampilkan ringkasan command yang tersedia.
@@ -144,6 +154,8 @@ Menampilkan daftar helper owner atau status helping bot terpilih.
 ```
 
 Helper hanya dapat bergabung bila berstatus `READY` atau `ACTIVE`, tidak sedang recovery, emergency, critical combat, atau user-critical task.
+
+Handoff item memakai verifikasi inventory. Jika bot ketiga mengambil drop, sistem mendeteksi pertambahan inventory bot tersebut, memintanya kembali ke titik serah, lalu menyerahkannya kepada penerima yang benar. Kehilangan terverifikasi mengurangi skor reliabilitas transfer; `help status` menampilkan skor 0–100 dan jumlah item hilang.
 
 ## 4. Command movement
 

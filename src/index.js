@@ -29,6 +29,8 @@ export { createMemoryEventStream } from './memory/memory-event-stream.js';
 export { createAdaptiveModel } from './ml/adaptive-model.js';
 export { createHiveService } from './hivemind/hive-service.js';
 export { createAutonomyService } from './autonomy/autonomy-service.js';
+export { createEarlyGameService } from './autonomy/early-game-service.js';
+export { EARLY_GAME_BLUEPRINTS } from './autonomy/early-game-blueprints.js';
 export { RotatingLogStore } from './observability/rotating-log-store.js';
 export { createDiscoveryService } from './world/discovery-service.js';
 export { createStructureObserver } from './world/structure-observer.js';

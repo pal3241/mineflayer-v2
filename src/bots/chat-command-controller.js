@@ -1,8 +1,8 @@
-const HELP = 'commands: help <owner>, add helper <bot...>, stop help, helpers, help status, status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, shear, milk, sleep, sleep toggle on/off, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
+const HELP = 'commands: early_game <leader>, help <owner>, add helper <bot...>, stop help, helpers, help status, status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, shear, milk, sleep, sleep toggle on/off, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
 
 export class ChatCommandController {
-  constructor({ goalService, executor, capabilities, coordinator, helpCommands, navigation, botProfiles, survival, config, logger }) {
-    this.goals = goalService; this.executor = executor; this.capabilities = capabilities; this.coordinator = coordinator; this.helpCommands = helpCommands; this.navigation = navigation; this.botProfiles = botProfiles; this.survival = survival; this.config = config; this.logger = logger;
+  constructor({ goalService, executor, capabilities, coordinator, helpCommands, navigation, botProfiles, survival, earlyGame = null, config, logger }) {
+    this.goals = goalService; this.executor = executor; this.capabilities = capabilities; this.coordinator = coordinator; this.helpCommands = helpCommands; this.navigation = navigation; this.botProfiles = botProfiles; this.survival = survival; this.earlyGame = earlyGame; this.config = config; this.logger = logger;
   }
   attach(runtime) {
     if (!this.config.enabled) return () => {};
@@ -21,6 +21,15 @@ export class ChatCommandController {
       return;
     }
     try {
+      if (command === 'early_game') {
+        if (selector !== 'global') return this.#reply(runtime, `use !global early_game <leader>`);
+        const leader = String(args[0] ?? '').toLowerCase();
+        const identities = [runtime.bot.id, runtime.bot.name, runtime.bot.username, runtime.bot.metadata?.commandAlias].filter(Boolean).map(value => String(value).toLowerCase());
+        if (!leader || !identities.includes(leader)) return;
+        if (!this.earlyGame) throw new Error('Automatic early-game service is unavailable');
+        const state = await this.earlyGame.activate({ leader });
+        return this.#reply(runtime, `early game active; leader=${leader}, squad leash=${state.policy.leashMinimum}-${state.policy.leashMaximum} blocks`);
+      }
       if (command === 'help' && args[0] === 'status') return this.#reply(runtime, await this.helpCommands.status({ botId: runtime.bot.id }));
       if (command === 'help' && args[0]) { await this.helpCommands.requestHelp({ helperBotId: runtime.bot.id, ownerBotId: args[0] }); return this.#reply(runtime, await this.helpCommands.helpers({ ownerBotId: args[0] })); }
       if (command === 'help') return this.#reply(runtime, `use !${alias} <command>, !${className || 'class'} <command>, or !global <command>. ${HELP}`);

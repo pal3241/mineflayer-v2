@@ -3,7 +3,7 @@ import { resolveActiveHelpTask } from './active-task-resolver.js';
 import { validateHelper } from './helper-validator.js';
 import { presentHelperStatus, presentHelpSession } from './help-chat-presenter.js';
 
-export function createHelpCommandService({ help, goals, bots, events, maxHelpersPerSession, minimumChunk }) {
+export function createHelpCommandService({ help, goals, bots, events, fleetTransfer = null, maxHelpersPerSession, minimumChunk }) {
   const settings = { maxHelpersPerSession, minimumChunk };
   const tails = new Map();
   const requestHelp = input => locked(tails, input.ownerBotId, async () => { const { helperBotId, ownerBotId } = input;
@@ -20,7 +20,7 @@ export function createHelpCommandService({ help, goals, bots, events, maxHelpers
   const removeHelper = async ({ ownerBotId, helperBotId }) => { const session = await help.activeForOwner(ownerBotId); if (!session) throw new ConflictError(`No active help session for '${ownerBotId}'`); const left = await help.leave({ sessionId: session.id, botId: helperBotId, reason: 'OWNER_REMOVED' }); await publish(events, 'help.command.completed', { sessionId: session.id, botId: helperBotId, action: 'REMOVE_HELPER' }); return left; };
   const pause = async ({ botId }) => { const session = await activeWorkerSession(help, botId); const paused = await help.pause({ sessionId: session.id, botId }); await publish(events, 'help.command.completed', { sessionId: session.id, botId, action: 'PAUSE_HELP' }); return paused; };
   const resume = async ({ botId }) => { const session = await activeWorkerSession(help, botId); const resumed = await help.resume({ sessionId: session.id, botId }); await publish(events, 'help.command.completed', { sessionId: session.id, botId, action: 'RESUME_HELP' }); return resumed; };
-  const status = async ({ botId }) => presentHelperStatus((await help.list()).find(session => session.workShares.some(share => share.botId === botId)) ?? { workShares: [] }, botId);
+  const status = async ({ botId }) => { const summary = presentHelperStatus((await help.list()).find(session => session.workShares.some(share => share.botId === botId)) ?? { workShares: [] }, botId); const reliability = await fleetTransfer?.reliability?.(botId); return reliability ? `${summary} | transfer reliability=${reliability.score}/100, losses=${reliability.lostItems}` : summary; };
   const helpers = async ({ ownerBotId }) => { const session = await help.activeForOwner(ownerBotId); return session ? presentHelpSession(session) : `[Help] ${ownerBotId} has no active helpers`; };
   async function validateJoin(session, helperBotId) { const remaining = session.id ? await help.remaining(session.id) : session.progress.remaining; return validateHelper({ bots, goals, helperBotId, ownerBotId: session.ownerBotId, activeShares: session.workShares, maxHelpers: settings.maxHelpersPerSession, minimumChunk: settings.minimumChunk, remaining }); }
   return Object.freeze({ requestHelp, addHelpers, joinSession, joinManySession, stopHelping, removeHelper, pause, resume, status, helpers });

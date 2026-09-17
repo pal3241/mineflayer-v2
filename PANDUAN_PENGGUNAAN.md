@@ -181,6 +181,14 @@ Contoh: `!bot1` hanya mengontrol bot dengan alias `bot1`, `!miner` mengontrol se
 !bot1 help
 ```
 
+### Menjalankan automatic early game
+
+```text
+!global early_game bot1
+```
+
+`bot1` menjadi pemimpin. Seluruh bot READY tetap dalam formasi 10–15 blok; pengumpulan dihentikan sementara bila ada anggota yang tertinggal. Urutan progres adalah kayu → batu → shelter → iron → warehouse/workshop. Blueprint bawaan hanya dibangun setelah makanan dan material cukup serta scanner menemukan permukaan yang luas, terang, relatif rata, tanpa hostile atau hazard. Blueprint otomatis yang boleh melewati approval hanya blueprint bawaan tepercaya, bukan file pengguna.
+
 ### Melihat status bot
 
 ```text
