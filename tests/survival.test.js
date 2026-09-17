@@ -17,6 +17,7 @@ class SurvivalClient extends EventEmitter {
   async equip(item, destination) { const previous = this.equipment[destination]; if (previous && destination !== 'hand') this.items.push(previous); if (destination !== 'hand') this.items = this.items.filter(entry => entry !== item); this.equipment[destination] = item; if (destination === 'hand') this.heldItem = item; }
   async unequip(destination) { const previous = this.equipment[destination]; if (previous) this.items.push(previous); delete this.equipment[destination]; if (destination === 'hand') this.heldItem = null; }
   async activateEntity(entity) { if (entity.name === 'sheep') { entity.sheared = true; addItem(this.items, 'white_wool', 2); } if (entity.name === 'cow') { addItem(this.items, 'bucket', -1); addItem(this.items, 'milk_bucket', 1); } }
+  async attack(entity) { this.attacks=(this.attacks??0)+1;if(entity.name==='sheep'){delete this.entities[entity.id];addItem(this.items,`${entity.color??'white'}_wool`,1);} }
   activateItem() { this.itemActivated = true; }
   deactivateItem() { this.itemDeactivated = true; }
   blockAt(position) { return this.blocks.get(positionKey(position)) ?? null; }
@@ -43,6 +44,16 @@ test('sheep and cow interactions verify wool and milk inventory deltas', async (
   const { adapter, client } = await readyAdapter(); client.items.push({ name: 'shears', count: 1 }, { name: 'bucket', count: 2 }); client.entities = { 1: { id: 1, type: 'mob', name: 'sheep', color: 'white', sheared: false, position: new Vec3(2, 64, 0) }, 2: { id: 2, type: 'mob', name: 'cow', position: new Vec3(3, 64, 0) } }; adapter.navigate = async input => { client.entity.position = new Vec3(input.x, input.y, input.z); return { position: client.entity.position }; };
   assert.equal(adapter.findSheep({ color: 'white', maxDistance: 16 }).entityId, '1'); const wool = await adapter.acquireWool({ color: 'white', count: 2, maxDistance: 16, minimumSheepReserve: 2, allowAnimalKill: false }, {}); assert.equal(wool.acquired, 2); assert.equal(wool.animalKilled, false);
   const milk = await adapter.acquireMilk({ count: 2, maxDistance: 16, minimumCowReserve: 2 }, {}); assert.equal(milk.acquired, 2); assert.equal(countItem(client.items, 'bucket'), 0); assert.equal(countItem(client.items, 'milk_bucket'), 2); await adapter.disconnect();
+});
+
+test('animal-kill wool fallback works only above the configured adult sheep reserve',async()=>{
+  const {adapter,client}=await readyAdapter();client.entities={1:{id:1,type:'mob',name:'sheep',color:'white',sheared:false,isBaby:false,position:new Vec3(2,64,0)},2:{id:2,type:'mob',name:'sheep',color:'white',sheared:false,isBaby:false,position:new Vec3(3,64,0)},3:{id:3,type:'mob',name:'sheep',color:'white',sheared:false,isBaby:false,position:new Vec3(4,64,0)}};adapter.navigate=async input=>({position:input});
+  const result=await adapter.acquireWool({color:'white',count:1,maxDistance:16,minimumSheepReserve:2,allowAnimalKill:true},{});assert.equal(result.animalKilled,true);assert.equal(result.animalsKilled,1);assert.equal(client.attacks,1);assert.equal(Object.keys(client.entities).length,2);await adapter.disconnect();
+});
+
+test('animal-kill wool fallback refuses to breach the adult sheep reserve',async()=>{
+  const {adapter,client}=await readyAdapter();client.entities={1:{id:1,type:'mob',name:'sheep',color:'white',sheared:false,isBaby:false,position:new Vec3(2,64,0)},2:{id:2,type:'mob',name:'sheep',color:'white',sheared:false,isBaby:false,position:new Vec3(3,64,0)}};adapter.navigate=async input=>({position:input});
+  await assert.rejects(adapter.acquireWool({color:'white',count:1,maxDistance:16,minimumSheepReserve:2,allowAnimalKill:true},{}),error=>error.code==='CAPABILITY_UNAVAILABLE');assert.equal(client.attacks??0,0);assert.equal(Object.keys(client.entities).length,2);await adapter.disconnect();
 });
 
 test('milk reports full inventory and an entity that disappears during movement', async () => {
