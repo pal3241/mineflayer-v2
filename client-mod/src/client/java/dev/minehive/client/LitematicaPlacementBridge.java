@@ -32,7 +32,10 @@ public final class LitematicaPlacementBridge {
             Object schematic = invoke(placement, "getSchematic", "getSchematicHolder");
             Object file = first(invoke(placement, "getSchematicFile", "getFile"), schematic == null ? null : invoke(schematic, "getSchematicFile", "getFile"));
             Object regions = invoke(placement, "getSubRegionPlacements", "getSubRegionPlacementMap", "getSubRegionPlacementsMap");
-            int regionCount = regions instanceof Map<?, ?> map ? map.size() : regions instanceof Collection<?> list ? list.size() : 0;
+            Collection<?> regionValues = regions instanceof Map<?, ?> map ? map.values() : regions instanceof Collection<?> list ? list : java.util.List.of();
+            int regionCount = regionValues.size(); int enabledRegions = 0;
+            for (Object region : regionValues) if (truthy(invoke(region, "isEnabled", "getEnabled"), true)) enabledRegions++;
+            if (enabledRegions != regionCount) return failure(State.DISABLED, "disabled Litematica sub-regions are not supported; enable all regions before Sync");
             String name = string(first(invoke(placement, "getName"), schematic == null ? null : invoke(schematic, "getMetadataName", "getName")), "Litematica placement");
             return new Snapshot(State.READY, new Placement(name, origin, rotation(invoke(placement, "getRotation")), mirrorX(invoke(placement, "getMirror")), mirrorZ(invoke(placement, "getMirror")), true, fileName(file), regionCount), "");
         } catch (ClassNotFoundException ignored) { return failure(State.NOT_LOADED, "Litematica is not loaded"); }

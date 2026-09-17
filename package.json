@@ -15,9 +15,7 @@
     "test:survival-e2e": "MINEHIVE_E2E_SURVIVAL=1 node --test tests/integration/survival-overnight.test.js",
     "health": "node src/cli.js health",
     "ai": "node src/cli.js ai",
-    "ai:setup": "node scripts/setup-local-ai.js",
-    "ml:build": "cargo build --manifest-path native-ml/Cargo.toml --release",
-    "ml:setup": "node scripts/setup-native-ml.js"
+    "ai:setup": "node scripts/setup-local-ai.js"
   },
   "engines": {
     "node": ">=22"

@@ -23,10 +23,11 @@ public final class BlueprintScreen extends Screen {
         if (!snapshot.ready()) { message = snapshot.detail(); return; }
         JsonObject project = match(snapshot.placement()); if (project == null) return;
         message = "Syncing " + snapshot.placement().name() + " · " + pose(snapshot.placement());
-        MineHiveClient.INSTANCE.api().syncLitematicaPlacement(project.get("id").getAsString(), snapshot.placement()).whenComplete((data, error) -> message = error == null ? "Pose synced. Approve then Build." : MineHiveClient.rootMessage(error));
+        complete(MineHiveClient.INSTANCE.api().syncLitematicaPlacement(project.get("id").getAsString(), snapshot.placement()), "Pose synced. Approve then Build.");
     }
-    private void approve() { JsonObject project = matchedSelected(); if (project == null) return; MineHiveClient.INSTANCE.api().approveBlueprint(project.get("id").getAsString()).whenComplete((data, error) -> message = error == null ? "Blueprint approved. You can Build now." : MineHiveClient.rootMessage(error)); }
-    private void build() { JsonObject project = matchedSelected(); if (project == null) return; if (!project.has("target") || project.get("target").isJsonNull()) { message = "Sync a Litematica placement before Build"; return; } MineHiveClient.INSTANCE.api().buildBlueprint(project.get("id").getAsString(), project).whenComplete((data, error) -> message = error == null ? "Protected build started" : MineHiveClient.rootMessage(error)); }
+    private void approve() { JsonObject project = matchedSelected(); if (project == null) return; complete(MineHiveClient.INSTANCE.api().approveBlueprint(project.get("id").getAsString()), "Blueprint approved. You can Build now."); }
+    private void build() { JsonObject project = matchedSelected(); if (project == null) return; if (!project.has("target") || project.get("target").isJsonNull()) { message = "Sync a Litematica placement before Build"; return; } complete(MineHiveClient.INSTANCE.api().buildBlueprint(project.get("id").getAsString(), project), "Protected build started"); }
+    private void complete(java.util.concurrent.CompletableFuture<JsonObject> operation, String success) { operation.whenComplete((data, error) -> { if (client != null) client.execute(() -> message = error == null ? success : MineHiveClient.rootMessage(error)); }); }
     private JsonObject matchedSelected() { LitematicaPlacementBridge.Snapshot snapshot = LitematicaPlacementBridge.selected(); if (!snapshot.ready()) { message = snapshot.detail(); return null; } return match(snapshot.placement()); }
     private JsonObject match(LitematicaPlacementBridge.Placement placement) {
         List<JsonObject> candidates = new ArrayList<>(); String file = normalize(placement.schematicFile()), name = normalize(placement.name());

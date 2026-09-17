@@ -5,7 +5,7 @@ import { MetricsManager } from '../src/core/health.js';
 import { alternateApproaches, createNavigationService, createResourceReservationService, inspectTerrainPosition, microEscapeAction, normalizeNavigationPolicy, planCorridorWaves, planFormationTargets } from '../src/navigation/index.js';
 
 function setup(options) {
-  const state = { bot1: { x: 0, y: 64, z: 0 }, bot2: { x: 10, y: 64, z: 0 } }; const runtimes = Object.fromEntries(Object.keys(state).map(id => [id, { id, status: options?.statuses?.[id] ?? 'READY', adapter: { snapshot: () => ({ position: { ...state[id] }, inventorySummary: structuredClone(options?.inventory?.[id] ?? []) }) } }])); const calls = { navigation: [], stopped: [] }; const capabilities = { execute: async (name, input, context) => {
+  const state = { bot1: { x: 0, y: 64, z: 0 }, bot2: { x: 10, y: 64, z: 0 } }; const runtimes = Object.fromEntries(Object.keys(state).map(id => [id, { id, status: options?.statuses?.[id] ?? 'READY', options: { host: 'localhost', port: 25565 }, adapter: { snapshot: () => ({ position: { ...state[id] }, dimension: 'overworld', inventorySummary: structuredClone(options?.inventory?.[id] ?? []) }) } }])); const calls = { navigation: [], stopped: [] }; const capabilities = { execute: async (name, input, context) => {
     if (name === 'minecraft.navigation-stop') { calls.stopped.push(context.botId); return { stopped: true }; }
     if (name === 'minecraft.navigation-target') return options?.targets?.[input.target.type] ?? { x: 4, y: 64, z: 0 };
     if (name === 'minecraft.navigation-terrain-scan') return options?.terrain?.({ input, context, state, calls }) ?? { position: input.position, hazards: [], fallDistance: 0, safe: true, blockedTypes: [] };
@@ -16,7 +16,7 @@ function setup(options) {
     if (name !== 'minecraft.navigation') throw new Error(`Unexpected capability '${name}'`);
     calls.navigation.push({ input, context }); if (options?.navigate) return options.navigate({ input, context, state, calls }); state[context.botId] = { ...input.target }; return { position: { ...state[context.botId] } };
   } };
-  const bots = { get: id => { if (!runtimes[id]) throw new Error(`Bot '${id}' not found`); return runtimes[id]; } }; const events = new EventBus(); const metrics = new MetricsManager(); return { service: createNavigationService({ bots, capabilities, events, metrics, reservations: options?.reservations }), state, calls, events, metrics };
+  const bots = { get: id => { if (!runtimes[id]) throw new Error(`Bot '${id}' not found`); return runtimes[id]; } }; const events = new EventBus(); const metrics = new MetricsManager(); return { service: createNavigationService({ bots, capabilities, events, metrics, reservations: options?.reservations, environmentModel: options?.environmentModel }), state, calls, events, metrics };
 }
 
 test('navigation arrives with verified runtime position and normalized policy', async () => {
@@ -66,6 +66,15 @@ test('navigation rejects an unsafe target before pathfinder starts', async () =>
   context.events.subscribe('navigation.terrain.rejected', event => rejected.push(event.payload));
   await assert.rejects(context.service.moveTo({ botId: 'bot1', target: { x: 4, y: 64, z: 0 }, timeout: 1000, source: 'TASK' }), error => error.code === 'TERRAIN_UNSAFE');
   assert.equal(context.calls.navigation.length, 0); assert.equal(rejected.length, 1); assert.equal(context.metrics.snapshot().counters['navigation.safety.rejected'], 1);
+});
+
+test('navigation rejects a target learned as dangerous before pathfinder starts', async () => {
+  const environmentModel = { areaAt: async input => ({ id: 'area-danger', classification: 'DANGEROUS', dangerScore: 0.91, confidence: 0.88, input }) };
+  const context = setup({ environmentModel }); const rejected = [];
+  context.events.subscribe('navigation.terrain.rejected', event => rejected.push(event.payload));
+  await assert.rejects(context.service.moveTo({ botId: 'bot1', target: { x: 12, y: 64, z: 4 }, timeout: 1000, source: 'TASK' }), error => error.code === 'TERRAIN_UNSAFE');
+  assert.equal(context.calls.navigation.length, 0); assert.equal(rejected.length, 1);
+  assert.ok(rejected[0].diagnostics.terrain.hazards.some(hazard => hazard.type === 'LEARNED_DANGER'));
 });
 
 test('PRECISE mode performs a verified stable final approach', async () => {

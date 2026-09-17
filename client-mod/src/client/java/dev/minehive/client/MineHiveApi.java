@@ -35,6 +35,10 @@ public final class MineHiveApi {
         return request("GET", "/api/v1/client/state?sessionId=" + encode(sessionId), null).thenApply(data -> { state = data; status = "Connected"; return data; })
                 .exceptionally(error -> { failed(error); return state(); });
     }
+    private CompletableFuture<JsonObject> refreshState() {
+        if (sessionId == null) return CompletableFuture.failedFuture(new IllegalStateException("MineHive client has no session"));
+        return request("GET", "/api/v1/client/state?sessionId=" + encode(sessionId), null).thenApply(data -> { state = data; status = "Connected"; return data; });
+    }
     public CompletableFuture<JsonObject> switchBody(String botId) {
         JsonObject body = sessionBody(); body.addProperty("botId", botId);
         return request("POST", "/api/v1/client/switch", body).thenApply(data -> { status = "Controlling " + botId; return data; });
@@ -67,8 +71,13 @@ public final class MineHiveApi {
     public CompletableFuture<JsonObject> syncLitematicaPlacement(String blueprintId, LitematicaPlacementBridge.Placement placement) {
         JsonObject transform = new JsonObject();
         transform.addProperty("rotation", placement.rotation()); transform.addProperty("mirrorX", placement.mirrorX()); transform.addProperty("mirrorZ", placement.mirrorZ());
+        JsonObject placementBody = new JsonObject(), target = new JsonObject();
+        target.addProperty("x", placement.origin().getX()); target.addProperty("y", placement.origin().getY()); target.addProperty("z", placement.origin().getZ());
+        placementBody.add("target", target); placementBody.addProperty("source", "litematica");
         return request("POST", "/api/v1/building/blueprints/" + encode(blueprintId) + "/transform", transform)
-                .thenCompose(ignored -> placeBlueprint(blueprintId, placement.origin().getX(), placement.origin().getY(), placement.origin().getZ()));
+                .thenCompose(ignored -> request("POST", "/api/v1/building/blueprints/" + encode(blueprintId) + "/placement", placementBody))
+                .thenCompose(ignored -> loadPreview(blueprintId))
+                .thenCompose(ignored -> refreshState());
     }
     public CompletableFuture<JsonObject> approveBlueprint(String blueprintId) {
         JsonObject body = new JsonObject(); body.addProperty("actor", "minehive-client-litematica");
