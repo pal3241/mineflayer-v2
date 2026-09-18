@@ -263,19 +263,31 @@ export class MineflayerAdapter extends EventEmitter {
     try { for (const target of blocks) { if (collectedTargets >= amount || signal?.aborted) break; try { if (combatEscort || (ore && effectiveStrategy === 'CAVE_FIRST')) await this.#secureMiningArea(target.position, { signal }); await bot.collectBlock.collect(target); collectedTargets++; } catch (error) { lastError = error; } } if (!collectedTargets) throw new ValidationError(`No reachable '${block}' found within ${maxDistance} blocks${lastError ? `: ${lastError.message}` : ''}`); return { block, requested: amount, collectedTargets, strategy: effectiveStrategy, caveFirst: ore && effectiveStrategy === 'CAVE_FIRST', inventory: this.snapshot().inventorySummary }; } finally { cleanup(); this.#applyMovementPolicy(safeMovementPolicy()); }
   }
   async #secureMiningArea(anchor, { signal, radius = 12 } = {}) {
-    const bot = this.#ready('mining-combat'); const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
-      if (signal?.aborted) throw signal.reason ?? new ValidationError('Mining combat cancelled');
-      if (Number(bot.health ?? 20) <= 8) throw new ValidationError('Cave mining aborted: health is too low for combat');
-      const target = bot.nearestEntity(entity => entity.type === 'mob' && HOSTILE_MOBS.has(entity.name) && entity.position && distance3(entity.position, anchor) <= radius);
-      if (!target) return;
-      const shield = bot.inventory.items().find(item => item.name === 'shield'); if (shield) await bot.equip(shield, 'off-hand').catch(() => {});
-      await this.#combatEquipment(target); const distance = distance3(bot.entity.position, target.position);
-      if (distance > 4) await this.navigate({ x: target.position.x, y: target.position.y, z: target.position.z, range: 3 }, { signal });
-      else { await bot.lookAt(target.position.offset(0, target.height ?? 1, 0), true); await bot.attack(target); if (target.name === 'creeper') await this.#combatRetreat(900); }
-      await delay(450);
-    }
-    throw new ValidationError('Cave mining aborted: hostile area could not be secured within 20 seconds');
+    const bot = this.#ready('mining-combat'); const deadline = Date.now() + 20_000; const weapon = bestItem(bot, item => /_(?:sword|axe)$/.test(item.name));
+    if (!weapon) throw new ValidationError('Cave mining aborted: a sword or axe is required when hostiles are present');
+    if (Number(bot.food ?? 20) <= 8) throw new ValidationError('Cave mining aborted: hunger is too low for combat');
+    try {
+      while (Date.now() < deadline) {
+        if (signal?.aborted) throw signal.reason ?? new ValidationError('Mining combat cancelled');
+        if (Number(bot.health ?? 20) <= 8) throw new ValidationError('Cave mining aborted: health is too low for combat');
+        if (Number(bot.food ?? 20) <= 6) throw new ValidationError('Cave mining aborted: food reserve was exhausted during combat');
+        const target = bot.nearestEntity(entity => entity.type === 'mob' && HOSTILE_MOBS.has(entity.name) && entity.position && distance3(entity.position, anchor) <= radius);
+        if (!target) return;
+        const shield = bot.inventory.items().find(item => item.name === 'shield'); if (shield) await bot.equip(shield, 'off-hand').catch(() => {});
+        await this.#combatEquipment(target); const distance = distance3(bot.entity.position, target.position);
+        if (distance > 4) {
+          if (shield) bot.activateItem?.(true);
+          await this.navigate({ x: target.position.x, y: target.position.y, z: target.position.z, range: target.name === 'creeper' ? 4 : 3 }, { signal });
+          bot.deactivateItem?.();
+        } else {
+          bot.deactivateItem?.(); await bot.lookAt(target.position.offset(0, target.height ?? 1, 0), true); await bot.attack(target);
+          if (target.name === 'creeper') await this.#combatRetreat(900);
+          else if (shield && target.name === 'skeleton') { bot.activateItem?.(true); await delay(300); bot.deactivateItem?.(); }
+        }
+        await delay(450);
+      }
+      throw new ValidationError('Cave mining aborted: hostile area could not be secured within 20 seconds');
+    } finally { bot.deactivateItem?.(); }
   }
   async #withStorage(position, capability, operation) { const bot = this.#ready(capability); const { Vec3 } = await import('vec3'); const target = new Vec3(Number(position.x), Number(position.y), Number(position.z)); await this.smartMove({ x: target.x, y: target.y, z: target.z, range: 2 }); const block = bot.blockAt(target); if (!block || !isStorageBlock(block.name)) throw new NotFoundError('Storage block', `${target.x},${target.y},${target.z}`); const container = await bot.openContainer(block); try { return await operation(container, block); } finally { container.close(); } }
   async farm({ crop = 'wheat', count = 16, maxDistance = 32, movement } = {}, { signal } = {}) {
@@ -537,10 +549,10 @@ export class MineflayerAdapter extends EventEmitter {
       result.set(name, { name, count: (existing?.count ?? 0) + Number(item.count) });
       return result;
     }, new Map());
-    const slots = Array.isArray(bot?.inventory?.slots) ? bot.inventory.slots.slice(9, 45) : []; const inventorySlotsUsed = slots.filter(Boolean).length; const inventorySlotsFree = Math.max(0, 36 - inventorySlotsUsed); const freeItemCapacity = slots.reduce((total, item) => total + (item ? Math.max(0, Number(item.stackSize ?? 64) - Number(item.count ?? 0)) : 64), 0); const inventorySlots = slots.map(item => item ? { name: String(item.name).toLowerCase(), count: Number(item.count), stackSize: Number(item.stackSize ?? 64) } : null);
+    const slots = Array.isArray(bot?.inventory?.slots) ? bot.inventory.slots.slice(9, 45) : []; const inventorySlotsUsed = slots.filter(Boolean).length; const inventorySlotsFree = Math.max(0, 36 - inventorySlotsUsed); const freeItemCapacity = slots.reduce((total, item) => total + (item ? Math.max(0, Number(item.stackSize ?? 64) - Number(item.count ?? 0)) : 64), 0); const inventorySlots = slots.map(item => item ? { name: String(item.name).toLowerCase(), count: Number(item.count), stackSize: Number(item.stackSize ?? 64) } : null); const equipmentSummary = ['head','torso','legs','feet','off-hand'].map(destination => equipmentView(bot, destination)).filter(Boolean).map(item => ({ name: item.name, count: item.count }));
     return { connection: this.status, entityId: bot?.entity?.id ?? null, position: bot?.entity?.position ? { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z } : null,
       health: bot?.health ?? null, food: bot?.food ?? null, alive: this.alive, dimension: bot?.game?.dimension ?? null, home: this.homes.get('home') ? { ...this.homes.get('home') } : null,
-      inventorySummary: [...inventory.values()], inventorySlots, inventorySlotsUsed, inventorySlotsFree, freeItemCapacity, plugins: { ...this.pluginStatus },
+      inventorySummary: [...inventory.values()], equipmentSummary, inventorySlots, inventorySlotsUsed, inventorySlotsFree, freeItemCapacity, plugins: { ...this.pluginStatus },
       camera: { active: Boolean(bot?.viewer), port: this.viewerPort ?? null, mode: this.viewerMode ?? null, version: bot?.version ?? null, renderVersion: this.viewerRenderVersion ?? null, versionSupported: this.viewerVersionSupported ?? null }, combat: { ...this.combatState }, timestamp: new Date().toISOString() };
   }
 

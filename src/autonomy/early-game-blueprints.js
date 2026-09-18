@@ -9,9 +9,9 @@ function shell({ width, depth, height, floor='cobblestone', wall='oak_planks', r
 }
 
 export const EARLY_GAME_BLUEPRINTS = Object.freeze([
-  { templateId:'early-shelter-v1', stage:'STONE', name:'MineHive Early Shelter', width:5, depth:5, height:5, blocks:[...shell({width:5,depth:5,height:4}),block(1,1,1,'torch'),block(3,1,3,'torch')] },
-  { templateId:'early-warehouse-v1', stage:'IRON', name:'MineHive Early Warehouse', width:7, depth:5, height:5, blocks:[...shell({width:7,depth:5,height:4}),block(1,1,1,'chest'),block(2,1,1,'chest'),block(4,1,1,'chest'),block(5,1,1,'chest'),block(1,1,3,'torch'),block(5,1,3,'torch')] },
-  { templateId:'early-workshop-v1', stage:'IRON', name:'MineHive Early Workshop', width:5, depth:5, height:5, blocks:[...shell({width:5,depth:5,height:4}),block(1,1,1,'crafting_table'),block(2,1,1,'furnace'),block(3,1,1,'chest'),block(1,1,3,'torch'),block(3,1,3,'torch')] }
+  { templateId:'early-shelter-v1', stage:'STONE', name:'MineHive Early Shelter', width:5, depth:5, height:5, blocks:[...shell({width:5,depth:5,height:4}),block(2,1,0,'oak_door',{facing:'north',half:'lower',open:false}),block(1,1,1,'torch'),block(3,1,3,'torch')] },
+  { templateId:'early-warehouse-v1', stage:'IRON', name:'MineHive Early Warehouse', width:7, depth:5, height:5, blocks:[...shell({width:7,depth:5,height:4}),block(3,1,0,'oak_door',{facing:'north',half:'lower',open:false}),block(1,1,1,'chest'),block(2,1,1,'chest'),block(4,1,1,'chest'),block(5,1,1,'chest'),block(1,1,3,'torch'),block(5,1,3,'torch')] },
+  { templateId:'early-workshop-v1', stage:'IRON', name:'MineHive Early Workshop', width:5, depth:5, height:5, blocks:[...shell({width:5,depth:5,height:4}),block(2,1,0,'oak_door',{facing:'north',half:'lower',open:false}),block(1,1,1,'crafting_table'),block(2,1,1,'furnace'),block(3,1,1,'chest'),block(1,1,3,'torch'),block(3,1,3,'torch')] }
 ]);
 
 export function blueprintInput(template){return {name:template.name,format:'minehive-json',origin:{x:0,y:0,z:0},blocks:template.blocks,metadata:{trustedBuiltin:true,automaticInfrastructure:true,templateId:template.templateId,requiredStage:template.stage,footprint:{width:template.width,depth:template.depth,height:template.height}}};}

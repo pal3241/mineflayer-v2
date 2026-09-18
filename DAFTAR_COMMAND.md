@@ -44,15 +44,19 @@ Untuk command yang dapat dibagi, jumlah pekerjaan class/global dibagikan ke bebe
 
 ## 3. Command status dan bantuan
 
-### `early_game <leader>`
+### `early_game <leader|status|pause|resume|stop>`
 
 Mengaktifkan progres otomatis untuk satu squad. Command wajib memakai selector `global`; nama setelah command adalah alias/nama bot pemimpin.
 
 ```text
 !global early_game bot1
+!global early_game status
+!global early_game pause
+!global early_game resume
+!global early_game stop
 ```
 
-Squad mengumpulkan kayu, batu, makanan, iron, dan fuel secara berurutan. Bot tidak melanjutkan pencarian ketika anggota lain berada lebih dari 15 blok dari pemimpin. Sebelum mencari iron, squad menyelesaikan shelter serta menyiapkan 16 makanan, senjata, dan 16 obor. Ekspedisi iron memakai gua terbuka, membersihkan hostile, dan tidak memakai fallback strip-mine. Early game baru selesai setelah pemimpin memiliki iron chestplate, shield, dan iron pickaxe. Shelter, warehouse, dan workshop hanya dibangun dari blueprint bawaan setelah material, cadangan makanan, keamanan, ruang, kerataan, dan paparan langit lolos pemeriksaan.
+Squad mengumpulkan kayu, batu, makanan, iron, dan fuel secara berurutan. Hanya bot pada server, dimension, dan grup pemimpin yang bergabung. Bot tidak melanjutkan pencarian ketika anggota lain berada lebih dari 15 blok dari pemimpin. Sebelum mencari iron, squad menyelesaikan shelter serta menyiapkan 16 makanan, senjata, dan 16 obor. Ekspedisi iron memakai gua terbuka, membersihkan hostile, dan tidak memakai fallback strip-mine. Early game baru selesai setelah pemimpin memiliki iron chestplate, shield, dan iron pickaxe, lalu berhasil membuat farm gandum dan area tanam pohon. Shelter, warehouse, dan workshop memakai pintu dan hanya dibangun dari blueprint bawaan setelah material, cadangan makanan, keamanan, ruang, kerataan, dan paparan langit lolos pemeriksaan.
 
 ### `help`
 

@@ -1,4 +1,4 @@
-const HELP = 'commands: early_game <leader>, help <owner>, add helper <bot...>, stop help, helpers, help status, status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, shear, milk, sleep, sleep toggle on/off, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
+const HELP = 'commands: early_game <leader|status|pause|resume|stop>, help <owner>, add helper <bot...>, stop help, helpers, help status, status, come, follow [player], goto <x> <y> <z>, collect, craft, smelt, shear, milk, sleep, sleep toggle on/off, survey [radius], register_chest, store, retrieve, stock, farm, deforest, reforest, guard, combat, meat, remember, place, natural language, inventory, stop';
 
 export class ChatCommandController {
   constructor({ goalService, executor, capabilities, coordinator, helpCommands, navigation, botProfiles, survival, earlyGame = null, config, logger }) {
@@ -23,10 +23,15 @@ export class ChatCommandController {
     try {
       if (command === 'early_game') {
         if (selector !== 'global') return this.#reply(runtime, `use !global early_game <leader>`);
+        if (!this.earlyGame) throw new Error('Automatic early-game service is unavailable');
         const leader = String(args[0] ?? '').toLowerCase();
+        if (['status','pause','resume','stop'].includes(leader)) {
+          const current = await this.earlyGame.status(); if (current.leaderBotId && current.leaderBotId !== runtime.bot.id) return;
+          const state = leader === 'stop' ? await this.earlyGame.deactivate() : leader === 'pause' ? await this.earlyGame.pause() : leader === 'resume' ? await this.earlyGame.resume() : current;
+          return this.#reply(runtime, `early game ${state.status.toLowerCase()}; leader=${state.leaderBotId ?? 'none'}, members=${state.memberBotIds.length}`);
+        }
         const identities = [runtime.bot.id, runtime.bot.name, runtime.bot.username, runtime.bot.metadata?.commandAlias].filter(Boolean).map(value => String(value).toLowerCase());
         if (!leader || !identities.includes(leader)) return;
-        if (!this.earlyGame) throw new Error('Automatic early-game service is unavailable');
         const state = await this.earlyGame.activate({ leader });
         return this.#reply(runtime, `early game active; leader=${leader}, squad leash=${state.policy.leashMinimum}-${state.policy.leashMaximum} blocks`);
       }

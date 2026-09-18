@@ -19,6 +19,7 @@ export function createAutoHelpCoordinator({ help, goals, bots, events, earlyGame
       await events.publish('help.auto.started', { sessionId: session.id, parentTaskId: task.id, ownerBotId: task.assignedBot, helperBotIds: group.helpers, group: group.key }, { source: 'auto-help', correlationId: task.goalId });
       await runSession({ sessionId: session.id, help, events, logger });
       const completed = await help.get(session.id);
+      if (completed.status !== 'COMPLETED') throw new ValidationError(`Automatic help session '${session.id}' ended in ${completed.status}`);
       await events.publish('help.auto.completed', { sessionId: session.id, parentTaskId: task.id, status: completed.status, progress: completed.progress }, { source: 'auto-help', correlationId: task.goalId });
       return completed;
     } catch (error) {
@@ -33,8 +34,17 @@ export function createAutoHelpCoordinator({ help, goals, bots, events, earlyGame
 }
 
 async function runSession({ sessionId, help, events, logger }) {
-  const initial = await help.get(sessionId); const workers = [...new Set(initial.workShares.map(share => share.botId))];
-  await Promise.all(workers.map(botId => runWorker({ sessionId, botId, help, events, logger })));
+  for (let generation = 0; generation < 8; generation++) {
+    const current = await help.get(sessionId); if (TERMINAL.has(current.status)) return current;
+    const workers = [...new Set(current.workShares.filter(share => EXECUTABLE.has(share.status)).map(share => share.botId))];
+    if (!workers.length) throw new ValidationError(`Automatic help session '${sessionId}' has no executable workers`);
+    await Promise.all(workers.map(botId => runWorker({ sessionId, botId, help, events, logger })));
+    const refreshed = await help.get(sessionId); if (TERMINAL.has(refreshed.status)) return refreshed;
+    const failed = refreshed.workShares.filter(share => share.status === 'FAILED');
+    if (!failed.length) throw new ValidationError(`Automatic help session '${sessionId}' made no terminal progress`);
+    await help.rebalanceSession({ sessionId, reason: `MANUAL_AUTO_RECOVERY_${generation + 1}`, rebalanceKey: `auto-recovery:${generation + 1}` });
+  }
+  throw new ValidationError(`Automatic help session '${sessionId}' exceeded 8 recovery generations`);
 }
 
 async function runWorker({ sessionId, botId, help, events, logger }) {
