@@ -9,7 +9,7 @@ export class HealthManager {
       } catch (error) { return [name, { status: 'FAILED', critical: item.critical, error: error.message }]; }
     }));
     const checks = Object.fromEntries(entries); const values = Object.values(checks);
-    const status = values.some(x => x.critical && x.status === 'FAILED') ? 'UNHEALTHY' : values.some(x => x.status !== 'HEALTHY') ? 'DEGRADED' : 'HEALTHY';
+    const status = values.some(x => x.critical && x.status === 'FAILED') ? 'UNHEALTHY' : values.some(x => !['HEALTHY','DISABLED','UNTRAINED'].includes(x.status)) ? 'DEGRADED' : 'HEALTHY';
     return { status, timestamp: new Date().toISOString(), checks };
   }
 }
