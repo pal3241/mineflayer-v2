@@ -40,7 +40,7 @@ export class BotRuntime {
     clearTimeout(this.reconnectTimer); this.reconnectTimer = setTimeout(async () => {
       try { if (this.machine.can('RETRY')) await this.machine.transition('RETRY'); else if (this.machine.can('START')) await this.machine.transition('START'); this.bot.status = this.machine.state; await this.adapter.connect(this.options); }
       catch (error) { await this.#fail(error); this.reconnectTimer=null; await this.#disconnected(`Reconnect attempt failed: ${error.message}`); }
-    }, delay);
+    }, delay); this.reconnectTimer.unref?.();
   }
   async start(options) { this.stopping = false; this.options = options; await this.machine.transition('START'); this.bot.status = this.machine.state; try { await this.adapter.connect(options); } catch (error) { await this.#fail(error); throw error; } }
   async stop() { this.stopping = true; clearTimeout(this.reconnectTimer); if (this.machine.can('STOP')) await this.machine.transition('STOP'); try { await this.adapter.disconnect(); } catch (error) { await this.#fail(error); throw error; } if (this.machine.can('STOPPED')) await this.machine.transition('STOPPED'); this.bot.status = this.machine.state; }
