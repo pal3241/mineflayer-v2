@@ -56,6 +56,8 @@ Mengaktifkan progres otomatis untuk satu squad. Command wajib memakai selector `
 !global early_game stop
 ```
 
+`early_game <leader>` dapat dimulai dengan inventory kosong. Setelah fondasi selesai, command tetap aktif sebagai supervisor self-sufficient: menjaga reserve makanan/kayu/obor/bahan bakar, memanen dan menanam ulang farm, mengganti gear yang hilang, serta melaporkan status `DEGRADED` setelah kegagalan berulang. Blueprint otomatis terlihat di tab Building dengan kategori dan nilai early-game.
+
 Squad mengumpulkan kayu, batu, makanan, iron, dan fuel secara berurutan. Hanya bot pada server, dimension, dan grup pemimpin yang bergabung. Bot tidak melanjutkan pencarian ketika anggota lain berada lebih dari 15 blok dari pemimpin. Sebelum mencari iron, squad menyelesaikan shelter serta menyiapkan 16 makanan, senjata, dan 16 obor. Ekspedisi iron memakai gua terbuka, membersihkan hostile, dan tidak memakai fallback strip-mine. Early game baru selesai setelah pemimpin memiliki iron chestplate, shield, dan iron pickaxe, lalu berhasil membuat farm gandum dan area tanam pohon. Shelter, warehouse, dan workshop memakai pintu dan hanya dibangun dari blueprint bawaan setelah material, cadangan makanan, keamanan, ruang, kerataan, dan paparan langit lolos pemeriksaan.
 
 ### `help`

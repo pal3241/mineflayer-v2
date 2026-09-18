@@ -168,7 +168,7 @@ export class Application {
     this.health.register('recovery', async () => { const jobs = await this.recovery.list({ statuses: ['PENDING', 'EVALUATING', 'ASSIGNED', 'TRAVELLING', 'SEARCHING', 'COLLECTING', 'VERIFYING', 'REASSIGN_REQUIRED'] }); return { status: jobs.length ? 'DEGRADED' : 'HEALTHY', activeJobs: jobs.length, jobs }; });
     this.health.register('survival', async () => this.survival.status());
     this.health.register('building', async () => this.building.status());
-    this.health.register('earlyGame', async () => { const state = await this.earlyGame.status(); return { ...state, status: state.status === 'ACTIVE' ? 'HEALTHY' : 'DISABLED' }; });
+    this.health.register('earlyGame', async () => { const state = await this.earlyGame.status(); return { ...state, status: state.status === 'ACTIVE' ? 'HEALTHY' : state.status === 'DEGRADED' ? 'DEGRADED' : 'DISABLED' }; });
     this.health.register('combat', async () => { const status = await this.combat.status(); return { status: 'HEALTHY', profiles: status.profiles.length, experience: status.events.length }; });
     this.health.register('help', async () => this.help.status());
     this.health.register('autoHelp', async () => this.autoHelp.status());

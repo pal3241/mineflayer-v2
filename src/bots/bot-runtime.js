@@ -3,7 +3,7 @@ import { StateMachine } from '../orchestration/state-machine.js';
 export class BotRuntime {
   constructor({ bot, adapter, eventBus, logger, reconnect = {} }) {
     this.bot = bot; this.adapter = adapter; this.eventBus = eventBus; this.logger = logger;
-    this.reconnect = { enabled: true, maxAttempts: 5, delayMs: 3000, ...reconnect }; this.reconnectAttempts = 0; this.stopping = false;
+    this.reconnect = { enabled: true, maxAttempts: 0, delayMs: 3000, ...reconnect }; this.reconnectAttempts = 0; this.stopping = false;
     this.transitionQueue = Promise.resolve();
     this.machine = new StateMachine({ initial: 'REGISTERED', eventBus, source: `bot:${bot.id}`, states: {
       REGISTERED: { on: { START: 'CONNECTING', STOP: 'OFFLINE' } },
@@ -34,12 +34,12 @@ export class BotRuntime {
   async #fail(error) { this.logger?.error('bot.runtime.failure', { botId: this.bot.id, error: error.message }); await this.#safeTransition('FAIL'); }
   async #disconnected(reason) {
     await this.#fail(new Error(`Connection ended${reason ? `: ${reason}` : ''}`));
-    if (!this.reconnect.enabled || this.reconnectAttempts >= this.reconnect.maxAttempts || this.stopping) return;
+    if (!this.reconnect.enabled || (this.reconnect.maxAttempts > 0 && this.reconnectAttempts >= this.reconnect.maxAttempts) || this.stopping) return;
     const attempt = ++this.reconnectAttempts; const delay = Math.min(30_000, this.reconnect.delayMs * 2 ** (attempt - 1));
     this.logger?.warn('bot.runtime.reconnecting', { botId: this.bot.id, attempt, delay });
     clearTimeout(this.reconnectTimer); this.reconnectTimer = setTimeout(async () => {
       try { if (this.machine.can('RETRY')) await this.machine.transition('RETRY'); else if (this.machine.can('START')) await this.machine.transition('START'); this.bot.status = this.machine.state; await this.adapter.connect(this.options); }
-      catch (error) { await this.#fail(error); }
+      catch (error) { await this.#fail(error); this.reconnectTimer=null; await this.#disconnected(`Reconnect attempt failed: ${error.message}`); }
     }, delay);
   }
   async start(options) { this.stopping = false; this.options = options; await this.machine.transition('START'); this.bot.status = this.machine.state; try { await this.adapter.connect(options); } catch (error) { await this.#fail(error); throw error; } }
