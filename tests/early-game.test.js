@@ -24,7 +24,7 @@ function setup({ followerX = 5 } = {}) {
     build: async id => projects.set(id, { ...projects.get(id), status: 'BUILDING' })
   };
   const service = createEarlyGameService({ repository: new MemoryRepository(), bots, building, acquisition: { acquire: async input => { acquired.push(input); return { requestId: 'request', source: 'COLLECT' }; } }, capabilities: { execute: async (name,input,context) => { capabilityCalls.push({name,input,context}); if(name==='minecraft.farming')return {planted:8,harvested:0};if(name==='minecraft.reforestation')return {planted:4};if(name==='minecraft.deforestation')return {trees:2,logs:8,replanted:2};return { suitable: true, strategicScore: 1 }; } }, environmentModel: { areaAt: async () => null }, events: new EventBus(), config: { intervalMs: 60_000 } });
-  return { service, inventory, equipment, acquired, followed, projects, capabilityCalls };
+  return { service, inventory, equipment, acquired, followed, projects, capabilityCalls, runtimes };
 }
 
 function setInventory(target, values) { target.splice(0, target.length, ...Object.entries(values).map(([name, count]) => ({ name, count }))); }
@@ -47,6 +47,7 @@ test('automatic early game follows wood, stone, shelter, then iron progression',
 
 test('squad stops resource work and regroups beyond the 15 block leash', async () => {
   const context = setup({ followerX: 30 }); await context.service.initialize(); await context.service.activate({ leader: 'bot1' }); context.service.stop(); setInventory(context.inventory, { bread: 12 });
+  assert.equal(context.runtimes.leader.reconnect.maxAttempts,0);assert.equal(context.runtimes.follower.reconnect.maxAttempts,0);
   const result = await context.service.tick(); assert.equal(result.status, 'REGROUPING'); assert.deepEqual(result.separated, ['follower']); assert.equal(context.acquired.length, 0); assert.ok(context.followed.some(call => call.botId === 'follower' && call.range === 10));
 });
 

@@ -29,7 +29,7 @@ export function loadConfig(env = process.env) {
       host: env.MINEHIVE_HOST ?? 'localhost', port: integer(env.MINEHIVE_PORT, 25565),
       username: env.MINEHIVE_USERNAME ?? 'MineHiveBot', auth: env.MINEHIVE_AUTH ?? 'offline',
       version: env.MINEHIVE_VERSION || undefined, autoConnect: bool(env.MINEHIVE_AUTO_CONNECT ?? false),
-      reconnect: { enabled: bool(env.MINEHIVE_RECONNECT ?? true), maxAttempts: integer(env.MINEHIVE_RECONNECT_ATTEMPTS, 0), delayMs: integer(env.MINEHIVE_RECONNECT_DELAY_MS, 3000) },
+      reconnect: { enabled: bool(env.MINEHIVE_RECONNECT ?? true), maxAttempts: integer(env.MINEHIVE_RECONNECT_ATTEMPTS, 5), delayMs: integer(env.MINEHIVE_RECONNECT_DELAY_MS, 3000) },
       autoEat: { enabled: bool(env.MINEHIVE_AUTO_EAT ?? true), minHunger: integer(env.MINEHIVE_AUTO_EAT_MIN_HUNGER, 16) }
     },
     commands: { enabled: bool(env.MINEHIVE_CHAT_COMMANDS ?? true), admins: (env.MINEHIVE_ADMINS ?? '').split(',').map(value => value.trim()).filter(Boolean) },

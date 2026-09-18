@@ -3,7 +3,7 @@ import { StateMachine } from '../orchestration/state-machine.js';
 export class BotRuntime {
   constructor({ bot, adapter, eventBus, logger, reconnect = {} }) {
     this.bot = bot; this.adapter = adapter; this.eventBus = eventBus; this.logger = logger;
-    this.reconnect = { enabled: true, maxAttempts: 0, delayMs: 3000, ...reconnect }; this.reconnectAttempts = 0; this.stopping = false;
+    this.reconnect = { enabled: true, maxAttempts: 5, delayMs: 3000, ...reconnect }; this.reconnectAttempts = 0; this.stopping = false;
     this.transitionQueue = Promise.resolve();
     this.machine = new StateMachine({ initial: 'REGISTERED', eventBus, source: `bot:${bot.id}`, states: {
       REGISTERED: { on: { START: 'CONNECTING', STOP: 'OFFLINE' } },
