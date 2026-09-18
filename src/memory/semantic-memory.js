@@ -7,7 +7,12 @@ const VISIBILITIES = new Set(['PRIVATE', 'TEAM', 'HIVE', 'GLOBAL']);
 export function createHashEmbeddingProvider({ dimensions, version }) {
   if (!Number.isInteger(dimensions) || dimensions < 16 || dimensions > 4096) throw new ValidationError('Embedding dimensions must be an integer between 16 and 4096');
   // Compatibility factory name; the implementation is honest lexical indexing.
-  return Object.freeze({ model: 'minehive-keyword-bm25', version, dimensions: null, embed: text => keywordDocument(text) });
+  return Object.freeze({
+    model: 'minehive-keyword-bm25', version, dimensions: null,
+    embed: text => keywordDocument(text),
+    isCompatible: value => value?.model === 'minehive-keyword-bm25' && value?.version === version && Array.isArray(value?.terms) && plainFrequencies(value?.frequencies) && Number.isFinite(value?.length),
+    similarity: (left, right) => keywordSimilarity(left?.terms, right?.terms)
+  });
 }
 
 export function createSemanticMemory({ repository, events, embeddingProvider, governance = null, maxRecords, longTermMaxRecords, shortTermMaxRecords, shortTermTtlMs, promotionAccesses, promotionImportance }) {
@@ -95,6 +100,7 @@ function normalizeMemory(input) {
 function lifecycleFields(type, previous, now, ttlMs) { if (type !== 'SHORT_TERM') return { accessCount: Number(previous?.accessCount ?? 0), lastAccessedAt: previous?.lastAccessedAt ?? null, expiresAt: null, consolidatedAt: previous?.consolidatedAt ?? null }; return { accessCount: Number(previous?.accessCount ?? 0), lastAccessedAt: previous?.lastAccessedAt ?? null, expiresAt: new Date(Date.parse(now) + ttlMs).toISOString(), consolidatedAt: null }; }
 function rankRecords(records, query, embeddingProvider, now) { const text = String(query.text ?? '').trim(); const queryTerms=tokenize(text); const limit = boundedInteger(query.limit, 1, 50, 10); const candidates=records.filter(record => !isExpired(record, now) && matchesScope(record, query) && (!query.type || record.type === String(query.type).toUpperCase()) && (!query.visibility || record.visibility === String(query.visibility).toUpperCase())); const lexical=bm25Scores(candidates,queryTerms); return candidates.map(record => ({ record, score: scoreMemory(record, queryTerms.length?lexical.get(record.id)??0:0.5, now) })).sort((left, right) => right.score - left.score || right.record.updatedAt.localeCompare(left.record.updatedAt)).slice(0, limit); }
 function keywordDocument(text){const tokens=tokenize(text),frequencies={};for(const token of tokens)frequencies[token]=(frequencies[token]??0)+1;return {terms:Object.keys(frequencies),frequencies,length:tokens.length};}
+function plainFrequencies(value){return Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&Object.values(value).every(count=>Number.isInteger(count)&&count>0);}
 function tokenize(text) { return String(text).toLowerCase().normalize('NFKD').replace(/[^a-z0-9_ ]/g, ' ').split(/\s+/).filter(token => token.length > 1); }
 function bm25Scores(records,queryTerms){const result=new Map();if(!queryTerms.length)return result;const documents=records.map(record=>({record,index:recordIndex(record)})),average=documents.reduce((sum,item)=>sum+item.index.length,0)/Math.max(1,documents.length);for(const {record,index} of documents){let score=0;for(const term of new Set(queryTerms)){const containing=documents.filter(item=>(item.index.frequencies[term]??0)>0).length,idf=Math.log(1+(documents.length-containing+.5)/(containing+.5)),tf=index.frequencies[term]??0,denominator=tf+1.2*(1-.75+.75*index.length/Math.max(1,average));score+=idf*(tf*2.2)/Math.max(.001,denominator);}result.set(record.id,score/(score+3));}return result;}
 function recordIndex(record){const stored=record.embedding;if(stored?.frequencies&&Number.isFinite(stored.length))return {frequencies:stored.frequencies,length:stored.length};return keywordDocument(record.content);}

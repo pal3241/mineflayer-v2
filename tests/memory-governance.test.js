@@ -10,7 +10,7 @@ function fixture() {
 
 test('governance migrates recoverable legacy memory and is idempotent after restart', async () => {
   const value = fixture(); await value.memory.create({ id: 'legacy', type: 'long_term', content: 'lokasi base utama', visibility: 'hive', importance: 0.9 });
-  const first = await value.governance.initialize(); assert.equal(first.migrated, 1); const migrated = await value.memory.find('legacy'); assert.equal(migrated.schemaVersion, 1); assert.equal(migrated.embedding.vector.length, 16); assert.equal(migrated.type, 'LONG_TERM');
+  const first = await value.governance.initialize(); assert.equal(first.migrated, 1); const migrated = await value.memory.find('legacy'); assert.equal(migrated.schemaVersion, 1); assert.equal(migrated.embedding.model, 'minehive-keyword-bm25'); assert.deepEqual(migrated.embedding.terms, ['lokasi', 'base', 'utama']); assert.equal(migrated.embedding.vector, undefined); assert.equal(migrated.type, 'LONG_TERM');
   const second = await value.governance.initialize(); assert.equal(second.migrated, 0); assert.equal(second.valid, 1); assert.equal((await value.audit.list()).filter(item => item.action === 'SCHEMA_MIGRATED').length, 1);
 });
 

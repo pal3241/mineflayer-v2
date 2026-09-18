@@ -22,6 +22,7 @@ class OperationalAdapter extends EventEmitter {
   async dropItem({ item }) { const found = this.items.find(entry => entry.name === item && entry.count > 0); if (!found) throw new Error('missing item'); found.count--; this.worldDrop = item; return { item }; }
   async pickupItem({ item }) { this.items.push({ name: item, count: 1 }); return { item, collected: true }; }
   async navigate(input) { this.lastNavigate = input; this.position = { ...input }; return { position: input }; }
+  async inspectNavigationTerrain({ position }) { return { position, safe: true, hazards: [], blockedTypes: [], samples: 1 }; }
   async navigateTo({ position }) { this.lastNavigate = position; this.position = { ...position }; return { position }; }
   async stopNavigation() { this.navigationStopped = true; return { stopped: true }; }
   async resolveNavigationTarget({ type, username }) { if (type !== 'PLAYER' || username !== 'Alice') throw new Error('player is not visible'); return { x: 4, y: 64, z: 2 }; }
