@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createEarlyGameService } from '../src/autonomy/early-game-service.js';
+import { EARLY_GAME_BLUEPRINTS } from '../src/autonomy/early-game-blueprints.js';
 import { EventBus } from '../src/core/event-bus.js';
 import { MemoryRepository } from '../src/persistence/memory-repository.js';
 
@@ -70,6 +71,7 @@ test('built-in blueprints expose auditable early-game categories and value', asy
   const categories=new Set([...context.projects.values()].map(project=>project.metadata.category));
   assert.deepEqual(categories,new Set(['HOUSE','STOREHOUSE','CROP_FARM','TREE_FARM','WORKSHOP']));
   assert.ok([...context.projects.values()].every(project=>Number.isFinite(project.metadata.earlyGameValue)));
+  for(const template of EARLY_GAME_BLUEPRINTS){const coordinates=template.blocks.map(entry=>`${entry.x},${entry.y},${entry.z}`);assert.equal(new Set(coordinates).size,coordinates.length,`${template.templateId} contains duplicate block coordinates`);}
 });
 
 test('automatic building selects high-value storehouse when wood and stone are ready',async()=>{
