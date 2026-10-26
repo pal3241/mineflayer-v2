@@ -6,7 +6,7 @@ const integer = (value, fallback) => value === undefined ? fallback : Number.par
 export function loadConfig(env = process.env) {
   const profile = env.MINEHIVE_PROFILE ?? 'development';
   const memoryMaxRecords = integer(env.MINEHIVE_MEMORY_MAX_RECORDS, 10_000);
-  const openRouterKeys = providerKeys([env.OPENROUTER_API_KEY_1, env.OPENROUTER_API_KEY_2, env.OPENROUTER_API_KEY_3, env.OPENROUTER_API_KEY], 'OpenRouter'); const nvidiaKeys = providerKeys([env.NVIDIA_API_KEY_1, env.NVIDIA_API_KEY_2, env.NVIDIA_API_KEY_3, env.NVIDIA_API_KEY, env.MINEHIVE_LOCAL_LLM_API_KEY], 'NVIDIA NIM');
+  const openRouterKeys = providerKeys([env.OPENROUTER_API_KEY_1, env.OPENROUTER_API_KEY_2, env.OPENROUTER_API_KEY_3, env.OPENROUTER_API_KEY], 'OpenRouter'); const nvidiaKeys = providerKeys([env.NVIDIA_API_KEY_1, env.NVIDIA_API_KEY_2, env.NVIDIA_API_KEY_3, env.NVIDIA_API_KEY, env.MINEHIVE_LOCAL_LLM_API_KEY], 'NVIDIA NIM'); const nvidiaVlmKeys = providerKeys([env.NVIDIA_VLM_API_KEY_1, env.NVIDIA_VLM_API_KEY_2, env.NVIDIA_VLM_API_KEY_3], 'NVIDIA NIM VLM');
   const ollamaEndpoint = env.MINEHIVE_OLLAMA_ENDPOINT ?? 'http://127.0.0.1:11434'; const ollamaModel = env.MINEHIVE_OLLAMA_MODEL ?? 'qwen3:1.7b'; const ollamaConfigured = Boolean(env.MINEHIVE_OLLAMA_MODEL ?? env.MINEHIVE_OLLAMA_ENDPOINT);
   const nvidiaEndpoint = env.MINEHIVE_NVIDIA_NIM_ENDPOINT ?? env.MINEHIVE_LOCAL_LLM_ENDPOINT ?? 'https://integrate.api.nvidia.com/v1'; const nvidiaModel = env.MINEHIVE_NVIDIA_NIM_MODEL ?? env.MINEHIVE_LOCAL_LLM_MODEL ?? 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning'; const nvidiaConfigured = nvidiaKeys.length > 0 || Boolean((env.MINEHIVE_NVIDIA_NIM_ENDPOINT ?? env.MINEHIVE_LOCAL_LLM_ENDPOINT) && (env.MINEHIVE_NVIDIA_NIM_MODEL ?? env.MINEHIVE_LOCAL_LLM_MODEL));
   const config = {
@@ -34,6 +34,7 @@ export function loadConfig(env = process.env) {
     },
     commands: { enabled: bool(env.MINEHIVE_CHAT_COMMANDS ?? true), admins: (env.MINEHIVE_ADMINS ?? '').split(',').map(value => value.trim()).filter(Boolean) },
     viewer: { basePort: integer(env.MINEHIVE_VIEWER_BASE_PORT, 3100), viewDistance: integer(env.MINEHIVE_VIEWER_DISTANCE, 4) },
+    vlm: { endpoint: env.MINEHIVE_NVIDIA_VLM_ENDPOINT ?? 'https://integrate.api.nvidia.com/v1', model: env.MINEHIVE_NVIDIA_VLM_MODEL ?? '', apiKeys: nvidiaVlmKeys, timeoutMs: integer(env.MINEHIVE_VLM_TIMEOUT_MS, 30_000) },
     llm: { provider: resolveLlmProvider(env.MINEHIVE_LLM_PROVIDER, openRouterKeys.length > 0, nvidiaConfigured, ollamaConfigured), openRouterEndpoint: env.MINEHIVE_OPENROUTER_ENDPOINT ?? env.MINEHIVE_LLM_ENDPOINT ?? 'https://openrouter.ai/api/v1', openRouterModel: env.MINEHIVE_OPENROUTER_MODEL ?? env.MINEHIVE_LLM_MODEL ?? 'openrouter/auto', openRouterApiKeys: openRouterKeys, nvidiaEndpoint, nvidiaModel, nvidiaApiKeys: nvidiaKeys, ollamaEndpoint, ollamaModel, siteUrl: env.MINEHIVE_SITE_URL, timeoutMs: integer(env.MINEHIVE_LLM_TIMEOUT_MS, 90_000) }
   };
   if (!Number.isInteger(config.api.port) || config.api.port < 1 || config.api.port > 65535) throw new ValidationError('Invalid API port');
