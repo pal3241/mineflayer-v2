@@ -12,12 +12,15 @@ export function createOutcomeFeedback({ events, ml, logger = null }) {
 
   let disposed = false;
   let queue = Promise.resolve();
+  let pending = 0;
   const seen = new Set();
   const unsubscribe = [];
 
   const enqueue = operation => {
+    pending++;
     const next = queue.then(operation);
-    queue = next.catch(error => {
+    queue = next.then(() => { pending--; }, error => {
+      pending--;
       logger?.warn?.('ml.outcome-feedback.failed', { error: error.message });
     });
     return next;
@@ -48,7 +51,9 @@ export function createOutcomeFeedback({ events, ml, logger = null }) {
       ? Math.max(0, updatedAt - createdAt)
       : Math.max(0, Number(task.durationMs) || 0);
 
-    const outcome = await ml.recordOutcome({
+    let outcome;
+    try {
+      outcome = await ml.recordOutcome({
       botId: String(botId),
       intent: normalizeIntent(task.type),
       success,
@@ -59,7 +64,11 @@ export function createOutcomeFeedback({ events, ml, logger = null }) {
       taskId: key,
       goalId: task.goalId ?? null,
       errorCode: success ? null : task.error?.code ?? null
-    });
+      });
+    } catch (error) {
+      seen.delete(key);
+      throw error;
+    }
     await events.publish('learning.task-outcome-recorded', {
       taskId: key,
       botId: String(botId),
@@ -74,7 +83,7 @@ export function createOutcomeFeedback({ events, ml, logger = null }) {
 
   return Object.freeze({
     flush: () => queue,
-    status: () => ({ status: disposed ? 'STOPPED' : 'ACTIVE', pending: false, seenInProcess: seen.size }),
+    status: () => ({ status: disposed ? 'STOPPED' : 'ACTIVE', pending: pending > 0, pendingCount: pending, seenInProcess: seen.size }),
     dispose() {
       if (disposed) return;
       disposed = true;
