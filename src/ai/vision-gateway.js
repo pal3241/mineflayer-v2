@@ -17,7 +17,6 @@ export class VisionGateway {
     const model = clean(config.model);
     const apiKeys = [...new Set((config.apiKeys ?? []).filter(value => typeof value === 'string' && value.trim()).map(value => value.trim()))];
     if (endpoint && !/^https:\/\//i.test(endpoint)) throw new ValidationError('VLM endpoint must use HTTPS');
-    if (endpoint && !/^https:\/\//i.test(endpoint)) throw new ValidationError('VLM endpoint must use HTTPS');
     this.endpoint = endpoint?.replace(/\/$/, '') ?? null;
     this.model = model ?? null;
     this.keys = apiKeys.map(key => ({ key, cooldownUntil: 0 }));
