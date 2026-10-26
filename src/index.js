@@ -3,6 +3,8 @@ import { Application } from './core/application.js';
 
 export function createApplication(options = {}) { return new Application(options.config ?? loadConfig(options.env), options.overrides); }
 export { Application } from './core/application.js';
+export { VisionGateway } from './ai/vision-gateway.js';
+export { createOutcomeFeedback } from './ml/outcome-feedback.js';
 export { EventBus } from './core/event-bus.js';
 export { Container } from './core/container.js';
 export { StateMachine } from './orchestration/state-machine.js';
